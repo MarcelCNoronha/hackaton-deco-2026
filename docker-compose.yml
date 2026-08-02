@@ -1,0 +1,34 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: catalogia
+      POSTGRES_PASSWORD: catalogia
+      POSTGRES_DB: catalogia
+    ports:
+      - "5433:5432"
+    volumes:
+      - catalogia_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U catalogia"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  valkey:
+    image: valkey/valkey:8
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - catalogia_valkey_data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  catalogia_postgres_data:
+  catalogia_valkey_data:

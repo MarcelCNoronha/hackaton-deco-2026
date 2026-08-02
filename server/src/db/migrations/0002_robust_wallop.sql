@@ -1,0 +1,1 @@
+ALTER TABLE "content_scores" ADD COLUMN "attempts" integer DEFAULT 1 NOT NULL;

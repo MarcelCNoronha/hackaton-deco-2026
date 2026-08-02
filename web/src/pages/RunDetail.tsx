@@ -1,0 +1,279 @@
+import { useEffect, useState } from "react";
+import { useParams } from "react-router-dom";
+import {
+  api,
+  type CatalogPlatform,
+  type ContentScore,
+  type EnrichmentProposal,
+  type EnrichmentRun,
+  type Product,
+  type RunCosts,
+} from "../api/client";
+import { StatTile } from "../components/StatTile";
+import { StatusBadge } from "../components/StatusBadge";
+import { ScoreCompare } from "../components/ScoreCompare";
+import { formatCost } from "../lib/currency";
+
+const FIELD_LABELS: Record<EnrichmentProposal["field"], string> = {
+  description: "Descrição",
+  alt_text: "Alt-text de imagem",
+  structured_data: "Dados estruturados (schema.org)",
+  faq: "FAQ (GEO)",
+  benefit_bullets: "Bullets de benefício",
+  technical_specs: "Especificações técnicas",
+};
+
+/** description/alt_text store plain text in proposedValue; the rest store a JSON-encoded value —
+ *  this renders a readable preview for those instead of showing raw JSON in the diff view. The
+ *  underlying textarea below still lets a reviewer edit the raw JSON directly if needed. */
+function ProposalPreview({ proposal }: { proposal: EnrichmentProposal }) {
+  if (proposal.field === "description" || proposal.field === "alt_text") return null;
+
+  try {
+    if (proposal.field === "benefit_bullets") {
+      const bullets = JSON.parse(proposal.proposedValue) as string[];
+      return (
+        <ul style={{ margin: "0 0 0.75rem", paddingLeft: "1.2rem" }}>
+          {bullets.map((bullet, i) => (
+            <li key={i}>{bullet}</li>
+          ))}
+        </ul>
+      );
+    }
+    if (proposal.field === "technical_specs") {
+      const specs = JSON.parse(proposal.proposedValue) as Array<{ label: string; value: string }>;
+      return (
+        <table style={{ marginBottom: "0.75rem" }}>
+          <tbody>
+            {specs.map((spec, i) => (
+              <tr key={i}>
+                <td className="muted" style={{ width: "40%" }}>
+                  {spec.label}
+                </td>
+                <td>{spec.value}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      );
+    }
+    if (proposal.field === "faq") {
+      const faq = JSON.parse(proposal.proposedValue) as Array<{ question: string; answer: string }>;
+      return (
+        <div style={{ marginBottom: "0.75rem" }}>
+          {faq.map((item, i) => (
+            <div key={i} style={{ marginBottom: "0.5rem" }}>
+              <strong>{item.question}</strong>
+              <p className="muted" style={{ margin: "0.2rem 0 0" }}>
+                {item.answer}
+              </p>
+            </div>
+          ))}
+        </div>
+      );
+    }
+    if (proposal.field === "structured_data") {
+      return <pre style={{ marginBottom: "0.75rem" }}>{JSON.stringify(JSON.parse(proposal.proposedValue), null, 2)}</pre>;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+const PLATFORM_LABELS: Record<CatalogPlatform, string> = {
+  vtex: "VTEX",
+  shopify: "Shopify",
+};
+
+export function RunDetail() {
+  const { id } = useParams<{ id: string }>();
+  const runId = Number(id);
+  const [run, setRun] = useState<EnrichmentRun | null>(null);
+  const [proposals, setProposals] = useState<EnrichmentProposal[]>([]);
+  const [scores, setScores] = useState<ContentScore[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [costs, setCosts] = useState<RunCosts | null>(null);
+  const [drafts, setDrafts] = useState<Record<number, string>>({});
+  const [platform, setPlatform] = useState<CatalogPlatform>("vtex");
+
+  async function refresh() {
+    const [runData, proposalsData, scoresData, costsData] = await Promise.all([
+      api.getRun(runId),
+      api.listProposals(runId),
+      api.listScores(runId),
+      api.runCosts(runId),
+    ]);
+    setRun(runData);
+    setProposals(proposalsData);
+    setScores(scoresData);
+    setCosts(costsData);
+  }
+
+  useEffect(() => {
+    refresh();
+    api.listProducts().then(setProducts);
+    api.getCatalogPlatform().then(({ platform }) => setPlatform(platform));
+    const interval = setInterval(refresh, 5000);
+    return () => clearInterval(interval);
+  }, [runId]);
+
+  async function review(proposal: EnrichmentProposal, status: "approved" | "rejected" | "edited") {
+    const proposedValue = status === "edited" ? drafts[proposal.id] ?? proposal.proposedValue : undefined;
+    await api.reviewProposal(proposal.id, { status, proposedValue });
+    refresh();
+  }
+
+  async function handlePublish() {
+    await api.publishRun(runId);
+    refresh();
+  }
+
+  const approvedCount = proposals.filter((p) => p.status === "approved").length;
+  const pendingCount = proposals.filter((p) => p.status === "pending" || p.status === "edited").length;
+  const publishedCount = proposals.filter((p) => p.status === "published").length;
+  const reusedCount = proposals.filter((p) => p.field === "description" && p.reusedFromProductId !== null).length;
+
+  const productIds = [...new Set(proposals.map((p) => p.productId))];
+
+  return (
+    <>
+      <div className="page-header">
+        <div>
+          <h1>Otimização #{runId}</h1>
+          {run && (
+            <p className="muted">
+              <StatusBadge kind="run" status={run.status} /> · {run.processedCount} produtos processados
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="page-content">
+        <div className="stat-row">
+          <StatTile label="Pendentes" value={pendingCount} />
+          <StatTile label="Aprovadas" value={approvedCount} />
+          <StatTile label="Publicadas" value={publishedCount} />
+          {costs && (
+            <>
+              <StatTile label="Custo da otimização" value={formatCost(costs.totalCostUsd)} />
+              <StatTile label="Chamadas de IA" value={costs.totalCalls} />
+            </>
+          )}
+          {reusedCount > 0 && (
+            <StatTile label="Reaproveitados (RAG)" value={reusedCount} delta="menor custo" deltaGood />
+          )}
+        </div>
+
+        <div className="banner">
+          <span>Aprove o conteúdo abaixo antes de publicar de volta na {PLATFORM_LABELS[platform]}.</span>
+          <button type="button" onClick={handlePublish} disabled={approvedCount === 0}>
+            Publicar aprovadas na {PLATFORM_LABELS[platform]}
+          </button>
+        </div>
+
+        {productIds.map((productId) => {
+          const productProposals = proposals.filter((p) => p.productId === productId);
+          const original = scores.find((s) => s.productId === productId && s.target === "original");
+          const proposed = scores.find((s) => s.productId === productId && s.target === "proposed");
+
+          const productCost = costs?.byProduct.find((c) => c.productId === productId);
+          const descriptionProposal = productProposals.find((p) => p.field === "description");
+          const donorProduct =
+            descriptionProposal?.reusedFromProductId != null
+              ? products.find((p) => p.id === descriptionProposal.reusedFromProductId)
+              : undefined;
+
+          return (
+            <section className="card" key={productId}>
+              <div className="proposal-header">
+                <h2 style={{ margin: 0 }}>{products.find((p) => p.id === productId)?.title ?? `Produto #${productId}`}</h2>
+                <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                  {descriptionProposal?.reusedFromProductId != null && (
+                    <span className="pill" title="Conteúdo adaptado de um produto muito similar já aprovado — menos chamadas de IA, menor custo.">
+                      🔗 Reaproveitado{donorProduct ? ` de "${donorProduct.title}"` : ""}
+                      {descriptionProposal.reusedSimilarity
+                        ? ` (${Math.round(Number(descriptionProposal.reusedSimilarity) * 100)}% similar)`
+                        : ""}
+                    </span>
+                  )}
+                  {productCost && (
+                    <span className="pill">
+                      Custo desta otimização: {formatCost(productCost.costUsd)} ({productCost.calls} chamadas)
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {original && proposed && (
+                <div className="card" style={{ background: "var(--surface-2)", margin: "0 0 1rem" }}>
+                  <div className="proposal-header">
+                    <h3 style={{ margin: 0 }}>Score de qualidade de conteúdo (antes → depois)</h3>
+                    {proposed.attempts > 1 && (
+                      <span className="pill">
+                        Refinado automaticamente em {proposed.attempts} tentativas até atingir score {proposed.overallScore}
+                      </span>
+                    )}
+                  </div>
+                  <ScoreCompare label="Score geral" before={original.overallScore} after={proposed.overallScore} />
+                  <ScoreCompare label="Checklist estrutural" before={original.checklistScore} after={proposed.checklistScore} />
+                  <ScoreCompare label="Confiança do comprador" before={original.buyerConfidence} after={proposed.buyerConfidence} />
+                  <ScoreCompare
+                    label="Perguntas respondidas (GEO)"
+                    before={original.geoAnswerableCount}
+                    after={proposed.geoAnswerableCount}
+                    max={proposed.geoTotalQuestions}
+                  />
+                  {proposed.unsupportedClaims.length > 0 && (
+                    <p className="muted" style={{ color: "var(--status-warning)" }}>
+                      ⚠ Possível alucinação — revisar: {proposed.unsupportedClaims.join("; ")}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {productProposals.map((proposal) => (
+                <div key={proposal.id} style={{ marginBottom: "1.25rem" }}>
+                  <div className="proposal-header">
+                    <span className="pill">{FIELD_LABELS[proposal.field]}</span>
+                    <StatusBadge kind="proposal" status={proposal.status} />
+                  </div>
+                  <ProposalPreview proposal={proposal} />
+                  <div className="diff">
+                    <div>
+                      <h3>Antes</h3>
+                      <pre>{proposal.originalValue ?? "(vazio)"}</pre>
+                    </div>
+                    <div>
+                      <h3>Proposto</h3>
+                      <textarea
+                        value={drafts[proposal.id] ?? proposal.proposedValue}
+                        onChange={(e) => setDrafts({ ...drafts, [proposal.id]: e.target.value })}
+                        rows={6}
+                      />
+                    </div>
+                  </div>
+                  {(proposal.status === "pending" || proposal.status === "edited") && (
+                    <div className="actions">
+                      <button type="button" onClick={() => review(proposal, "approved")}>
+                        Aprovar
+                      </button>
+                      <button type="button" className="secondary" onClick={() => review(proposal, "edited")}>
+                        Salvar edição
+                      </button>
+                      <button type="button" onClick={() => review(proposal, "rejected")} className="danger">
+                        Rejeitar
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </section>
+          );
+        })}
+
+        {productIds.length === 0 && <div className="empty-state">Nenhuma proposta gerada ainda para esta otimização.</div>}
+      </div>
+    </>
+  );
+}
