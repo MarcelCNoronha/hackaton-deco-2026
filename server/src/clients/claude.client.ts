@@ -1,7 +1,15 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { RequestLogEntry } from "./http.js";
 import { computeCostUsd } from "./model-recommendations.js";
-import { GEO_QUESTIONS, type ContentEvaluation, type EnrichedContent, type LlmClient, type ReuseReference } from "./llm-types.js";
+import { buildEnrichmentInstructionSuffix, buildEnrichmentSchema, resolveRequestedFields } from "./enrichment-schema.js";
+import {
+  GEO_QUESTIONS,
+  type ContentEvaluation,
+  type EnrichedContent,
+  type EnrichmentField,
+  type LlmClient,
+  type ReuseReference,
+} from "./llm-types.js";
 
 /** Thin client around the Anthropic SDK — content enrichment (text), vision (alt-text), and evaluation.
  *  One instance is bound to a single model (the orchestrator builds one instance per pipeline task,
@@ -113,7 +121,9 @@ export class ClaudeClient implements LlmClient {
     feedback?: { buyerUnanswered: string[]; unsupportedClaims: string[] } | null;
     reuseReference?: ReuseReference | null;
     productId?: number;
+    fields?: EnrichmentField[];
   }): Promise<EnrichedContent> {
+    const requestedFields = resolveRequestedFields(product.fields);
     return this.callWithTool<EnrichedContent>({
       operation: "enrichProductContent",
       productId: product.productId,
@@ -132,15 +142,7 @@ export class ClaudeClient implements LlmClient {
               ? " Esta é uma correção de uma tentativa anterior que não passou na revisão de qualidade — " +
                 "resolva especificamente os problemas apontados em 'correcaoNecessaria', sem reintroduzi-los."
               : "")) +
-        " Gere também: (1) 'benefitBullets' — 4 a 6 frases curtas e diretas com os principais benefícios/" +
-        "diferenciais, separadas do texto corrido da descrição; (2) 'technicalSpecs' — especificações técnicas " +
-        "em formato rótulo+valor, baseadas exclusivamente nos dados fornecidos ('attributes' e o texto em " +
-        "'currentDescription'), nunca inventando uma especificação que não conste em nenhum dos dois; " +
-        "(3) 'faq' com 6 a 10 perguntas reais que um comprador pesquisaria " +
-        "(uso, compatibilidade, cuidados, comparação com variações do produto), não só as básicas. Para " +
-        "'structuredData', preencha apenas campos descritivos do schema.org/Product (name, description, " +
-        "category, additionalProperty a partir de technicalSpecs) — NUNCA inclua price, offers ou availability, " +
-        "esses dados são preenchidos separadamente com informação real.",
+        buildEnrichmentInstructionSuffix(requestedFields),
       content: JSON.stringify({
         title: product.title,
         currentDescription: product.currentDescription,
@@ -158,42 +160,7 @@ export class ClaudeClient implements LlmClient {
       }),
       toolName: "submit_enriched_content",
       toolDescription: "Envia a descrição enriquecida, FAQ e dados estruturados do produto.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          description: { type: "string" },
-          benefitBullets: {
-            type: "array",
-            items: { type: "string" },
-            description: "4 a 6 frases curtas de benefício/diferencial, separadas da descrição corrida.",
-          },
-          technicalSpecs: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: { label: { type: "string" }, value: { type: "string" } },
-              required: ["label", "value"],
-            },
-            description:
-              "Baseado exclusivamente em 'attributes' e no texto de 'currentDescription' — nunca invente uma especificação que não conste em nenhum dos dois.",
-          },
-          faq: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: { question: { type: "string" }, answer: { type: "string" } },
-              required: ["question", "answer"],
-            },
-          },
-          structuredData: {
-            type: "object",
-            description:
-              "Objeto schema.org/Product válido (@context, @type, name, description, additionalProperty, ...). " +
-              "Nunca inclua price, offers ou availability.",
-          },
-        },
-        required: ["description", "benefitBullets", "technicalSpecs", "faq", "structuredData"],
-      },
+      inputSchema: { type: "object", ...buildEnrichmentSchema(requestedFields) },
     });
   }
 

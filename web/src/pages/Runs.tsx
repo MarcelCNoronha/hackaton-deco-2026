@@ -1,8 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, type CatalogFilterOptions, type CatalogListResult, type CatalogProductSummary, type FreeQuotaStatus } from "../api/client";
+import {
+  api,
+  type CatalogFilterOptions,
+  type CatalogListResult,
+  type CatalogProductSummary,
+  type EnrichmentField,
+  type FreeQuotaStatus,
+} from "../api/client";
 import { StatTile } from "../components/StatTile";
 import { CatalogFilterBar } from "../components/CatalogFilterBar";
+import { OptimizationFieldSelector } from "../components/OptimizationFieldSelector";
 import { shortId } from "../lib/format";
 import { formatCost } from "../lib/currency";
 
@@ -64,6 +72,10 @@ export function Runs() {
   // handler twice before the `disabled` attribute actually reaches the DOM — this ref is mutated
   // immediately, so the guard below is never fooled by render timing.
   const optimizingRef = useRef<Set<string>>(new Set());
+  // Set while the field-selector modal is open for a single-row "Otimizar"/"Refazer" click;
+  // holds the externalId so confirmSingleOptimize knows which product to run.
+  const [pendingSingle, setPendingSingle] = useState<string | null>(null);
+  const [pendingBulk, setPendingBulk] = useState(false);
 
   async function refreshQuotaAlerts() {
     const quotas = await api.getFreeQuotas();
@@ -138,52 +150,67 @@ export function Runs() {
   }
 
 
-  /** Fires a single-product run directly from the row — works both for a never-optimized
-   *  product and to redo an already-optimized one, without needing the checkbox + bulk button. */
-  async function handleOptimizeOne(externalId: string) {
+  /** Opens the field-selector modal for a single-product run from the row — works both for a
+   *  never-optimized product and to redo an already-optimized one. The actual run is only fired
+   *  from confirmSingleOptimize, once the user picks fields and confirms. */
+  function handleOptimizeOne(externalId: string) {
     if (optimizingRef.current.has(externalId)) return;
+    setPendingSingle(externalId);
+  }
+
+  function confirmSingleOptimize(fields: EnrichmentField[], includeAltText: boolean) {
+    const externalId = pendingSingle;
+    setPendingSingle(null);
+    if (!externalId || optimizingRef.current.has(externalId)) return;
     optimizingRef.current.add(externalId);
     setOptimizingIds(new Set(optimizingRef.current));
     setRunError(null);
-    try {
-      await api.createRun({ candidateProductIds: [externalId] });
-      refreshOptimizedCount();
-      loadProducts(page);
-    } catch (err) {
-      setRunError(err instanceof Error ? err.message : String(err));
-    } finally {
-      optimizingRef.current.delete(externalId);
-      setOptimizingIds((prev) => {
-        const next = new Set(prev);
-        next.delete(externalId);
-        return next;
+    api
+      .createRun({ candidateProductIds: [externalId], fields, includeAltText })
+      .then(() => {
+        refreshOptimizedCount();
+        loadProducts(page);
+      })
+      .catch((err) => setRunError(err instanceof Error ? err.message : String(err)))
+      .finally(() => {
+        optimizingRef.current.delete(externalId);
+        setOptimizingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(externalId);
+          return next;
+        });
       });
-    }
   }
 
-  async function handleCreateRun() {
+  function handleCreateRun() {
     if (!selectAllMatching && selectedIds.size === 0) return;
+    setPendingBulk(true);
+  }
+
+  function confirmBulkOptimize(fields: EnrichmentField[], includeAltText: boolean) {
+    setPendingBulk(false);
     setCreating(true);
     setRunError(null);
-    try {
-      if (selectAllMatching) {
-        await api.createRun({
+    const body = selectAllMatching
+      ? {
           catalogFilter: { search: search || undefined, categoryId: categoryId || undefined, brandId: brandId || undefined },
           topN: topN ? Number(topN) : undefined,
-        });
-      } else {
-        await api.createRun({ candidateProductIds: [...selectedIds], topN: topN ? Number(topN) : undefined });
-      }
-      setSelectedIds(new Set());
-      setSelectAllMatching(false);
-      setTopN("");
-      refreshOptimizedCount();
-      loadProducts(page);
-    } catch (err) {
-      setRunError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setCreating(false);
-    }
+          fields,
+          includeAltText,
+        }
+      : { candidateProductIds: [...selectedIds], topN: topN ? Number(topN) : undefined, fields, includeAltText };
+
+    api
+      .createRun(body)
+      .then(() => {
+        setSelectedIds(new Set());
+        setSelectAllMatching(false);
+        setTopN("");
+        refreshOptimizedCount();
+        loadProducts(page);
+      })
+      .catch((err) => setRunError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setCreating(false));
   }
 
   const visibleItems = listResult?.items.filter((item) => statusFilter.has(statusGroupOf(item))) ?? [];
@@ -419,6 +446,23 @@ export function Runs() {
           </div>
         </section>
       </div>
+
+      {pendingSingle && (
+        <OptimizationFieldSelector
+          productCount={1}
+          confirmLabel="Confirmar otimização"
+          onCancel={() => setPendingSingle(null)}
+          onConfirm={({ fields, includeAltText }) => confirmSingleOptimize(fields, includeAltText)}
+        />
+      )}
+      {pendingBulk && (
+        <OptimizationFieldSelector
+          productCount={selectAllMatching ? (topN ? Number(topN) : 50) : selectedIds.size}
+          confirmLabel="Confirmar otimização"
+          onCancel={() => setPendingBulk(false)}
+          onConfirm={({ fields, includeAltText }) => confirmBulkOptimize(fields, includeAltText)}
+        />
+      )}
     </>
   );
 }

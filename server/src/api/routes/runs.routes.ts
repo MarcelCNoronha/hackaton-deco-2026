@@ -9,6 +9,8 @@ import { getModelRouting } from "../../repositories/model-routing.repo.js";
 import { findExceededProviders } from "../../repositories/provider-spend-limits.repo.js";
 import { findExhaustedFreeQuotaProviders } from "../../repositories/provider-free-quota.repo.js";
 import { requireAuth, requireSection } from "../../auth/guards.js";
+import { estimateFieldCosts } from "../../agents/field-cost-estimates.js";
+import { ALL_ENRICHMENT_FIELDS, type EnrichmentField } from "../../clients/llm-types.js";
 
 function formatResetIn(resetAt: string): string {
   const ms = Math.max(0, new Date(resetAt).getTime() - Date.now());
@@ -28,6 +30,8 @@ const createRunBody = z
       })
       .optional(),
     topN: z.number().int().positive().optional(),
+    fields: z.array(z.enum(ALL_ENRICHMENT_FIELDS as [EnrichmentField, ...EnrichmentField[]])).optional(),
+    includeAltText: z.boolean().optional(),
   })
   .refine((body) => Boolean(body.candidateProductIds) !== Boolean(body.catalogFilter), {
     message: "Informe exatamente um entre candidateProductIds (seleção manual) e catalogFilter (otimização total).",
@@ -60,6 +64,13 @@ export async function runsRoutes(app: FastifyInstance) {
     const { runId } = await createEnrichmentRun(body);
     await enqueueEnrichmentRun({ runId, ...body });
     return reply.status(202).send({ runId });
+  });
+
+  /** Feeds the "optimization selector" (pick which fields to run, see cost per field before
+   *  confirming) — computed from whichever model is currently routed, never a hardcoded price. */
+  app.get<{ Querystring: { productCount?: string } }>("/api/runs/field-estimates", async (req) => {
+    const productCount = Math.max(1, Number(req.query.productCount) || 1);
+    return estimateFieldCosts(productCount);
   });
 
   app.get<{ Querystring: { search?: string; categoryId?: string; brandId?: string } }>("/api/runs", async (req) => {

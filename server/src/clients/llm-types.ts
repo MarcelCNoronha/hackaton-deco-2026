@@ -1,15 +1,33 @@
 export type LlmProvider = "anthropic" | "openai" | "gemini";
 
+/** The 5 fields `enrichProductContent` can produce in one combined call (mirrors `proposal_field`'s
+ *  text-content values in schema.ts — `alt_text` is a separate, per-image pipeline, see
+ *  image-alttext.agent.ts, so it's not part of this set). Used to let a run request only a subset,
+ *  trimming both output tokens and which proposal rows get created — see enrichment-schema.ts. */
+export type EnrichmentField = "description" | "benefit_bullets" | "technical_specs" | "faq" | "structured_data";
+
+export const ALL_ENRICHMENT_FIELDS: EnrichmentField[] = [
+  "description",
+  "benefit_bullets",
+  "technical_specs",
+  "faq",
+  "structured_data",
+];
+
 export interface EnrichedContent {
   description: string;
   /** Short, scannable value props — distinct from the flowing description, matching how
-   *  high-conversion product pages separate a benefits list from the main copy. */
-  benefitBullets: string[];
-  /** Formatted FROM the product's own `attributes` input only — the prompt is instructed to
-   *  never invent a spec not present there, so this can't hallucinate technical facts. */
-  technicalSpecs: Array<{ label: string; value: string }>;
-  faq: Array<{ question: string; answer: string }>;
-  structuredData: Record<string, unknown>; // schema.org/Product JSON-LD
+   *  high-conversion product pages separate a benefits list from the main copy. Absent when
+   *  "benefit_bullets" wasn't requested for this run. */
+  benefitBullets?: string[];
+  /** Formatted FROM the product's own `attributes`/`currentDescription` input only — the prompt is
+   *  instructed to never invent a spec not present there, so this can't hallucinate technical facts.
+   *  Absent when "technical_specs" wasn't requested for this run. */
+  technicalSpecs?: Array<{ label: string; value: string }>;
+  /** Absent when "faq" wasn't requested for this run. */
+  faq?: Array<{ question: string; answer: string }>;
+  /** schema.org/Product JSON-LD. Absent when "structured_data" wasn't requested for this run. */
+  structuredData?: Record<string, unknown>;
 }
 
 export interface ContentEvaluation {
@@ -54,6 +72,9 @@ export interface LlmClient {
      *  from scratch — see content-enrichment.agent.ts's reuse branch. */
     reuseReference?: ReuseReference | null;
     productId?: number;
+    /** Which fields to request beyond "description" (always requested — the quality-gate loop is
+     *  anchored on it). Defaults to ALL_ENRICHMENT_FIELDS when omitted. See enrichment-schema.ts. */
+    fields?: EnrichmentField[];
   }): Promise<EnrichedContent>;
 
   evaluateContent(params: { text: string; knownFacts?: string | null; productId?: number }): Promise<ContentEvaluation>;

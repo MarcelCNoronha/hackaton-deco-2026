@@ -13,7 +13,7 @@ import { ClaudeClient } from "../clients/claude.client.js";
 import { OpenAiClient } from "../clients/openai.client.js";
 import { GeminiClient } from "../clients/gemini.client.js";
 import { EmbeddingsClient } from "../clients/embeddings.client.js";
-import type { LlmClient, LlmProvider } from "../clients/llm-types.js";
+import type { EnrichmentField, LlmClient, LlmProvider } from "../clients/llm-types.js";
 import type { CatalogClient } from "../clients/catalog-types.js";
 import type { RequestLogEntry } from "../clients/http.js";
 import { syncCatalogByProductIds, type ProductRow } from "../agents/catalog-reader.agent.js";
@@ -32,6 +32,12 @@ export interface StartEnrichmentRunParams {
    *  to 50 when running in catalogFilter mode without an explicit value, so "otimização total"
    *  never fires AI cost against an entire catalog without the user consciously picking a size. */
   topN?: number;
+  /** Which content fields to propose (see the optimization selector in the UI). `undefined` means
+   *  all 5 (unchanged default behavior); an explicit `[]` skips content enrichment entirely for
+   *  this run (e.g. an alt-text-only run) — see the `runContent` guard in executeEnrichmentRun. */
+  fields?: EnrichmentField[];
+  /** Whether to also run the (separate, per-image) alt-text pass. Defaults to true. */
+  includeAltText?: boolean;
 }
 
 /** Safety ceiling on how many products a catalogFilter run fetches to consider for ranking —
@@ -198,19 +204,29 @@ export async function executeEnrichmentRun(runId: number, params: StartEnrichmen
 
     const embeddingByProductId = await embedTargetProducts(embeddings, targetProducts);
 
+    // `fields: []` is an explicit "skip content generation entirely" (an alt-text-only run) —
+    // distinct from `undefined`, which keeps the pre-existing "all 5 fields" default.
+    const runContent = !params.fields || params.fields.length > 0;
+    const runAltText = params.includeAltText ?? true;
+
     const [contentResults, imageResults] = await Promise.all([
-      Promise.allSettled(
-        targetProducts.map((product) =>
-          proposeContentEnrichment({
-            contentLlm,
-            evaluatorLlm,
-            runId,
-            product,
-            embedding: embeddingByProductId.get(product.id) ?? null,
-          }),
-        ),
-      ),
-      Promise.allSettled(targetProducts.map((product) => proposeImageAltText({ llm: imageLlm, runId, product }))),
+      runContent
+        ? Promise.allSettled(
+            targetProducts.map((product) =>
+              proposeContentEnrichment({
+                contentLlm,
+                evaluatorLlm,
+                runId,
+                product,
+                embedding: embeddingByProductId.get(product.id) ?? null,
+                fields: params.fields,
+              }),
+            ),
+          )
+        : Promise.resolve([]),
+      runAltText
+        ? Promise.allSettled(targetProducts.map((product) => proposeImageAltText({ llm: imageLlm, runId, product })))
+        : Promise.resolve([]),
     ]);
 
     const failures = [...contentResults, ...imageResults].filter((r) => r.status === "rejected");

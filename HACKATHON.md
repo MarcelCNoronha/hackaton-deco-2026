@@ -216,6 +216,29 @@ loja tem dado real disponível): usar avaliações de clientes que já compraram
 Ratings, se ativo na conta) como fonte de perguntas *reais* pro Evaluator e pro Content
 Enrichment, em vez de só perguntas simuladas pela IA.
 
+### Seletor de otimização com custo estimado por campo (2026-08-02)
+
+Antes desta mudança, todo run gerava sempre os 5 campos de conteúdo (descrição, bullets,
+specs, FAQ, dados estruturados) + alt-text de imagem, sem opção de escolher. Agora, tanto o botão
+"Otimizar"/"Refazer" de uma linha quanto o botão em massa abrem um modal
+(`OptimizationFieldSelector.tsx`) antes de criar o run:
+
+- Lista os 6 campos com checkbox + custo estimado em USD/BRL, calculado com o preço real do
+  modelo atualmente roteado (`GET /api/runs/field-estimates?productCount=N`,
+  `field-cost-estimates.ts`) — não é um valor fixo, reflete o roteamento atual de modelos.
+- "descrição" continua sendo sempre gerada internamente pela chamada ao LLM mesmo se
+  desmarcada (o loop de qualidade precisa dela pra pontuar), mas só vira proposta na tela se o
+  usuário de fato marcar o campo — ver `buildProposalRows` em `content-enrichment.agent.ts`.
+- Desmarcar todos os 5 campos de texto pula a chamada de conteúdo inteira pro run (run só de
+  alt-text); desmarcar alt-text pula o pipeline de imagem — ambos por produto, sem custo extra.
+- Os 3 clients (Claude/OpenAI/Gemini) agora montam o schema/instrução do LLM dinamicamente a
+  partir dos campos pedidos (`clients/enrichment-schema.ts`, compartilhado pelos 3), em vez de
+  sempre pedir os 5 campos fixos — reduz tokens de saída (e custo real) quando menos campos são
+  selecionados, não só a proposta apresentada.
+- Estimativa é "por tentativa" (pode haver até 3 tentativas de correção de qualidade por produto,
+  custo real pode ser maior) e assume uma média de imagens/produto pro alt-text — é só uma
+  prévia, o custo real cobrado continua vindo do log real de tokens em Custos.
+
 ### Ideias de evolução futura (não implementadas — anotadas para depois)
 
 - **Migrar os clients de LLM (Claude/OpenAI/Gemini) para LangChain** — avaliado em 2026-08-02.

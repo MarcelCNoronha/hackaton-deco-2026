@@ -104,6 +104,25 @@ export interface EnrichmentRun {
   errorMessage: string | null;
 }
 
+/** The 5 fields a run can propose in one combined content-enrichment call — matches the backend's
+ *  EnrichmentField (see server/src/clients/llm-types.ts). "alt_text" is a separate, per-image
+ *  pipeline, so it's toggled independently (see EstimableField) rather than part of this set. */
+export type EnrichmentField = "description" | "benefit_bullets" | "technical_specs" | "faq" | "structured_data";
+export const ALL_ENRICHMENT_FIELDS: EnrichmentField[] = [
+  "description",
+  "benefit_bullets",
+  "technical_specs",
+  "faq",
+  "structured_data",
+];
+export type EstimableField = EnrichmentField | "alt_text";
+
+export interface FieldCostEstimate {
+  field: EstimableField;
+  label: string;
+  estimatedCostUsd: number;
+}
+
 export interface EnrichmentProposal {
   id: number;
   runId: number;
@@ -269,8 +288,15 @@ export const api = {
     return request<EnrichmentRun[]>(`/runs${qs ? `?${qs}` : ""}`);
   },
   getRun: (id: number) => request<EnrichmentRun>(`/runs/${id}`),
-  createRun: (body: { candidateProductIds?: string[]; catalogFilter?: CatalogFilter; topN?: number }) =>
-    request<{ runId: number }>("/runs", { method: "POST", body: JSON.stringify(body) }),
+  createRun: (body: {
+    candidateProductIds?: string[];
+    catalogFilter?: CatalogFilter;
+    topN?: number;
+    fields?: EnrichmentField[];
+    includeAltText?: boolean;
+  }) => request<{ runId: number }>("/runs", { method: "POST", body: JSON.stringify(body) }),
+  fieldCostEstimates: (productCount: number) =>
+    request<{ estimates: FieldCostEstimate[]; note: string }>(`/runs/field-estimates?productCount=${productCount}`),
   publishRun: (id: number) => request<{ enqueued: boolean }>(`/runs/${id}/publish`, { method: "POST" }),
   listProposals: (runId: number) => request<EnrichmentProposal[]>(`/runs/${runId}/proposals`),
   listScores: (runId: number) => request<ContentScore[]>(`/runs/${runId}/scores`),
