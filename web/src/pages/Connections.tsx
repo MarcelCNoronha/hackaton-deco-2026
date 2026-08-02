@@ -122,7 +122,7 @@ export function Connections() {
   const [anthropic, setAnthropic] = useState({ displayName: "Anthropic (Claude)", apiKey: "" });
   const [openai, setOpenai] = useState({ displayName: "OpenAI (GPT)", apiKey: "" });
   const [gemini, setGemini] = useState({ displayName: "Google (Gemini)", apiKey: "" });
-  const [google, setGoogle] = useState({ displayName: "Google (GSC + GA4)", code: "", gscSiteUrl: "https://mundialacabamentos.com.br/", ga4PropertyId: "" });
+  const [google, setGoogle] = useState({ displayName: "Google (GSC + GA4)", code: "", gscSiteUrl: "https://www.mundialacabamentos.com.br/", ga4PropertyId: "" });
 
   async function refresh() {
     setConnections(await api.listConnections());

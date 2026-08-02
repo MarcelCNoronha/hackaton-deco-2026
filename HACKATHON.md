@@ -172,6 +172,13 @@ os trechos criptografados). Primeiro usuário admin criado em produção via
 `docker compose exec app node dist/scripts/create-admin.js` (banco de produção começa vazio —
 senha diferente da usada em dev).
 
+**Segundo deploy (Resend + favicon) falhou por bloqueio de rede temporário** — o passo "Upload
+and deploy on VPS" deu `Connection timed out` nas 3 tentativas do retry já existente. Confirmado
+direto na VPS que não é bloqueio nosso (ufw inativo, sem regra de iptables bloqueando, fail2ban
+nem instalado) — é bloqueio externo, na borda de rede da Hostinger, no IP compartilhado/rotativo
+do runner do GitHub Actions (mesmo sintoma documentado no projeto Mundial). Sem correção de
+código necessária; resolve sozinho re-rodando o workflow depois do bloqueio expirar.
+
 **Pendências de segurança identificadas, para ajustar depois (não bloqueiam o uso agora):**
 - **Senha root da VPS ainda ativa** — o deploy automático já usa só chave SSH, mas a senha root
   (que passou por esta conversa de texto) continua funcionando pra login. Trocar ou desativar
