@@ -8,6 +8,7 @@ import { hashPassword, verifyPassword } from "../../auth/password.js";
 import { createSession, destroyAllSessionsForUser, destroySession, getSessionContext, markSessionFullyAuthenticated } from "../../auth/session.js";
 import { generateToken, hashToken } from "../../auth/tokens.js";
 import { decryptCredentials } from "../../security/encryption.js";
+import { buildEmailClient, buildPasswordResetEmail } from "../../clients/email.client.js";
 
 const DEVICE_COOKIE = "device_token";
 const DEVICE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -156,10 +157,18 @@ export async function authRoutes(app: FastifyInstance) {
       expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS),
     });
 
-    // No SMTP configured yet — the reset link is handed back directly instead of emailed.
     const origin = (req.headers.origin as string | undefined) ?? "http://localhost:5173";
     const resetUrl = `${origin}/reset-password?token=${token}`;
-    return reply.send({ ok: true, resetUrl });
+
+    const emailClient = buildEmailClient();
+    if (!emailClient) {
+      // No Resend configured — same dev-friendly fallback as before: hand the link back directly.
+      return reply.send({ ok: true, resetUrl });
+    }
+
+    const { subject, html } = buildPasswordResetEmail(resetUrl);
+    await emailClient.send({ to: user.email, subject, html });
+    return reply.send({ ok: true });
   });
 
   app.post("/api/auth/reset-password", async (req, reply) => {

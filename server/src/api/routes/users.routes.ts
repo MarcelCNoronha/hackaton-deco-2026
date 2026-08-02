@@ -6,6 +6,7 @@ import { passwordResetTokens, twoFactorTrustedDevices, users } from "../../db/sc
 import { requireAdmin } from "../../auth/guards.js";
 import { hashPassword } from "../../auth/password.js";
 import { generateToken, hashToken } from "../../auth/tokens.js";
+import { buildAccountSetupEmail, buildEmailClient } from "../../clients/email.client.js";
 
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
 const SECTIONS = ["connections", "publish", "users"] as const;
@@ -29,14 +30,28 @@ function publicUser(user: typeof users.$inferSelect) {
   return rest;
 }
 
-async function issueSetupLink(userId: number, origin: string): Promise<string> {
+/** Still returns the link in the API response regardless of email — the admin who triggered this
+ *  is already trusted, so showing it isn't a security issue the way it would be for self-service
+ *  forgot-password. Email failure is logged but never fails the request; the admin still has the
+ *  link to share manually. */
+async function issueSetupLink(userId: number, userEmail: string, origin: string): Promise<string> {
   const token = generateToken();
   await db.insert(passwordResetTokens).values({
     userId,
     tokenHash: hashToken(token),
     expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS),
   });
-  return `${origin}/reset-password?token=${token}`;
+  const setupUrl = `${origin}/reset-password?token=${token}`;
+
+  const emailClient = buildEmailClient();
+  if (emailClient) {
+    const { subject, html } = buildAccountSetupEmail(setupUrl);
+    await emailClient.send({ to: userEmail, subject, html }).catch((err) => {
+      console.error(`Failed to email setup link to ${userEmail}:`, err);
+    });
+  }
+
+  return setupUrl;
 }
 
 export async function usersRoutes(app: FastifyInstance) {
@@ -66,7 +81,7 @@ export async function usersRoutes(app: FastifyInstance) {
       .returning();
 
     const origin = (req.headers.origin as string | undefined) ?? "http://localhost:5173";
-    const setupUrl = await issueSetupLink(created.id, origin);
+    const setupUrl = await issueSetupLink(created.id, created.email, origin);
     return reply.send({ user: publicUser(created), setupUrl });
   });
 
@@ -108,7 +123,7 @@ export async function usersRoutes(app: FastifyInstance) {
     if (!target) return reply.status(404).send({ error: "Usuário não encontrado." });
 
     const origin = (req.headers.origin as string | undefined) ?? "http://localhost:5173";
-    const resetUrl = await issueSetupLink(targetId, origin);
+    const resetUrl = await issueSetupLink(targetId, target.email, origin);
     return reply.send({ resetUrl });
   });
 

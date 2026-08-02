@@ -160,6 +160,28 @@ Ubuntu 24.04 LTS, IP `46.202.144.198`.
   ausente). Depois disso: gerar par de chaves SSH pro `VPS_SSH_KEY`, preencher os demais secrets
   do GitHub Actions, e então habilitar o `deploy-production.yml`.
 
+### Primeiro deploy em produção concluído (2026-08-02)
+
+Certificado instalado, os 8 secrets do GitHub Actions preenchidos, `push: main` habilitado no
+`deploy-production.yml`. Descoberto nesse processo: o projeto inteiro nunca tinha sido commitado
+(só existia um "Initial commit" com um README de 1 linha) — commit real feito (131 arquivos) e
+push pro `main`. CI e Deploy Production rodaram automaticamente e concluíram com sucesso; os 5
+containers (`app`, `worker`, `web`, `db`, `valkey`) sobem saudáveis; `https://app.
+assessoriadigitalvicosa.com.br` responde em HTTPS de ponta a ponta (Cloudflare → origem, ambos
+os trechos criptografados). Primeiro usuário admin criado em produção via
+`docker compose exec app node dist/scripts/create-admin.js` (banco de produção começa vazio —
+senha diferente da usada em dev).
+
+**Pendências de segurança identificadas, para ajustar depois (não bloqueiam o uso agora):**
+- **Senha root da VPS ainda ativa** — o deploy automático já usa só chave SSH, mas a senha root
+  (que passou por esta conversa de texto) continua funcionando pra login. Trocar ou desativar
+  autenticação por senha no SSH (`PasswordAuthentication no` no sshd_config), deixando só chave.
+- **CORS da API permissivo** (`origin: true` em `server/src/api/server.ts`, aceita qualquer
+  origem) — funciona, mas é mais aberto que o necessário agora que existe um domínio de produção
+  fixo. Trocar por uma lista fixa (`localhost:5173` em dev + o domínio de produção).
+- Recadastrar as conexões (VTEX/Shopify, Anthropic/OpenAI/Gemini, Google) pela tela de
+  Integrações em produção — o banco novo não herda nada do ambiente local.
+
 ### Gate de qualidade com auto-correção (2026-08-01, quarta rodada)
 
 Validação do fluxo completo de Catalog & Content + SEO/GEO apontou que nada no pipeline garantia

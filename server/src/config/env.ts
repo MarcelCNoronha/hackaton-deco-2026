@@ -15,6 +15,11 @@ const envSchema = z.object({
   SESSION_COOKIE_SECRET: z
     .string()
     .min(32, "SESSION_COOKIE_SECRET must be at least 32 characters — generate with `openssl rand -hex 32`"),
+  // Optional: without these, password-reset/invite links are returned directly in the API
+  // response instead of emailed (today's behavior) — same "graceful without it" pattern as the
+  // Google/OpenAI-optional integrations elsewhere in this app.
+  RESEND_API_KEY: z.string().optional(),
+  RESEND_FROM_EMAIL: z.string().optional(),
 });
 
 export const env = envSchema.parse(process.env);
