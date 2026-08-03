@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, type EnrichmentRun, type ProviderSpend } from "../api/client";
+import { api, type CatalogPlatform, type Connection, type EnrichmentRun, type ProviderSpend } from "../api/client";
 import { StatTile } from "../components/StatTile";
 import { StatusBadge } from "../components/StatusBadge";
+import { ToolStatusGrid } from "../components/ToolStatusGrid";
 import { formatCost } from "../lib/currency";
+import { useAuth } from "../context/AuthContext";
 
 const PROVIDER_LABELS: Record<string, string> = {
   anthropic: "Anthropic (Claude)",
@@ -12,20 +14,29 @@ const PROVIDER_LABELS: Record<string, string> = {
 };
 
 export function Dashboard() {
+  const { can } = useAuth();
   const [runs, setRuns] = useState<EnrichmentRun[]>([]);
   const [optimizedCount, setOptimizedCount] = useState(0);
   const [spendLimits, setSpendLimits] = useState<ProviderSpend[]>([]);
+  const [connections, setConnections] = useState<Connection[]>([]);
+  const [catalogPlatform, setCatalogPlatform] = useState<CatalogPlatform>("vtex");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([api.listRuns(), api.optimizedProductCount(), api.getSpendLimits()]).then(
-      ([runsResult, optimized, spend]) => {
-        setRuns(runsResult);
-        setOptimizedCount(optimized.count);
-        setSpendLimits(spend);
-        setLoading(false);
-      },
-    );
+    Promise.all([
+      api.listRuns(),
+      api.optimizedProductCount(),
+      api.getSpendLimits(),
+      api.listConnections(),
+      api.getCatalogPlatform(),
+    ]).then(([runsResult, optimized, spend, connectionsResult, { platform }]) => {
+      setRuns(runsResult);
+      setOptimizedCount(optimized.count);
+      setSpendLimits(spend);
+      setConnections(connectionsResult);
+      setCatalogPlatform(platform);
+      setLoading(false);
+    });
   }, []);
 
   if (loading) return null;
@@ -47,6 +58,8 @@ export function Dashboard() {
       </div>
 
       <div className="page-content">
+        <ToolStatusGrid connections={connections} catalogPlatform={catalogPlatform} canManage={can("connections")} />
+
         <div className="stat-row">
           <StatTile label="Total de Otimizados" value={optimizedCount} />
           <StatTile label="Otimizações executadas" value={totalRuns} />

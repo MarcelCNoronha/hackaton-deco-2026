@@ -80,6 +80,7 @@ export class ShopifyClient implements CatalogClient {
         nodes: Array<{
           id: string;
           title: string;
+          handle: string;
           productType: string | null;
           vendor: string | null;
           featuredImage: { url: string } | null;
@@ -93,7 +94,7 @@ export class ShopifyClient implements CatalogClient {
       "listProducts",
       `query ListProducts($first: Int!, $query: String) {
         products(first: $first, query: $query) {
-          nodes { id title productType vendor featuredImage { url } variants(first: 1) { nodes { sku } } }
+          nodes { id title handle productType vendor featuredImage { url } variants(first: 1) { nodes { sku } } }
           pageInfo { hasNextPage }
         }
       }`,
@@ -108,6 +109,7 @@ export class ShopifyClient implements CatalogClient {
         category: p.productType || null,
         brand: p.vendor || null,
         sku: p.variants.nodes[0]?.sku || null,
+        url: `https://${this.credentials.shopDomain}/products/${p.handle}`,
       })),
       hasMore: data.products.pageInfo.hasNextPage,
     };
@@ -128,6 +130,7 @@ export class ShopifyClient implements CatalogClient {
       product: {
         id: string;
         title: string;
+        handle: string;
         descriptionHtml: string | null;
         productType: string | null;
         vendor: string | null;
@@ -135,6 +138,11 @@ export class ShopifyClient implements CatalogClient {
         // current API, and its `id` is also the one `fileUpdate` (see updateImageAltText) accepts.
         media: { nodes: Array<{ id: string; alt: string | null; mediaContentType: string; image: { url: string } | null }> };
         variants: { nodes: Array<{ id: string; sku: string | null }> };
+        // Covers both the standard category metafields (Color, Material, ... under the `shopify`
+        // namespace, populated from the product's assigned taxonomy category) and any
+        // merchant-defined custom metafields (e.g. `finish`, `pieces_per_box`) — both show up here
+        // identically, so no special-casing is needed to read either.
+        metafields: { nodes: Array<{ namespace: string; key: string; value: string }> };
       };
     };
 
@@ -142,15 +150,23 @@ export class ShopifyClient implements CatalogClient {
       "getProduct",
       `query GetProduct($id: ID!) {
         product(id: $id) {
-          id title descriptionHtml productType vendor
+          id title handle descriptionHtml productType vendor
           media(first: 20) { nodes { id alt mediaContentType ... on MediaImage { image { url } } } }
           variants(first: 1) { nodes { id sku } }
+          metafields(first: 50) { nodes { namespace key value } }
         }
       }`,
       { id: externalId },
     );
 
     const images = data.product.media.nodes.filter((m) => m.mediaContentType === "IMAGE" && m.image);
+    // Reference-type metafields (e.g. a taxonomy field like "color-pattern" pointing at a
+    // Metaobject) return a raw `gid://...` id as `value`, not the human-readable label — resolving
+    // that needs a separate query per metaobject (its "display" field varies by definition), not
+    // done here. Sending the raw id to the LLM would be worse than omitting it, so it's filtered out.
+    const attributes = Object.fromEntries(
+      data.product.metafields.nodes.filter((m) => !m.value.includes("gid://")).map((m) => [m.key, m.value]),
+    );
 
     return {
       externalId: data.product.id,
@@ -159,10 +175,11 @@ export class ShopifyClient implements CatalogClient {
       category: data.product.productType || null,
       brand: data.product.vendor || null,
       sku: data.product.variants.nodes[0]?.sku || null,
+      url: `https://${this.credentials.shopDomain}/products/${data.product.handle}`,
       imageUrl: images[0]?.image?.url ?? null,
       variantId: data.product.variants.nodes[0]?.id ?? "",
       images: images.map((m) => ({ id: m.id, url: m.image!.url, altText: m.alt })),
-      attributes: {},
+      attributes,
     };
   }
 

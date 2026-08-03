@@ -8,6 +8,7 @@ import {
   type EnrichmentField,
   type FreeQuotaStatus,
 } from "../api/client";
+import type { EnrichmentRun } from "../api/client";
 import { StatTile } from "../components/StatTile";
 import { CatalogFilterBar } from "../components/CatalogFilterBar";
 import { OptimizationFieldSelector } from "../components/OptimizationFieldSelector";
@@ -50,6 +51,8 @@ function formatResetIn(resetAt: string): string {
 
 export function Runs() {
   const [optimizedCount, setOptimizedCount] = useState(0);
+  const [pendingReviewCount, setPendingReviewCount] = useState(0);
+  const [avgPrecision, setAvgPrecision] = useState<number | null>(null);
 
   const [search, setSearch] = useState("");
   const [categoryId, setCategoryId] = useState("");
@@ -86,6 +89,21 @@ export function Runs() {
     setOptimizedCount((await api.optimizedProductCount()).count);
   }
 
+  async function refreshPendingReviewCount() {
+    setPendingReviewCount((await api.pendingReviewCount()).count);
+  }
+
+  /** "Taxa de precisão" — average final content score across completed runs (already computed
+   *  per run by the quality-gate loop, see enrichment-run.orchestrator.ts's avgFinalContentScore).
+   *  Reuses the existing runs list endpoint rather than adding a dedicated aggregate one. */
+  async function refreshAvgPrecision() {
+    const runs = await api.listRuns();
+    const scores = runs
+      .map((r) => (r.summary as { avgFinalContentScore?: number } | null)?.avgFinalContentScore)
+      .filter((v): v is number => typeof v === "number");
+    setAvgPrecision(scores.length ? scores.reduce((sum, v) => sum + v, 0) / scores.length : null);
+  }
+
   async function loadFilters() {
     try {
       setFilters(await api.catalogFilters());
@@ -117,11 +135,15 @@ export function Runs() {
 
   useEffect(() => {
     refreshOptimizedCount();
+    refreshPendingReviewCount();
+    refreshAvgPrecision();
     refreshQuotaAlerts();
     loadFilters();
     loadProducts(1);
     const interval = setInterval(() => {
       refreshOptimizedCount();
+      refreshPendingReviewCount();
+      refreshAvgPrecision();
       refreshQuotaAlerts();
     }, 30_000);
     return () => clearInterval(interval);
@@ -238,7 +260,9 @@ export function Runs() {
 
       <div className="page-content">
         <div className="stat-row">
-          <StatTile label="Total de Otimizados" value={optimizedCount} />
+          <StatTile label="Total Otimizados" value={optimizedCount} />
+          <StatTile label="A Validar" value={pendingReviewCount} />
+          <StatTile label="Taxa de Precisão" value={avgPrecision !== null ? `${Math.round(avgPrecision)}%` : "—"} />
         </div>
 
         <section className="card">
@@ -286,124 +310,95 @@ export function Runs() {
 
           {!catalogError && listResult && (
             <>
-              <table style={{ marginTop: "0.75rem" }}>
-                <thead>
-                  <tr>
-                    <th>
-                      <input
-                        type="checkbox"
-                        checked={selectAllMatching}
-                        onChange={toggleSelectAllMatching}
-                        title="Selecionar todos os produtos deste filtro"
-                      />
-                    </th>
-                    <th></th>
-                    <th>SKU / Produto</th>
-                    <th>Categoria</th>
-                    <th>Marca</th>
-                    <th>Otimização</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleItems.map((item) => (
-                    <tr key={item.externalId}>
-                      <td>
-                        <input
-                          type="checkbox"
-                          checked={selectAllMatching || selectedIds.has(item.externalId)}
-                          disabled={selectAllMatching}
-                          onChange={() => toggleSelect(item.externalId)}
-                        />
-                      </td>
-                      <td>
-                        {item.imageUrl ? (
-                          <img src={item.imageUrl} alt="" style={{ width: 40, height: 40, objectFit: "cover", borderRadius: "var(--radius-sm)" }} />
-                        ) : (
-                          <div style={{ width: 40, height: 40, background: "var(--surface-2)", borderRadius: "var(--radius-sm)" }} />
-                        )}
-                      </td>
-                      <td>
-                        <div className="muted" style={{ fontSize: "0.75rem" }}>
-                          {item.sku ? shortId(item.sku) : `Sem SKU (${shortId(item.externalId)})`}
-                        </div>
-                        <div>{item.title}</div>
-                      </td>
-                      <td className="muted">{item.category ?? "—"}</td>
-                      <td className="muted">{item.brand ?? "—"}</td>
-                      <td>
-                        {item.optimizedAt ? (
-                          <div style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start" }}>
-                            <div>
-                              <div
-                                style={{
-                                  fontWeight: 600,
-                                  color: item.optimizationStatus === "published" ? "var(--status-good)" : "var(--status-critical)",
-                                }}
-                              >
-                                {item.optimizationStatus === "published" ? "Pronta e enviada" : "A validar"}
-                              </div>
-                              <div className="muted" style={{ fontSize: "0.8rem" }}>
-                                {new Date(item.optimizedAt).toLocaleDateString("pt-BR")}
-                              </div>
-                              <div className="muted" style={{ fontSize: "0.8rem" }}>
-                                {formatCost(item.optimizationCostUsd ?? 0)}
-                              </div>
-                            </div>
-                            <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem" }}>
-                              <Link
-                                to={`/runs/${item.lastRunId}`}
-                                className="link-button"
-                                style={toneStyle(item.optimizationStatus === "published" ? "good" : "critical")}
-                              >
-                                Otimização
-                              </Link>
-                              {item.productId !== null && (
-                                <Link
-                                  to={`/impact?productId=${item.productId}`}
-                                  className="link-button"
-                                  style={toneStyle(
-                                    item.impactReadiness === "ready"
-                                      ? "good"
-                                      : item.impactReadiness === "partial"
-                                        ? "warning"
-                                        : "critical",
-                                  )}
-                                >
-                                  Impacto
-                                </Link>
-                              )}
-                              <button
-                                type="button"
-                                className="link-button"
-                                onClick={() => handleOptimizeOne(item.externalId)}
-                                disabled={optimizingIds.has(item.externalId)}
-                              >
-                                {optimizingIds.has(item.externalId) ? "Enviando…" : "Refazer"}
-                              </button>
-                            </div>
+              <label className="product-select-all">
+                <input type="checkbox" checked={selectAllMatching} onChange={toggleSelectAllMatching} />
+                Selecionar todos os produtos deste filtro
+              </label>
+
+              <div className="product-card-list">
+                {visibleItems.map((item) => (
+                  <div className="product-row-card" key={item.externalId}>
+                    <input
+                      type="checkbox"
+                      className="product-row-checkbox"
+                      checked={selectAllMatching || selectedIds.has(item.externalId)}
+                      disabled={selectAllMatching}
+                      onChange={() => toggleSelect(item.externalId)}
+                    />
+                    {item.imageUrl ? (
+                      <img src={item.imageUrl} alt="" className="product-row-thumb" />
+                    ) : (
+                      <div className="product-row-thumb product-row-thumb--empty" />
+                    )}
+                    <div className="product-row-main">
+                      <div className="muted" style={{ fontSize: "0.72rem" }}>
+                        {item.sku ? shortId(item.sku) : `Sem SKU (${shortId(item.externalId)})`}
+                      </div>
+                      {item.category && <span className="pill product-tag">{item.category}</span>}
+                      <div className="product-row-title">{item.title}</div>
+                      {item.url && (
+                        <a href={item.url} target="_blank" rel="noreferrer" className="link-button" style={{ fontSize: "0.75rem" }}>
+                          Ver na loja ↗
+                        </a>
+                      )}
+                    </div>
+                    <div className="product-row-brand">
+                      <span className="muted" style={{ fontSize: "0.72rem" }}>
+                        Marca
+                      </span>
+                      <div>{item.brand ?? "—"}</div>
+                    </div>
+                    <div className="product-row-status">
+                      {item.optimizedAt ? (
+                        <>
+                          <span className={`pill tone-${item.optimizationStatus === "published" ? "good" : "warning"}`}>
+                            {item.optimizationStatus === "published" ? "Pronta e enviada" : "A validar"}
+                          </span>
+                          <div className="muted" style={{ fontSize: "0.72rem", marginTop: "0.3rem" }}>
+                            {new Date(item.optimizedAt).toLocaleDateString("pt-BR")} · {formatCost(item.optimizationCostUsd ?? 0)}
                           </div>
-                        ) : (
-                          <button
-                            type="button"
-                            className="link-button"
-                            onClick={() => handleOptimizeOne(item.externalId)}
-                            disabled={optimizingIds.has(item.externalId)}
-                          >
-                            {optimizingIds.has(item.externalId) ? "Enviando…" : "Otimizar"}
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                  {visibleItems.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="muted">
-                        Nenhum produto encontrado para esse filtro.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+                          <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.35rem", flexWrap: "wrap" }}>
+                            <Link
+                              to={`/runs/${item.lastRunId}`}
+                              className="link-button"
+                              style={toneStyle(item.optimizationStatus === "published" ? "good" : "critical")}
+                            >
+                              Otimização
+                            </Link>
+                            {item.productId !== null && (
+                              <Link
+                                to={`/impact?productId=${item.productId}`}
+                                className="link-button"
+                                style={toneStyle(
+                                  item.impactReadiness === "ready"
+                                    ? "good"
+                                    : item.impactReadiness === "partial"
+                                      ? "warning"
+                                      : "critical",
+                                )}
+                              >
+                                Impacto
+                              </Link>
+                            )}
+                          </div>
+                        </>
+                      ) : (
+                        <span className="pill tone-muted">Não otimizado</span>
+                      )}
+                    </div>
+                    <div className="product-row-action">
+                      <button
+                        type="button"
+                        onClick={() => handleOptimizeOne(item.externalId)}
+                        disabled={optimizingIds.has(item.externalId)}
+                      >
+                        {optimizingIds.has(item.externalId) ? "Enviando…" : item.optimizedAt ? "Refazer" : "Otimizar"}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {visibleItems.length === 0 && <div className="empty-state">Nenhum produto encontrado para esse filtro.</div>}
+              </div>
 
               <div className="actions" style={{ marginTop: "0.75rem" }}>
                 <button type="button" className="secondary" onClick={() => loadProducts(page - 1)} disabled={page <= 1 || loadingList}>

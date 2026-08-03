@@ -122,16 +122,10 @@ a {
 }
 
 .sidebar-brand .mark {
-  width: 26px;
-  height: 26px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, var(--accent), #1c5cab);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.85rem;
-  font-weight: 800;
-  color: white;
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  flex-shrink: 0;
 }
 
 .sidebar-nav {
@@ -242,8 +236,10 @@ a {
 }
 
 .stat-label {
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .stat-value {
@@ -263,6 +259,77 @@ a {
 }
 
 .stat-delta.is-bad {
+  color: var(--status-critical);
+}
+
+/* ---------- Tool status ---------- */
+
+.tool-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+  margin: 1.25rem 0 1.5rem;
+}
+
+.tool-status-link {
+  text-decoration: none;
+  color: inherit;
+}
+
+.tool-status-card {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 0.85rem 1rem;
+  transition: filter 120ms ease;
+}
+
+.tool-status-link:hover .tool-status-card {
+  filter: brightness(1.15);
+}
+
+.tool-status-card.is-active {
+  border-color: var(--status-good);
+}
+
+.tool-status-card.is-inactive {
+  border-color: var(--status-critical);
+}
+
+.tool-status-dot {
+  width: 10px;
+  height: 10px;
+  min-width: 10px;
+  border-radius: 50%;
+}
+
+.tool-status-card.is-active .tool-status-dot {
+  background: var(--status-good);
+  box-shadow: 0 0 0 3px rgba(12, 163, 12, 0.18);
+}
+
+.tool-status-card.is-inactive .tool-status-dot {
+  background: var(--status-critical);
+  box-shadow: 0 0 0 3px rgba(230, 103, 103, 0.18);
+}
+
+.tool-status-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.tool-status-state {
+  font-size: 0.75rem;
+}
+
+.tool-status-card.is-active .tool-status-state {
+  color: var(--status-good);
+}
+
+.tool-status-card.is-inactive .tool-status-state {
   color: var(--status-critical);
 }
 
@@ -732,6 +799,96 @@ tbody tr:last-child td {
   border: 1px solid var(--border);
   font-size: 0.72rem;
   color: var(--text-secondary);
+}
+
+.pill.tone-good {
+  color: var(--status-good);
+  border-color: var(--status-good);
+  background: rgba(12, 163, 12, 0.12);
+}
+
+.pill.tone-warning {
+  color: var(--status-warning);
+  border-color: var(--status-warning);
+  background: rgba(250, 178, 25, 0.12);
+}
+
+.pill.tone-critical {
+  color: var(--status-critical);
+  border-color: var(--status-critical);
+  background: rgba(230, 103, 103, 0.12);
+}
+
+.pill.tone-muted {
+  color: var(--text-muted);
+}
+
+/* ---------- Product card list (Produtos page) ---------- */
+
+.product-select-all {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-top: 0.75rem;
+  cursor: pointer;
+}
+
+.product-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+}
+
+.product-row-card {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 0.85rem 1.1rem;
+}
+
+.product-row-thumb {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+}
+
+.product-row-thumb--empty {
+  background: var(--surface-1);
+}
+
+.product-row-main {
+  flex: 2 1 260px;
+  min-width: 0;
+}
+
+.product-tag {
+  margin: 0.15rem 0;
+}
+
+.product-row-title {
+  font-weight: 600;
+}
+
+.product-row-brand {
+  flex: 1 1 120px;
+  text-align: center;
+}
+
+.product-row-status {
+  flex: 1.4 1 200px;
+  text-align: center;
+}
+
+.product-row-action {
+  flex: 0 0 auto;
 }
 
 /* ---------- Auth pages (login / forgot / reset) ---------- */

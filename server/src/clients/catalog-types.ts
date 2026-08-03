@@ -10,6 +10,9 @@ export interface CatalogProductSummary {
   brand: string | null;
   /** Merchant-assigned SKU code (VTEX: RefId. Shopify: variant sku) — null when unset ("No SKU"). */
   sku: string | null;
+  /** Public storefront URL (VTEX: `{account}.{environment}.com.br/{LinkId}/p`. Shopify:
+   *  `{shopDomain}/products/{handle}`) — null when the platform didn't return a slug. */
+  url: string | null;
 }
 
 export interface CatalogProductDetail extends CatalogProductSummary {

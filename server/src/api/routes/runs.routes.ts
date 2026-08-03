@@ -112,6 +112,17 @@ export async function runsRoutes(app: FastifyInstance) {
     { preHandler: requireSection("publish") },
     async (req, reply) => {
       const runId = Number(req.params.id);
+      const run = await db.query.enrichmentRuns.findFirst({ where: eq(enrichmentRuns.id, runId) });
+      if (!run) return reply.status(404).send({ error: "Run not found" });
+      // The worker still processes remaining products while status is "running" — publishing now
+      // would only send whatever's approved so far, silently leaving the rest for a second,
+      // easy-to-forget publish once they finish. Block here too, not just in the UI, since this
+      // endpoint is reachable directly.
+      if (run.status === "running") {
+        return reply.status(409).send({
+          error: "A otimização ainda está em andamento — aguarde terminar de processar todos os produtos antes de publicar.",
+        });
+      }
       await enqueuePublishRun(runId);
       return reply.status(202).send({ enqueued: true });
     },

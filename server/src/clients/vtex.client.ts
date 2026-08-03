@@ -20,6 +20,8 @@ export interface VtexProduct {
   DepartmentId?: number;
   CategoryId?: number;
   Description?: string;
+  /** SEO-friendly URL slug — storefront product page is `{account}.{environment}.com.br/{LinkId}/p`. */
+  LinkId?: string;
   [key: string]: unknown;
 }
 
@@ -39,11 +41,35 @@ interface VtexSearchProduct {
   description?: string;
   brand?: string;
   categories?: string[];
+  /** Full storefront URL — the public Search API returns this ready-made, unlike the private
+   *  Catalog API (which only has the `LinkId` slug, see VtexProduct). */
+  link?: string;
+  linkText?: string;
+  /** Names of every category-level specification field ("Características"/"Especificações" in
+   *  the admin) that has a value on this product — each name is ALSO a top-level property on this
+   *  same object (e.g. `allSpecifications: ["Material"]` implies `Material: ["Liga de Cobre..."]`),
+   *  a long-standing documented behavior of this Search API. Empty fields (never filled in the
+   *  admin) simply don't appear here at all. */
+  allSpecifications?: string[];
   items?: Array<{
     itemId: string;
     referenceId?: Array<{ Key: string; Value: string }> | string;
     images?: Array<{ imageId?: string; imageUrl: string; imageText?: string }>;
   }>;
+  [key: string]: unknown;
+}
+
+/** `allSpecifications` lists which spec fields have a value; each name doubles as a top-level
+ *  property holding that field's value(s) as a string array — collapses single-value arrays to a
+ *  plain string since that's how virtually every VTEX spec field is actually used in practice. */
+function extractVtexSpecifications(p: VtexSearchProduct): Record<string, unknown> {
+  const attributes: Record<string, unknown> = {};
+  for (const name of p.allSpecifications ?? []) {
+    const values = p[name];
+    if (!Array.isArray(values) || values.length === 0) continue;
+    attributes[name] = values.length === 1 ? values[0] : values;
+  }
+  return attributes;
 }
 
 interface VtexCategoryTreeNode {
@@ -77,6 +103,7 @@ function extractVtexReferenceId(referenceId: Array<{ Key: string; Value: string 
  */
 export class VtexClient implements CatalogClient {
   readonly platform = "vtex" as const;
+  private readonly host: string;
   private readonly baseUrl: string;
   private readonly searchBaseUrl: string;
 
@@ -84,9 +111,9 @@ export class VtexClient implements CatalogClient {
     private readonly credentials: VtexCredentials,
     private readonly onAttempt?: (entry: RequestLogEntry) => void | Promise<void>,
   ) {
-    const host = `${credentials.account}.${credentials.environment}.com.br`;
-    this.baseUrl = `https://${host}/api/catalog`;
-    this.searchBaseUrl = `https://${host}/api/catalog_system/pub`;
+    this.host = `${credentials.account}.${credentials.environment}.com.br`;
+    this.baseUrl = `https://${this.host}/api/catalog`;
+    this.searchBaseUrl = `https://${this.host}/api/catalog_system/pub`;
   }
 
   private headers() {
@@ -120,13 +147,43 @@ export class VtexClient implements CatalogClient {
     return (await res.json()) as VtexSku;
   }
 
+  /** The private Catalog API (fetchProduct/fetchSku) never returns category-level specification
+   *  values ("Características"/"Especificações" in the admin — real specs like Material, Acabamento,
+   *  dimensões) nor the brand NAME (only fetchProduct's numeric BrandId) — only the public Search
+   *  API has both, as dynamic per-product fields (see extractVtexSpecifications). Reuses that same
+   *  endpoint/auth as listProducts, filtered down to this one product. Never throws: a lookup
+   *  failing shouldn't fail the whole product sync, it just means the LLM falls back to whatever's
+   *  in the free-text description (and brand stays unset), same as before this existed. */
+  private async fetchProductSpecifications(
+    productId: string | number,
+  ): Promise<{ attributes: Record<string, unknown>; brand: string | null }> {
+    try {
+      const res = await requestWithRetry({
+        provider: "vtex",
+        operation: "getProductSpecifications",
+        url: `${this.searchBaseUrl}/products/search?fq=productId:${productId}`,
+        init: { method: "GET", headers: this.headers() },
+        onAttempt: this.onAttempt,
+      });
+      const items = ((await res.json()) as VtexSearchProduct[]) ?? [];
+      const item = items[0];
+      return { attributes: item ? extractVtexSpecifications(item) : {}, brand: item?.brand ?? null };
+    } catch (err) {
+      console.error(`VTEX getProductSpecifications failed for product ${productId} — continuing with empty attributes`, err);
+      return { attributes: {}, brand: null };
+    }
+  }
+
   /** Composes the private product+SKU endpoints into the platform-agnostic detail shape —
    *  treats the first SKU's images as "the" product images, same simplification the pipeline
    *  already relied on before this abstraction existed. */
   async getProduct(externalId: string): Promise<CatalogProductDetail> {
     const product = await this.fetchProduct(externalId);
     const skuId = (product as { SkuIds?: number[] }).SkuIds?.[0];
-    const sku = skuId ? await this.fetchSku(skuId) : undefined;
+    const [sku, { attributes, brand }] = await Promise.all([
+      skuId ? this.fetchSku(skuId) : Promise.resolve(undefined),
+      this.fetchProductSpecifications(externalId),
+    ]);
     const images = (sku?.Images ?? []) as Array<{ Id?: string | number; ImageUrl: string; ImageText?: string }>;
 
     return {
@@ -134,8 +191,9 @@ export class VtexClient implements CatalogClient {
       title: product.Name,
       description: product.Description ?? null,
       category: product.CategoryId ? String(product.CategoryId) : null,
-      brand: null,
+      brand,
       sku: sku?.RefId ?? null,
+      url: product.LinkId ? `https://${this.host}/${product.LinkId}/p` : null,
       imageUrl: images[0]?.ImageUrl ?? null,
       variantId: sku ? String(sku.Id) : "",
       images: images.map((img, i) => ({
@@ -143,7 +201,7 @@ export class VtexClient implements CatalogClient {
         url: img.ImageUrl,
         altText: img.ImageText ?? null,
       })),
-      attributes: {},
+      attributes,
     };
   }
 
@@ -176,6 +234,7 @@ export class VtexClient implements CatalogClient {
         category: p.categories?.[0]?.replace(/^\/|\/$/g, "").split("/").pop() ?? null,
         brand: p.brand ?? null,
         sku: extractVtexReferenceId(p.items?.[0]?.referenceId),
+        url: p.link ?? (p.linkText ? `https://${this.host}/${p.linkText}/p` : null),
       })),
       hasMore: items.length === params.pageSize,
       total,

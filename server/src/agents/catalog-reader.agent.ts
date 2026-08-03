@@ -22,7 +22,7 @@ export async function syncProduct(catalog: CatalogClient, externalId: string): P
     category: product.category,
     brand: product.brand,
     sku: product.sku,
-    url: null,
+    url: product.url,
     lastSyncedAt: new Date(),
   };
 

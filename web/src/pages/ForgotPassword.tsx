@@ -24,7 +24,7 @@ export function ForgotPassword() {
     <div className="auth-shell">
       <div className="card auth-card">
         <div className="sidebar-brand" style={{ padding: 0, marginBottom: "1.25rem" }}>
-          <span className="mark">C</span>
+          <img src="/logo-icon.png" alt="" className="mark" />
           <span>CatalogIA</span>
         </div>
 

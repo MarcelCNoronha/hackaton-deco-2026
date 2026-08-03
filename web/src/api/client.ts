@@ -39,6 +39,8 @@ export interface CatalogProductSummary {
   imageUrl: string | null;
   category: string | null;
   brand: string | null;
+  /** Public storefront URL, when the platform returned a slug for it. */
+  url: string | null;
   /** Our local product id, only set once this item has been synced by a run at least once. */
   productId: number | null;
   /** Local SKU/variant id, once synced — falls back to externalId on the frontend until then. */
@@ -305,8 +307,10 @@ export const api = {
     request<EnrichmentProposal>(`/proposals/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
 
   listProducts: () => request<Product[]>("/products"),
+  resyncProduct: (id: number) => request<Product>(`/products/${id}/resync`, { method: "POST" }),
   productMetrics: (id: number) => request<ProductMetric[]>(`/products/${id}/metrics`),
   optimizedProductCount: () => request<{ count: number }>("/products/optimized-count"),
+  pendingReviewCount: () => request<{ count: number }>("/products/pending-review-count"),
 
   getSpendLimits: () => request<ProviderSpend[]>("/spend-limits"),
   setSpendLimit: (provider: LlmProvider, limitUsd: number | null) =>

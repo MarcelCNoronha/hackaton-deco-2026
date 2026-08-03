@@ -34,7 +34,7 @@ function AppShell() {
     <div className="app">
       <aside className={`sidebar${collapsed ? " sidebar--collapsed" : ""}`}>
         <Link to="/" className="sidebar-brand" style={{ textDecoration: "none" }}>
-          <span className="mark">C</span>
+          <img src="/logo-icon.png" alt="" className="mark" />
           <span>CatalogIA</span>
         </Link>
         <nav className="sidebar-nav">

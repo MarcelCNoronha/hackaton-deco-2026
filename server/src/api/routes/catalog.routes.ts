@@ -23,7 +23,7 @@ const listQuery = z.object({
 
 /** Loads the credentials for whichever platform is active and builds the matching CatalogClient —
  *  same factory-per-request pattern used for LLM clients in the orchestrator. */
-async function requireActiveCatalogClient(): Promise<CatalogClient> {
+export async function requireActiveCatalogClient(): Promise<CatalogClient> {
   const platform = await getCatalogPlatform();
   const logger = makeRequestLogger();
 

@@ -291,6 +291,10 @@ export function Connections() {
   }
 
   const routingByTask = useMemo(() => new Map(routing.map((r) => [r.task, r])), [routing]);
+  const connectedProviders = useMemo(
+    () => (Object.keys(PROVIDER_LABELS) as LlmProvider[]).filter((provider) => statusFor(provider) === "connected"),
+    [connections],
+  );
 
   return (
     <>
@@ -400,8 +404,12 @@ export function Connections() {
           <h2>Roteamento de modelos</h2>
           <p className="muted">
             Escolha o provedor de IA e o nível de otimização (qualidade ou preço) para cada tarefa do pipeline.
-            Conecte o provedor correspondente acima antes de rodar um run.
+            Só provedores conectados aparecem como opção — conecte o provedor correspondente acima primeiro.
           </p>
+
+          {connectedProviders.length === 0 && (
+            <div className="banner">Nenhum provedor de IA conectado ainda — conecte Anthropic, OpenAI ou Gemini acima para poder rotear.</div>
+          )}
 
           {recommendations &&
             TASKS.map((task) => {
@@ -410,6 +418,11 @@ export function Connections() {
               const tiers = recommendations[row.provider];
               const currentTier = findTier(tiers, row.model);
               const resolved = tiers[currentTier];
+              // The current selection must always render as a valid <option>, even if that
+              // provider isn't connected (e.g. a stale routing row from before it was disconnected).
+              const selectableProviders = connectedProviders.includes(row.provider)
+                ? connectedProviders
+                : [...connectedProviders, row.provider];
 
               return (
                 <div key={task.key} className="card" style={{ background: "var(--surface-2)", marginBottom: "1rem" }}>
@@ -428,9 +441,10 @@ export function Connections() {
                         Provedor
                       </label>
                       <select value={row.provider} onChange={(e) => handleProviderChange(task.key, e.target.value as LlmProvider)}>
-                        {(Object.keys(PROVIDER_LABELS) as LlmProvider[]).map((provider) => (
-                          <option key={provider} value={provider}>
+                        {selectableProviders.map((provider) => (
+                          <option key={provider} value={provider} disabled={!connectedProviders.includes(provider)}>
                             {PROVIDER_LABELS[provider]}
+                            {connectedProviders.includes(provider) ? "" : " (não conectado)"}
                           </option>
                         ))}
                       </select>

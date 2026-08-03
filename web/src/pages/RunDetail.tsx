@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import {
   api,
+  ApiError,
   type CatalogPlatform,
   type ContentScore,
   type EnrichmentProposal,
@@ -96,6 +97,9 @@ export function RunDetail() {
   const [costs, setCosts] = useState<RunCosts | null>(null);
   const [drafts, setDrafts] = useState<Record<number, string>>({});
   const [platform, setPlatform] = useState<CatalogPlatform>("vtex");
+  const [publishError, setPublishError] = useState<string | null>(null);
+  const [resyncingIds, setResyncingIds] = useState<Set<number>>(new Set());
+  const [resyncError, setResyncError] = useState<string | null>(null);
 
   async function refresh() {
     const [runData, proposalsData, scoresData, costsData] = await Promise.all([
@@ -118,6 +122,26 @@ export function RunDetail() {
     return () => clearInterval(interval);
   }, [runId]);
 
+  /** Re-fetches one product from the active catalog platform without running a whole new
+   *  optimization — for when the local snapshot was synced before a field existed (e.g. `url`,
+   *  added later) and still shows stale/incomplete data. */
+  async function resyncProduct(productId: number) {
+    setResyncError(null);
+    setResyncingIds((prev) => new Set(prev).add(productId));
+    try {
+      const updated = await api.resyncProduct(productId);
+      setProducts((prev) => prev.map((p) => (p.id === productId ? updated : p)));
+    } catch (err) {
+      setResyncError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setResyncingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(productId);
+        return next;
+      });
+    }
+  }
+
   async function review(proposal: EnrichmentProposal, status: "approved" | "rejected" | "edited") {
     const proposedValue = status === "edited" ? drafts[proposal.id] ?? proposal.proposedValue : undefined;
     await api.reviewProposal(proposal.id, { status, proposedValue });
@@ -125,13 +149,22 @@ export function RunDetail() {
   }
 
   async function handlePublish() {
-    await api.publishRun(runId);
-    refresh();
+    setPublishError(null);
+    try {
+      await api.publishRun(runId);
+      refresh();
+    } catch (err) {
+      setPublishError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : String(err));
+    }
   }
 
   const approvedCount = proposals.filter((p) => p.status === "approved").length;
   const pendingCount = proposals.filter((p) => p.status === "pending" || p.status === "edited").length;
   const publishedCount = proposals.filter((p) => p.status === "published").length;
+  // The worker still processes remaining products in the background while status is "running" —
+  // publishing now would only send whatever's ready so far, and the rest would need a second,
+  // easy-to-forget publish once they finish generating. Block until the run itself is done.
+  const runInProgress = run?.status === "running";
   const reusedCount = proposals.filter((p) => p.field === "description" && p.reusedFromProductId !== null).length;
 
   const productIds = [...new Set(proposals.map((p) => p.productId))];
@@ -166,11 +199,17 @@ export function RunDetail() {
         </div>
 
         <div className="banner">
-          <span>Aprove o conteúdo abaixo antes de publicar de volta na {PLATFORM_LABELS[platform]}.</span>
-          <button type="button" onClick={handlePublish} disabled={approvedCount === 0}>
+          <span>
+            {runInProgress
+              ? "Otimização ainda em andamento — aguarde terminar de processar todos os produtos antes de publicar, para não deixar parte de fora."
+              : `Aprove o conteúdo abaixo antes de publicar de volta na ${PLATFORM_LABELS[platform]}.`}
+          </span>
+          <button type="button" onClick={handlePublish} disabled={approvedCount === 0 || runInProgress}>
             Publicar aprovadas na {PLATFORM_LABELS[platform]}
           </button>
         </div>
+        {publishError && <div className="banner">{publishError}</div>}
+        {resyncError && <div className="banner">{resyncError}</div>}
 
         {productIds.map((productId) => {
           const productProposals = proposals.filter((p) => p.productId === productId);
@@ -178,6 +217,7 @@ export function RunDetail() {
           const proposed = scores.find((s) => s.productId === productId && s.target === "proposed");
 
           const productCost = costs?.byProduct.find((c) => c.productId === productId);
+          const currentProduct = products.find((p) => p.id === productId);
           const descriptionProposal = productProposals.find((p) => p.field === "description");
           const donorProduct =
             descriptionProposal?.reusedFromProductId != null
@@ -187,8 +227,22 @@ export function RunDetail() {
           return (
             <section className="card" key={productId}>
               <div className="proposal-header">
-                <h2 style={{ margin: 0 }}>{products.find((p) => p.id === productId)?.title ?? `Produto #${productId}`}</h2>
-                <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                <h2 style={{ margin: 0 }}>{currentProduct?.title ?? `Produto #${productId}`}</h2>
+                <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
+                  {currentProduct?.url && (
+                    <a href={currentProduct.url} target="_blank" rel="noreferrer" className="link-button">
+                      Ver na loja ↗
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    className="link-button"
+                    onClick={() => resyncProduct(productId)}
+                    disabled={resyncingIds.has(productId)}
+                    title="Busca os dados mais recentes deste produto na loja — útil quando a sincronização local está incompleta ou desatualizada."
+                  >
+                    {resyncingIds.has(productId) ? "Ressincronizando…" : "Ressincronizar produto"}
+                  </button>
                   {descriptionProposal?.reusedFromProductId != null && (
                     <span className="pill" title="Conteúdo adaptado de um produto muito similar já aprovado — menos chamadas de IA, menor custo.">
                       🔗 Reaproveitado{donorProduct ? ` de "${donorProduct.title}"` : ""}
