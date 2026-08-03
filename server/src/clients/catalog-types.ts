@@ -8,6 +8,11 @@ export interface CatalogProductSummary {
   category: string | null;
   /** VTEX: nome da marca. Shopify: vendor. */
   brand: string | null;
+  /** Collections this product belongs to, joined with ", " when there's more than one. Shopify:
+   *  the product's `collections` connection. VTEX: null for now — the private Collections API
+   *  (`GET /api/catalog_system/pvt/collection/...`) needs verifying against a real account before
+   *  wiring it up, same discipline as this file's other VTEX endpoints. */
+  collection: string | null;
   /** Merchant-assigned SKU code (VTEX: RefId. Shopify: variant sku) — null when unset ("No SKU"). */
   sku: string | null;
   /** Public storefront URL (VTEX: `{account}.{environment}.com.br/{LinkId}/p`. Shopify:

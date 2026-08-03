@@ -13,6 +13,7 @@ import {
 
 interface GeminiInteraction {
   output_text?: string;
+  output_image?: { data?: string; mime_type?: string; uri?: string };
   steps?: Array<{ type: string; [key: string]: unknown }>;
   usage?: { total_input_tokens?: number; total_output_tokens?: number };
 }
@@ -240,6 +241,83 @@ export class GeminiClient implements LlmClient {
         }) as unknown as Promise<GeminiInteraction>,
       extract: (interaction) => (interaction.output_text ?? "").trim(),
     });
+  }
+
+  /** Generates a new image FROM one or more of the product's existing photos (never from
+   *  scratch) — e.g. placing the product in a realistic lifestyle setting, or a close-up calling
+   *  out one feature. `costUsd` is supplied by the caller (image generation is priced per-image,
+   *  not per-token, so the generic loggedCall/computeCostUsd path doesn't apply here). */
+  async generateProductImage(params: {
+    referenceImageUrls: string[];
+    prompt: string;
+    costUsd: number;
+    productId?: number;
+  }): Promise<{ mimeType: string; base64: string }> {
+    const startedAt = Date.now();
+    try {
+      const imageBlocks = await Promise.all(
+        params.referenceImageUrls.map(async (url) => {
+          const res = await fetch(url);
+          const mimeType = res.headers.get("content-type") ?? "image/jpeg";
+          const data = Buffer.from(await res.arrayBuffer()).toString("base64");
+          return { type: "image" as const, data, mime_type: mimeType };
+        }),
+      );
+
+      const interaction = (await this.client.interactions.create({
+        model: this.model,
+        input: [...imageBlocks, { type: "text", text: params.prompt }],
+        // Verified live: an explicit `delivery` value (either "inline" or "uri") is rejected on
+        // this model ("Image delivery mode is not supported") — must be omitted entirely, which
+        // then returns inline base64 data by default. `thinking_level` also only accepts
+        // "low"/"high" here, not "minimal" (that's valid for the text models elsewhere in this
+        // file, not the image ones).
+        response_format: { type: "image", aspect_ratio: "1:1", image_size: "1K" },
+        generation_config: { thinking_level: "low" },
+      })) as unknown as GeminiInteraction;
+
+      let mimeType = interaction.output_image?.mime_type ?? "image/jpeg";
+      let base64 = interaction.output_image?.data;
+      if (!base64 && interaction.output_image?.uri) {
+        // Not expected given the above, but harmless to also handle a hosted-URI response —
+        // fetched and re-encoded as base64 immediately since that URI is likely transient.
+        const res = await fetch(interaction.output_image.uri);
+        mimeType = res.headers.get("content-type") ?? mimeType;
+        base64 = Buffer.from(await res.arrayBuffer()).toString("base64");
+      }
+      if (!base64) {
+        throw new Error("Gemini did not return an output image");
+      }
+
+      await this.onAttempt?.({
+        provider: "gemini",
+        operation: "generateProductImage",
+        endpoint: "https://generativelanguage.googleapis.com/v1beta/interactions",
+        method: "POST",
+        success: true,
+        attempt: 1,
+        durationMs: Date.now() - startedAt,
+        model: this.model,
+        costUsd: params.costUsd,
+        productId: params.productId,
+      });
+
+      return { mimeType, base64 };
+    } catch (err) {
+      await this.onAttempt?.({
+        provider: "gemini",
+        operation: "generateProductImage",
+        endpoint: "https://generativelanguage.googleapis.com/v1beta/interactions",
+        method: "POST",
+        success: false,
+        attempt: 1,
+        durationMs: Date.now() - startedAt,
+        error: err instanceof Error ? err.message : String(err),
+        model: this.model,
+        productId: params.productId,
+      });
+      throw err;
+    }
   }
 
   async testConnection(): Promise<{ ok: boolean; error?: string }> {

@@ -72,6 +72,16 @@ function extractVtexSpecifications(p: VtexSearchProduct): Record<string, unknown
   return attributes;
 }
 
+/** VTEX organizes its catalog around a category TREE (not a flat collection list, unlike
+ *  Shopify) — `categories` here is a slash-separated breadcrumb like "/Casa/Banheiro/Torneiras/".
+ *  Returns the full path (e.g. "Casa > Banheiro > Torneiras") rather than just the leaf name, so
+ *  a synced product's category carries real hierarchy context (useful both for display and as
+ *  extra context handed to the content-enrichment LLM prompt). */
+function formatVtexCategoryPath(categories?: string[]): string | null {
+  const path = categories?.[0]?.replace(/^\/|\/$/g, "");
+  return path ? path.split("/").join(" > ") : null;
+}
+
 interface VtexCategoryTreeNode {
   id: number;
   name: string;
@@ -156,7 +166,7 @@ export class VtexClient implements CatalogClient {
    *  in the free-text description (and brand stays unset), same as before this existed. */
   private async fetchProductSpecifications(
     productId: string | number,
-  ): Promise<{ attributes: Record<string, unknown>; brand: string | null }> {
+  ): Promise<{ attributes: Record<string, unknown>; brand: string | null; category: string | null }> {
     try {
       const res = await requestWithRetry({
         provider: "vtex",
@@ -167,10 +177,14 @@ export class VtexClient implements CatalogClient {
       });
       const items = ((await res.json()) as VtexSearchProduct[]) ?? [];
       const item = items[0];
-      return { attributes: item ? extractVtexSpecifications(item) : {}, brand: item?.brand ?? null };
+      return {
+        attributes: item ? extractVtexSpecifications(item) : {},
+        brand: item?.brand ?? null,
+        category: formatVtexCategoryPath(item?.categories),
+      };
     } catch (err) {
       console.error(`VTEX getProductSpecifications failed for product ${productId} — continuing with empty attributes`, err);
-      return { attributes: {}, brand: null };
+      return { attributes: {}, brand: null, category: null };
     }
   }
 
@@ -180,7 +194,7 @@ export class VtexClient implements CatalogClient {
   async getProduct(externalId: string): Promise<CatalogProductDetail> {
     const product = await this.fetchProduct(externalId);
     const skuId = (product as { SkuIds?: number[] }).SkuIds?.[0];
-    const [sku, { attributes, brand }] = await Promise.all([
+    const [sku, { attributes, brand, category }] = await Promise.all([
       skuId ? this.fetchSku(skuId) : Promise.resolve(undefined),
       this.fetchProductSpecifications(externalId),
     ]);
@@ -190,8 +204,15 @@ export class VtexClient implements CatalogClient {
       externalId: String(product.Id),
       title: product.Name,
       description: product.Description ?? null,
-      category: product.CategoryId ? String(product.CategoryId) : null,
+      // Falls back to the raw numeric id only if the search-API lookup above failed entirely —
+      // still better than nothing, but category (unlike brand) is virtually always resolved since
+      // every real product has to sit somewhere in the tree.
+      category: category ?? (product.CategoryId ? String(product.CategoryId) : null),
       brand,
+      // VTEX organizes by category tree, not a flat collection list like Shopify — its actual
+      // Collections module (grupos de coleções) needs its own private-API lookup, not yet verified
+      // against a live account (no VTEX connection available to test against right now).
+      collection: null,
       sku: sku?.RefId ?? null,
       url: product.LinkId ? `https://${this.host}/${product.LinkId}/p` : null,
       imageUrl: images[0]?.ImageUrl ?? null,
@@ -231,8 +252,9 @@ export class VtexClient implements CatalogClient {
         externalId: p.productId,
         title: p.productName,
         imageUrl: p.items?.[0]?.images?.[0]?.imageUrl ?? null,
-        category: p.categories?.[0]?.replace(/^\/|\/$/g, "").split("/").pop() ?? null,
+        category: formatVtexCategoryPath(p.categories),
         brand: p.brand ?? null,
+        collection: null, // see getProduct's comment — VTEX Collections not wired up yet
         sku: extractVtexReferenceId(p.items?.[0]?.referenceId),
         url: p.link ?? (p.linkText ? `https://${this.host}/${p.linkText}/p` : null),
       })),

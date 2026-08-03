@@ -254,6 +254,37 @@ specs, FAQ, dados estruturados) + alt-text de imagem, sem opção de escolher. A
   causa raiz rápido; troca de framework é aposta em manutenibilidade futura, não requisito pra
   terminar o projeto. Revisitar só se bugs de formatação por provedor continuarem recorrentes.
 
+- **Analytics completo de otimizações** — pedido em 2026-08-03, não implementado ainda. Deve
+  incluir: histórico de gastos mês a mês (não só o mês corrente, que já existe no Dashboard),
+  quantidade de otimizações por tipo de campo (descrição, FAQ, bullets, specs, dados estruturados,
+  alt-text, imagem gerada), e por nível/tier de modelo usado (qualidade/equilibrado/preço — ver
+  `model-recommendations.ts`). Dá pra montar em cima do que já existe em `agent_request_logs`
+  (tem `provider`/`model`/`costUsd`/`createdAt` por chamada) sem precisar de tabela nova.
+
+- **Geração de vídeo curto** — adiado para 2026-08-04 ("vamos fazer amanhã"). Ainda não
+  pesquisado; a geração de imagem (ver abaixo) já dá o padrão de client/agent/rota a seguir.
+
+### Geração de imagem por IA (implementado em 2026-08-03, com uma limitação de conta)
+
+Feature nova: gera foto "ambientada" (produto em cenário de uso real) ou de "destaque" (close-up
+em um detalhe), a partir das fotos JÁ existentes do produto (nunca do zero) — usa o Gemini
+(`gemini-2.5-flash-image`, via `@google/genai`, já dependência do projeto) porque é o único dos 3
+provedores que gera imagem de verdade (Claude só entende imagem, não gera; OpenAI teria que ser
+integrado à parte). Nova tabela `generated_images`, agente `image-generation.agent.ts`, rotas
+`GET/POST /api/products/:id/generated-images`, botões em RunDetail.
+
+**Dois bugs de parâmetro da API corrigidos ao vivo** (testados direto contra a API real, não
+documentação): `response_format.delivery` não pode ser enviado (nem "inline" nem "uri" — dá 400
+"Image delivery mode is not supported", tem que omitir o campo inteiro); `thinking_level` pra
+modelo de imagem só aceita "low"/"high", nunca "minimal" (que é o valor usado nas chamadas de
+texto no mesmo client, funcionando normalmente ali).
+
+**Limitação atual, não é bug**: depois de corrigido o request, a API retornou 429 com `limit: 0`
+pro modelo de imagem no tier gratuito — ou seja, geração de imagem simplesmente não está
+disponível na cota grátis do Gemini, precisa de billing ativado no projeto Google AI Studio/Cloud
+pra essa chamada específica funcionar (as chamadas de texto continuam funcionando no grátis
+normalmente). Não testado ponta-a-ponta com uma imagem real até ativar billing.
+
 ## Formação de equipes
 
 - 1 a 5 pessoas por equipe (pode ser solo)

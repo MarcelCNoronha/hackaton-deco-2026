@@ -73,3 +73,10 @@ export const EMBEDDING_PRICE_PER_1M = 0.02;
 export function computeEmbeddingCostUsd(tokens: number): number {
   return (tokens / 1_000_000) * EMBEDDING_PRICE_PER_1M;
 }
+
+/** Image generation is priced per-image, not per-token, so it doesn't go through
+ *  computeCostUsd/priceForModel above — Gemini is the only one of our 3 providers that generates
+ *  images at all (Claude is vision-input-only; OpenAI's image-edit endpoint isn't wired up here).
+ *  Fetched live (beyond training cutoff) on 2026-08-01, not guessed. */
+export const IMAGE_GENERATION_MODEL = "gemini-2.5-flash-image";
+export const IMAGE_GENERATION_PRICE_PER_IMAGE = 0.039;

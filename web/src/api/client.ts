@@ -38,6 +38,9 @@ export interface CatalogProductSummary {
   title: string;
   imageUrl: string | null;
   category: string | null;
+  /** VTEX: not populated yet (needs the Collections module wired up). Shopify: real collections
+   *  this product belongs to, joined with ", " when there's more than one. */
+  collection: string | null;
   brand: string | null;
   /** Public storefront URL, when the platform returned a slug for it. */
   url: string | null;
@@ -150,9 +153,25 @@ export interface Product {
   title: string;
   description: string | null;
   category: string | null;
+  collection: string | null;
   brand: string | null;
   url: string | null;
   lastSyncedAt: string | null;
+}
+
+/** An AI-generated marketing image produced FROM the product's existing photos (never from
+ *  scratch) — "lifestyle" places it in a realistic use setting, "feature_callout" highlights one
+ *  detail. `imageBase64` is raw base64 (no `data:` prefix) — build the src as
+ *  `data:${mimeType};base64,${imageBase64}`. */
+export interface GeneratedImage {
+  id: number;
+  productId: number;
+  kind: "lifestyle" | "feature_callout";
+  prompt: string;
+  mimeType: string;
+  imageBase64: string;
+  costUsd: string | null;
+  createdAt: string;
 }
 
 export interface ProductMetric {
@@ -308,6 +327,9 @@ export const api = {
 
   listProducts: () => request<Product[]>("/products"),
   resyncProduct: (id: number) => request<Product>(`/products/${id}/resync`, { method: "POST" }),
+  listGeneratedImages: (productId: number) => request<GeneratedImage[]>(`/products/${productId}/generated-images`),
+  generateImage: (productId: number, body: { kind: "lifestyle" | "feature_callout"; note?: string }) =>
+    request<GeneratedImage>(`/products/${productId}/generated-images`, { method: "POST", body: JSON.stringify(body) }),
   productMetrics: (id: number) => request<ProductMetric[]>(`/products/${id}/metrics`),
   optimizedProductCount: () => request<{ count: number }>("/products/optimized-count"),
   pendingReviewCount: () => request<{ count: number }>("/products/pending-review-count"),

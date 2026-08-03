@@ -95,6 +95,7 @@ export class ShopifyClient implements CatalogClient {
           vendor: string | null;
           featuredImage: { url: string } | null;
           variants: { nodes: Array<{ sku: string | null }> };
+          collections: { nodes: Array<{ title: string }> };
         }>;
         pageInfo: { hasNextPage: boolean; endCursor: string | null };
       };
@@ -108,7 +109,10 @@ export class ShopifyClient implements CatalogClient {
       "listProducts",
       `query ListProducts($first: Int!, $query: String, $after: String) {
         products(first: $first, query: $query, after: $after) {
-          nodes { id title handle productType vendor featuredImage { url } variants(first: 1) { nodes { sku } } }
+          nodes {
+            id title handle productType vendor featuredImage { url } variants(first: 1) { nodes { sku } }
+            collections(first: 3) { nodes { title } }
+          }
           pageInfo { hasNextPage endCursor }
         }
       }`,
@@ -127,6 +131,7 @@ export class ShopifyClient implements CatalogClient {
         imageUrl: p.featuredImage?.url ?? null,
         category: p.productType || null,
         brand: p.vendor || null,
+        collection: p.collections.nodes.length ? p.collections.nodes.map((c) => c.title).join(", ") : null,
         sku: p.variants.nodes[0]?.sku || null,
         url: `https://${this.credentials.shopDomain}/products/${p.handle}`,
       })),
@@ -174,6 +179,7 @@ export class ShopifyClient implements CatalogClient {
         // merchant-defined custom metafields (e.g. `finish`, `pieces_per_box`) — both show up here
         // identically, so no special-casing is needed to read either.
         metafields: { nodes: Array<{ namespace: string; key: string; value: string }> };
+        collections: { nodes: Array<{ title: string }> };
       };
     };
 
@@ -185,6 +191,7 @@ export class ShopifyClient implements CatalogClient {
           media(first: 20) { nodes { id alt mediaContentType ... on MediaImage { image { url } } } }
           variants(first: 1) { nodes { id sku } }
           metafields(first: 50) { nodes { namespace key value } }
+          collections(first: 3) { nodes { title } }
         }
       }`,
       { id: externalId },
@@ -205,6 +212,7 @@ export class ShopifyClient implements CatalogClient {
       description: data.product.descriptionHtml,
       category: data.product.productType || null,
       brand: data.product.vendor || null,
+      collection: data.product.collections.nodes.length ? data.product.collections.nodes.map((c) => c.title).join(", ") : null,
       sku: data.product.variants.nodes[0]?.sku || null,
       url: `https://${this.credentials.shopDomain}/products/${data.product.handle}`,
       imageUrl: images[0]?.image?.url ?? null,

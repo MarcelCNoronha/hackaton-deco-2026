@@ -20,6 +20,7 @@ export async function syncProduct(catalog: CatalogClient, externalId: string): P
     images: product.images.map((img) => ({ Id: img.id, ImageUrl: img.url, ImageText: img.altText })),
     attributes: product.attributes,
     category: product.category,
+    collection: product.collection,
     brand: product.brand,
     sku: product.sku,
     url: product.url,

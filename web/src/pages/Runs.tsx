@@ -4,6 +4,7 @@ import {
   api,
   type CatalogFilterOptions,
   type CatalogListResult,
+  type CatalogPlatform,
   type CatalogProductSummary,
   type EnrichmentField,
   type FreeQuotaStatus,
@@ -61,6 +62,7 @@ export function Runs() {
   const [listResult, setListResult] = useState<CatalogListResult | null>(null);
   const [loadingList, setLoadingList] = useState(false);
   const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [platform, setPlatform] = useState<CatalogPlatform>("vtex");
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectAllMatching, setSelectAllMatching] = useState(false);
@@ -142,6 +144,7 @@ export function Runs() {
     refreshStats();
     loadFilters();
     loadProducts(1);
+    api.getCatalogPlatform().then(({ platform }) => setPlatform(platform));
     const interval = setInterval(refreshStats, 30_000);
     return () => clearInterval(interval);
   }, []);
@@ -337,7 +340,6 @@ export function Runs() {
                       <div className="muted" style={{ fontSize: "0.72rem" }}>
                         {item.sku ? shortId(item.sku) : `Sem SKU (${shortId(item.externalId)})`}
                       </div>
-                      {item.category && <span className="pill product-tag">{item.category}</span>}
                       <div className="product-row-title">{item.title}</div>
                       {/* Only shown here when there's no "Ver Ativo" action button already covering
                           the same link (published items) — avoids showing the same link twice. */}
@@ -346,6 +348,12 @@ export function Runs() {
                           Ver na loja ↗
                         </a>
                       )}
+                    </div>
+                    <div className="product-row-category">
+                      <span className="muted" style={{ fontSize: "0.72rem" }}>
+                        {platform === "shopify" ? "Coleção" : "Categoria"}
+                      </span>
+                      <div>{(platform === "shopify" ? item.collection : item.category) ?? "—"}</div>
                     </div>
                     <div className="product-row-brand">
                       <span className="muted" style={{ fontSize: "0.72rem" }}>

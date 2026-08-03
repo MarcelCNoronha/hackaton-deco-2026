@@ -1,10 +1,21 @@
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import { desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../../db/client.js";
-import { enrichmentProposals, productMetrics, products } from "../../db/schema.js";
+import { enrichmentProposals, generatedImages, productMetrics, products } from "../../db/schema.js";
 import { requireAuth } from "../../auth/guards.js";
 import { syncProduct } from "../../agents/catalog-reader.agent.js";
+import { generateProductImage } from "../../agents/image-generation.agent.js";
 import { requireActiveCatalogClient } from "./catalog.routes.js";
+import { getConnectionCredentials } from "../../repositories/connections.repo.js";
+import { makeRequestLogger } from "../../repositories/logs.repo.js";
+import { GeminiClient } from "../../clients/gemini.client.js";
+import { IMAGE_GENERATION_MODEL } from "../../clients/model-recommendations.js";
+
+const generateImageBody = z.object({
+  kind: z.enum(["lifestyle", "feature_callout"]),
+  note: z.string().max(500).optional(),
+});
 
 export async function productsRoutes(app: FastifyInstance) {
   app.addHook("preHandler", requireAuth);
@@ -50,6 +61,35 @@ export async function productsRoutes(app: FastifyInstance) {
     try {
       const catalog = await requireActiveCatalogClient();
       return await syncProduct(catalog, existing.vtexProductId);
+    } catch (err) {
+      return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.get<{ Params: { id: string } }>("/api/products/:id/generated-images", async (req) => {
+    return db.query.generatedImages.findMany({
+      where: eq(generatedImages.productId, Number(req.params.id)),
+      orderBy: desc(generatedImages.createdAt),
+    });
+  });
+
+  /** Generates a new marketing image FROM the product's existing photos (lifestyle scene or a
+   *  feature close-up) via Gemini — the only one of our 3 LLM providers that can generate images
+   *  at all (Claude is vision-input-only; OpenAI's image-edit endpoint isn't wired up here). */
+  app.post<{ Params: { id: string } }>("/api/products/:id/generated-images", async (req, reply) => {
+    const body = generateImageBody.parse(req.body);
+    const product = await db.query.products.findFirst({ where: eq(products.id, Number(req.params.id)) });
+    if (!product) return reply.status(404).send({ error: "Produto não encontrado" });
+
+    const geminiCreds = await getConnectionCredentials<"gemini">("gemini");
+    if (!geminiCreds) {
+      return reply.status(400).send({ error: "Conexão Gemini não configurada — configure no painel de Integrações primeiro." });
+    }
+
+    try {
+      const gemini = new GeminiClient(geminiCreds.apiKey, IMAGE_GENERATION_MODEL, makeRequestLogger());
+      const row = await generateProductImage({ gemini, product, kind: body.kind, note: body.note });
+      return reply.status(201).send(row);
     } catch (err) {
       return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
     }

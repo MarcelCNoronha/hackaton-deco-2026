@@ -39,6 +39,7 @@ export const proposalStatusEnum = pgEnum("proposal_status", [
 export const scoreTargetEnum = pgEnum("score_target", ["original", "proposed"]);
 export const userRoleEnum = pgEnum("user_role", ["admin", "user"]);
 export const appSectionEnum = pgEnum("app_section", ["connections", "publish", "users"]);
+export const generatedImageKindEnum = pgEnum("generated_image_kind", ["lifestyle", "feature_callout"]);
 
 /** Every external credential (VTEX keys, Anthropic key, Google OAuth refresh token) lives here, encrypted. */
 export const connections = pgTable("connections", {
@@ -66,6 +67,9 @@ export const products = pgTable("products", {
   images: jsonb("images").notNull().default(sql`'[]'::jsonb`),
   attributes: jsonb("attributes").notNull().default(sql`'{}'::jsonb`),
   category: text("category"),
+  // Shopify: real collections this product belongs to (joined with ", "). VTEX: not populated yet
+  // — see vtex.client.ts's getProduct comment on the Collections module.
+  collection: text("collection"),
   brand: text("brand"),
   // Merchant-assigned SKU code (VTEX RefId / Shopify variant sku) — distinct from vtexSkuId, which
   // is the internal variant identifier used for API calls, not what a merchant calls "the SKU".
@@ -78,6 +82,25 @@ export const products = pgTable("products", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
   vtexProductIdIdx: index("products_vtex_product_id_idx").on(table.vtexProductId),
+}));
+
+/** AI-generated marketing images produced FROM a product's existing photos (never from scratch) —
+ *  "lifestyle" places the product in a realistic use setting, "feature_callout" highlights one
+ *  specific detail/material/mechanism. Stored inline as base64 (no object storage in this stack
+ *  yet) — fine at hackathon-demo volume, would move to a bucket if this saw real traffic. */
+export const generatedImages = pgTable("generated_images", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  productId: bigint("product_id", { mode: "number" })
+    .notNull()
+    .references(() => products.id),
+  kind: generatedImageKindEnum("kind").notNull(),
+  prompt: text("prompt").notNull(),
+  mimeType: text("mime_type").notNull(),
+  imageBase64: text("image_base64").notNull(),
+  costUsd: numeric("cost_usd"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  productIdIdx: index("generated_images_product_id_idx").on(table.productId),
 }));
 
 /** GSC/GA4 snapshots per product, used to prioritize and to prove before/after impact. */

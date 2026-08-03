@@ -7,6 +7,7 @@ import {
   type ContentScore,
   type EnrichmentProposal,
   type EnrichmentRun,
+  type GeneratedImage,
   type Product,
   type RunCosts,
 } from "../api/client";
@@ -100,6 +101,9 @@ export function RunDetail() {
   const [publishError, setPublishError] = useState<string | null>(null);
   const [resyncingIds, setResyncingIds] = useState<Set<number>>(new Set());
   const [resyncError, setResyncError] = useState<string | null>(null);
+  const [generatedImages, setGeneratedImages] = useState<Record<number, GeneratedImage[]>>({});
+  const [generatingFor, setGeneratingFor] = useState<Record<number, "lifestyle" | "feature_callout" | undefined>>({});
+  const [imageGenError, setImageGenError] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   async function refresh() {
@@ -150,6 +154,31 @@ export function RunDetail() {
         next.delete(productId);
         return next;
       });
+    }
+  }
+
+  // Loads once proposals resolve (and again on every poll tick — the list is small and rarely
+  // changes, so refetching is simpler than tracking exactly which product ids are new).
+  useEffect(() => {
+    const ids = [...new Set(proposals.map((p) => p.productId))];
+    if (ids.length === 0) return;
+    Promise.all(ids.map((productId) => api.listGeneratedImages(productId).then((images) => [productId, images] as const)))
+      .then((pairs) => setGeneratedImages(Object.fromEntries(pairs)))
+      .catch((err) => console.error("Failed to load generated images", err));
+  }, [proposals]);
+
+  /** Generates a new marketing image FROM the product's existing photos (never from scratch) —
+   *  "lifestyle" places it in a realistic use setting, "feature_callout" highlights one detail. */
+  async function handleGenerateImage(productId: number, kind: "lifestyle" | "feature_callout") {
+    setImageGenError(null);
+    setGeneratingFor((prev) => ({ ...prev, [productId]: kind }));
+    try {
+      const image = await api.generateImage(productId, { kind });
+      setGeneratedImages((prev) => ({ ...prev, [productId]: [image, ...(prev[productId] ?? [])] }));
+    } catch (err) {
+      setImageGenError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGeneratingFor((prev) => ({ ...prev, [productId]: undefined }));
     }
   }
 
@@ -221,6 +250,7 @@ export function RunDetail() {
         </div>
         {publishError && <div className="banner">{publishError}</div>}
         {resyncError && <div className="banner">{resyncError}</div>}
+        {imageGenError && <div className="banner">{imageGenError}</div>}
 
         {productIds.map((productId) => {
           const productProposals = proposals.filter((p) => p.productId === productId);
@@ -296,6 +326,50 @@ export function RunDetail() {
                   )}
                 </div>
               )}
+
+              <div className="card" style={{ background: "var(--surface-2)", margin: "0 0 1rem" }}>
+                <div className="proposal-header">
+                  <h3 style={{ margin: 0 }}>Fotos geradas por IA</h3>
+                  <div className="actions" style={{ marginTop: 0 }}>
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => handleGenerateImage(productId, "lifestyle")}
+                      disabled={generatingFor[productId] !== undefined}
+                    >
+                      {generatingFor[productId] === "lifestyle" ? "Gerando…" : "🖼️ Gerar foto ambientada"}
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => handleGenerateImage(productId, "feature_callout")}
+                      disabled={generatingFor[productId] !== undefined}
+                    >
+                      {generatingFor[productId] === "feature_callout" ? "Gerando…" : "🎯 Gerar foto de destaque"}
+                    </button>
+                  </div>
+                </div>
+                {(generatedImages[productId]?.length ?? 0) === 0 ? (
+                  <p className="muted" style={{ margin: 0 }}>
+                    Nenhuma imagem gerada ainda para este produto.
+                  </p>
+                ) : (
+                  <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
+                    {generatedImages[productId]!.map((image) => (
+                      <div key={image.id} style={{ width: 160 }}>
+                        <img
+                          src={`data:${image.mimeType};base64,${image.imageBase64}`}
+                          alt={image.kind === "lifestyle" ? "Foto ambientada gerada por IA" : "Foto de destaque gerada por IA"}
+                          style={{ width: "100%", height: 160, objectFit: "cover", borderRadius: "var(--radius-md)" }}
+                        />
+                        <div className="muted" style={{ fontSize: "0.72rem", marginTop: "0.3rem" }}>
+                          {image.kind === "lifestyle" ? "Ambientada" : "Destaque"} · {formatCost(Number(image.costUsd ?? 0))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               {productProposals.map((proposal) => (
                 <div key={proposal.id} style={{ marginBottom: "1.25rem" }}>
