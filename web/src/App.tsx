@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { Architecture } from "./pages/Architecture";
 import { Connections } from "./pages/Connections";
 import { Runs } from "./pages/Runs";
 import { RunDetail } from "./pages/RunDetail";
@@ -49,6 +50,9 @@ function AppShell() {
           </NavLink>
         </nav>
         <nav className="sidebar-nav sidebar-nav--account">
+          <NavLink to="/architecture">
+            <span className="nav-icon">🕸</span> <span className="nav-label">Arquitetura</span>
+          </NavLink>
           {can("connections") && (
             <NavLink to="/connections">
               <span className="nav-icon">⚙</span> <span className="nav-label">Integrações</span>
@@ -84,6 +88,7 @@ function AppShell() {
           <Route path="/runs/:id" element={<RunDetail />} />
           <Route path="/impact" element={<Impact />} />
           <Route path="/account" element={<Account />} />
+          <Route path="/architecture" element={<Architecture />} />
           {can("connections") && <Route path="/connections" element={<Connections />} />}
           {can("users") && <Route path="/users" element={<Users />} />}
           <Route path="*" element={<Navigate to="/" replace />} />

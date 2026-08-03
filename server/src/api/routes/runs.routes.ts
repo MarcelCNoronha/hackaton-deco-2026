@@ -9,8 +9,11 @@ import { getModelRouting } from "../../repositories/model-routing.repo.js";
 import { findExceededProviders } from "../../repositories/provider-spend-limits.repo.js";
 import { findExhaustedFreeQuotaProviders } from "../../repositories/provider-free-quota.repo.js";
 import { requireAuth, requireSection } from "../../auth/guards.js";
-import { estimateFieldCosts } from "../../agents/field-cost-estimates.js";
+import { estimateFieldCosts, estimateLevelCost, LEVEL_PACKAGES, type OptimizationLevel } from "../../agents/field-cost-estimates.js";
 import { ALL_ENRICHMENT_FIELDS, type EnrichmentField } from "../../clients/llm-types.js";
+
+const DESCRIPTION_RICHNESS_VALUES = ["plain", "structured", "structured_with_image"] as const;
+const COMMUNICATION_TONE_VALUES = ["premium", "tecnico", "casual", "auto"] as const;
 
 function formatResetIn(resetAt: string): string {
   const ms = Math.max(0, new Date(resetAt).getTime() - Date.now());
@@ -33,6 +36,8 @@ const createRunBody = z
     fields: z.array(z.enum(ALL_ENRICHMENT_FIELDS as [EnrichmentField, ...EnrichmentField[]])).optional(),
     includeAltText: z.boolean().optional(),
     imageKinds: z.array(z.enum(["lifestyle", "feature_callout"])).optional(),
+    descriptionRichness: z.enum(DESCRIPTION_RICHNESS_VALUES).optional(),
+    communicationTone: z.enum(COMMUNICATION_TONE_VALUES).optional(),
   })
   .refine((body) => Boolean(body.candidateProductIds) !== Boolean(body.catalogFilter), {
     message: "Informe exatamente um entre candidateProductIds (seleção manual) e catalogFilter (otimização total).",
@@ -80,10 +85,33 @@ export async function runsRoutes(app: FastifyInstance) {
   });
 
   /** Feeds the "optimization selector" (pick which fields to run, see cost per field before
-   *  confirming) — computed from whichever model is currently routed, never a hardcoded price. */
-  app.get<{ Querystring: { productCount?: string } }>("/api/runs/field-estimates", async (req) => {
+   *  confirming) — computed from whichever model is currently routed, never a hardcoded price.
+   *  `descriptionRichness` shifts "description"'s own estimate (see field-cost-estimates.ts) so the
+   *  preview reflects the extra HTML/vision cost when a level other than Médio is active. */
+  app.get<{ Querystring: { productCount?: string; descriptionRichness?: string } }>(
+    "/api/runs/field-estimates",
+    async (req) => {
+      const productCount = Math.max(1, Number(req.query.productCount) || 1);
+      const richness = DESCRIPTION_RICHNESS_VALUES.includes(req.query.descriptionRichness as never)
+        ? (req.query.descriptionRichness as (typeof DESCRIPTION_RICHNESS_VALUES)[number])
+        : "plain";
+      return estimateFieldCosts(productCount, richness);
+    },
+  );
+
+  /** One predictable total per "nível de anúncio" (Médio/Bom/Excelente) — the quick-pick buttons in
+   *  the optimization selector, before any manual field customization. */
+  app.get<{ Querystring: { productCount?: string } }>("/api/runs/level-estimates", async (req) => {
     const productCount = Math.max(1, Number(req.query.productCount) || 1);
-    return estimateFieldCosts(productCount);
+    const levels = Object.keys(LEVEL_PACKAGES) as OptimizationLevel[];
+    const estimates = await Promise.all(
+      levels.map(async (level) => ({
+        level,
+        label: LEVEL_PACKAGES[level].label,
+        estimatedCostUsd: await estimateLevelCost(level, productCount),
+      })),
+    );
+    return { estimates };
   });
 
   app.get<{ Querystring: { search?: string; categoryId?: string; brandId?: string } }>("/api/runs", async (req) => {

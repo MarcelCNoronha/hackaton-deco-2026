@@ -322,6 +322,29 @@ export class VtexClient implements CatalogClient {
     });
   }
 
+  async updateProductSeo(productId: string | number, seo: { title?: string; metaDescription?: string }): Promise<void> {
+    const body: Record<string, string> = {};
+    if (seo.title) body.Title = seo.title;
+    if (seo.metaDescription) body.MetaTagDescription = seo.metaDescription;
+    if (Object.keys(body).length === 0) return;
+
+    await requestWithRetry({
+      provider: "vtex",
+      operation: "updateProductSeo",
+      url: `${this.baseUrl}/pvt/product/${productId}`,
+      init: {
+        method: "PUT",
+        headers: this.headers(),
+        body: JSON.stringify(body),
+      },
+      onAttempt: this.onAttempt,
+    });
+  }
+
+  /** VTEX has no clean native "tags" field without touching its category tree — tags proposals
+   *  stay in-app only on this platform, see CatalogClient's doc comment. */
+  async updateProductTags(): Promise<void> {}
+
   async updateSkuImageAltText(skuId: string | number, imageId: string, altText: string): Promise<void> {
     await requestWithRetry({
       provider: "vtex",

@@ -238,6 +238,43 @@ export class ShopifyClient implements CatalogClient {
     }
   }
 
+  async updateProductSeo(externalId: string, seo: { title?: string; metaDescription?: string }): Promise<void> {
+    if (!seo.title && !seo.metaDescription) return;
+    type Resp = { productUpdate: { userErrors: Array<{ field: string[]; message: string }> } };
+    const data = await this.graphql<Resp>(
+      "updateProductSeo",
+      `mutation UpdateSeo($input: ProductInput!) {
+        productUpdate(input: $input) { userErrors { field message } }
+      }`,
+      {
+        input: {
+          id: externalId,
+          seo: {
+            ...(seo.title ? { title: seo.title } : {}),
+            ...(seo.metaDescription ? { description: seo.metaDescription } : {}),
+          },
+        },
+      },
+    );
+    if (data.productUpdate.userErrors.length > 0) {
+      throw new Error(`Shopify productUpdate userError: ${data.productUpdate.userErrors[0].message}`);
+    }
+  }
+
+  async updateProductTags(externalId: string, tags: string[]): Promise<void> {
+    type Resp = { productUpdate: { userErrors: Array<{ field: string[]; message: string }> } };
+    const data = await this.graphql<Resp>(
+      "updateProductTags",
+      `mutation UpdateTags($input: ProductInput!) {
+        productUpdate(input: $input) { userErrors { field message } }
+      }`,
+      { input: { id: externalId, tags } },
+    );
+    if (data.productUpdate.userErrors.length > 0) {
+      throw new Error(`Shopify productUpdate userError: ${data.productUpdate.userErrors[0].message}`);
+    }
+  }
+
   /** `params.imageId` must be the MediaImage id returned by getProduct()'s `images[].id` —
    *  Shopify removed the old ProductImage/productImageUpdate mutation; media is now managed
    *  through the generic Files API (`fileUpdate`), even for images attached to a product. */

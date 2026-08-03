@@ -97,6 +97,26 @@ export interface ModelRoutingRow {
   model: string;
 }
 
+export type ScoreTier = "excelente" | "bom" | "medio";
+
+export interface CategoryScoreThreshold {
+  category: string;
+  excellentMin: number;
+  goodMin: number;
+}
+
+/** `'*'` — the catalog-wide default row used when a category has no override of its own. */
+export const DEFAULT_THRESHOLD_CATEGORY = "*";
+
+export function classifyScore(thresholds: CategoryScoreThreshold[], category: string | null, overallScore: number): ScoreTier {
+  const byCategory = new Map(thresholds.map((t) => [t.category, t]));
+  const threshold = (category ? byCategory.get(category) : undefined) ?? byCategory.get(DEFAULT_THRESHOLD_CATEGORY);
+  if (!threshold) return "medio";
+  if (overallScore >= threshold.excellentMin) return "excelente";
+  if (overallScore >= threshold.goodMin) return "bom";
+  return "medio";
+}
+
 export interface EnrichmentRun {
   id: number;
   status: "running" | "success" | "failed" | "partial";
@@ -109,16 +129,33 @@ export interface EnrichmentRun {
   errorMessage: string | null;
 }
 
-/** The 5 fields a run can propose in one combined content-enrichment call — matches the backend's
+/** The 11 fields a run can propose in one combined content-enrichment call — matches the backend's
  *  EnrichmentField (see server/src/clients/llm-types.ts). "alt_text" is a separate, per-image
  *  pipeline, so it's toggled independently (see EstimableField) rather than part of this set. */
-export type EnrichmentField = "description" | "benefit_bullets" | "technical_specs" | "faq" | "structured_data";
+export type EnrichmentField =
+  | "description"
+  | "benefit_bullets"
+  | "technical_specs"
+  | "faq"
+  | "structured_data"
+  | "seo_title"
+  | "meta_description"
+  | "keywords"
+  | "tags"
+  | "cta"
+  | "attributes_patch";
 export const ALL_ENRICHMENT_FIELDS: EnrichmentField[] = [
   "description",
   "benefit_bullets",
   "technical_specs",
   "faq",
   "structured_data",
+  "seo_title",
+  "meta_description",
+  "keywords",
+  "tags",
+  "cta",
+  "attributes_patch",
 ];
 export type ImageGenKind = "lifestyle" | "feature_callout";
 export type EstimableField = EnrichmentField | "alt_text" | ImageGenKind;
@@ -129,11 +166,35 @@ export interface FieldCostEstimate {
   estimatedCostUsd: number;
 }
 
+/** How much structure "description" should have — drives the Médio/Bom/Excelente level packages
+ *  (see field-cost-estimates.ts). */
+export type DescriptionRichness = "plain" | "structured" | "structured_with_image";
+export type CommunicationTone = "premium" | "tecnico" | "casual" | "auto";
+export type OptimizationLevel = "medio" | "bom" | "excelente";
+
+export interface LevelCostEstimate {
+  level: OptimizationLevel;
+  label: string;
+  estimatedCostUsd: number;
+}
+
 export interface EnrichmentProposal {
   id: number;
   runId: number;
   productId: number;
-  field: "description" | "alt_text" | "structured_data" | "faq" | "benefit_bullets" | "technical_specs";
+  field:
+    | "description"
+    | "alt_text"
+    | "structured_data"
+    | "faq"
+    | "benefit_bullets"
+    | "technical_specs"
+    | "seo_title"
+    | "meta_description"
+    | "keywords"
+    | "tags"
+    | "cta"
+    | "attributes_patch";
   agent: "content" | "image";
   originalValue: string | null;
   proposedValue: string;
@@ -172,6 +233,11 @@ export interface GeneratedImage {
   mimeType: string;
   imageBase64: string;
   costUsd: string | null;
+  /** Result of the post-generation integrity gate — false means the model itself flagged this
+   *  generation as NOT reliably the same product (see integrityNotes), after retrying. Shown as a
+   *  warning rather than silently trusted or discarded. */
+  integrityVerified: boolean;
+  integrityNotes: string | null;
   createdAt: string;
 }
 
@@ -202,8 +268,30 @@ export interface ContentScore {
   geoTotalQuestions: number;
   unsupportedClaims: string[];
   overallScore: number;
+  seoScore: number;
+  conversionScore: number;
+  readabilityScore: number;
+  structureScore: number;
+  dataConsistencyScore: number;
+  catalogIssues: string[];
+  attributesFilled: number;
+  attributesExpected: number;
+  questionsAnswered: number;
+  questionsTotal: number;
   attempts: number;
   createdAt: string;
+}
+
+export interface ImpactSummary {
+  productCount: number;
+  completudeDeltaPct: number;
+  seoDeltaPct: number;
+  geoDeltaPct: number;
+  conversionDeltaPct: number;
+  consistencyDeltaPct: number;
+  requiredAttributesFilledPct: number;
+  estimatedTimeSavedMinutes: number;
+  estimatedTimeSavedPct: number;
 }
 
 export interface RunCosts {
@@ -287,6 +375,11 @@ export const api = {
   setModelRouting: (routing: ModelRoutingRow[]) =>
     request<ModelRoutingRow[]>("/model-routing", { method: "PUT", body: JSON.stringify({ routing }) }),
 
+  getOptimizationThresholds: () =>
+    request<{ thresholds: CategoryScoreThreshold[]; categories: string[] }>("/optimization-thresholds"),
+  setOptimizationThreshold: (threshold: CategoryScoreThreshold) =>
+    request<{ ok: boolean }>("/optimization-thresholds", { method: "PUT", body: JSON.stringify(threshold) }),
+
   getCatalogPlatform: () => request<{ platform: CatalogPlatform }>("/catalog/platform"),
   setCatalogPlatform: (platform: CatalogPlatform) =>
     request<{ platform: CatalogPlatform }>("/catalog/platform", { method: "PUT", body: JSON.stringify({ platform }) }),
@@ -317,13 +410,23 @@ export const api = {
     fields?: EnrichmentField[];
     includeAltText?: boolean;
     imageKinds?: ImageGenKind[];
+    descriptionRichness?: DescriptionRichness;
+    communicationTone?: CommunicationTone;
   }) => request<{ runId: number }>("/runs", { method: "POST", body: JSON.stringify(body) }),
-  fieldCostEstimates: (productCount: number) =>
-    request<{ estimates: FieldCostEstimate[]; note: string }>(`/runs/field-estimates?productCount=${productCount}`),
+  fieldCostEstimates: (productCount: number, descriptionRichness?: DescriptionRichness) =>
+    request<{ estimates: FieldCostEstimate[]; note: string }>(
+      `/runs/field-estimates?productCount=${productCount}${
+        descriptionRichness ? `&descriptionRichness=${descriptionRichness}` : ""
+      }`,
+    ),
+  levelCostEstimates: (productCount: number) =>
+    request<{ estimates: LevelCostEstimate[] }>(`/runs/level-estimates?productCount=${productCount}`),
   publishRun: (id: number) => request<{ enqueued: boolean }>(`/runs/${id}/publish`, { method: "POST" }),
   listProposals: (runId: number) => request<EnrichmentProposal[]>(`/runs/${runId}/proposals`),
   listScores: (runId: number) => request<ContentScore[]>(`/runs/${runId}/scores`),
   runCosts: (runId: number) => request<RunCosts>(`/runs/${runId}/costs`),
+  runImpactSummary: (runId: number) => request<ImpactSummary>(`/runs/${runId}/impact-summary`),
+  overallImpactSummary: () => request<ImpactSummary>("/impact/summary"),
   reviewProposal: (id: number, body: { status: "approved" | "rejected" | "edited"; proposedValue?: string }) =>
     request<EnrichmentProposal>(`/proposals/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
 

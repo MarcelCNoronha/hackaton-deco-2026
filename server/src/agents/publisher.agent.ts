@@ -15,6 +15,12 @@ function renderFaqHtml(faq: Array<{ question: string; answer: string }>): string
   return `<div class="catalogia-faq"><h2>Perguntas frequentes</h2>${items}</div>`;
 }
 
+/** Same reasoning as FAQ: no native "CTA" field on either platform, so it's merged as a short HTML
+ *  block onto the description instead of staying invisible to a shopper. */
+function renderCtaHtml(cta: string): string {
+  return `<p class="catalogia-cta"><strong>${escapeHtml(cta)}</strong></p>`;
+}
+
 function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
@@ -59,28 +65,65 @@ export async function publishApprovedProposals(params: {
 
     const descriptionProposal = proposals.find((p) => p.field === "description");
     const faqProposal = proposals.find((p) => p.field === "faq");
-    const rest = proposals.filter((p) => p.field !== "description" && p.field !== "faq");
+    const ctaProposal = proposals.find((p) => p.field === "cta");
+    const seoTitleProposal = proposals.find((p) => p.field === "seo_title");
+    const metaDescriptionProposal = proposals.find((p) => p.field === "meta_description");
+    const tagsProposal = proposals.find((p) => p.field === "tags");
+    const mergedIntoDescription = new Set(["description", "faq", "cta"]);
+    const rest = proposals.filter(
+      (p) => !mergedIntoDescription.has(p.field) && p.field !== "seo_title" && p.field !== "meta_description" && p.field !== "tags",
+    );
 
-    // Merge FAQ into the description update so it's actually visible to a shopper — publishing
-    // either one alone (or both together) still results in exactly one description write.
-    if (descriptionProposal || faqProposal) {
+    // Merge FAQ/CTA into the description update so they're actually visible to a shopper —
+    // publishing any subset of the three still results in exactly one description write.
+    if (descriptionProposal || faqProposal || ctaProposal) {
       try {
-        const baseDescription = descriptionProposal?.proposedValue ?? product.description ?? "";
-        const finalDescription = faqProposal
-          ? `${baseDescription}${renderFaqHtml(JSON.parse(faqProposal.proposedValue) as Array<{ question: string; answer: string }>)}`
-          : baseDescription;
-        await params.catalog.updateProductDescription(product.vtexProductId, finalDescription);
-        if (descriptionProposal) {
-          await markPublished(descriptionProposal.id);
-          published++;
-        }
+        let finalDescription = descriptionProposal?.proposedValue ?? product.description ?? "";
         if (faqProposal) {
-          await markPublished(faqProposal.id);
+          finalDescription += renderFaqHtml(JSON.parse(faqProposal.proposedValue) as Array<{ question: string; answer: string }>);
+        }
+        if (ctaProposal) {
+          finalDescription += renderCtaHtml(ctaProposal.proposedValue);
+        }
+        await params.catalog.updateProductDescription(product.vtexProductId, finalDescription);
+        for (const p of [descriptionProposal, faqProposal, ctaProposal]) {
+          if (!p) continue;
+          await markPublished(p.id);
           published++;
         }
       } catch (err) {
-        console.error(`Failed to publish description/FAQ for product ${productId}:`, err);
-        failed += (descriptionProposal ? 1 : 0) + (faqProposal ? 1 : 0);
+        console.error(`Failed to publish description/FAQ/CTA for product ${productId}:`, err);
+        failed += [descriptionProposal, faqProposal, ctaProposal].filter(Boolean).length;
+      }
+    }
+
+    // seo_title/meta_description share one native platform write (VTEX: same product PUT.
+    // Shopify: same productUpdate `seo` input) — merge the pair the same way as description/FAQ.
+    if (seoTitleProposal || metaDescriptionProposal) {
+      try {
+        await params.catalog.updateProductSeo(product.vtexProductId, {
+          title: seoTitleProposal?.proposedValue,
+          metaDescription: metaDescriptionProposal?.proposedValue,
+        });
+        for (const p of [seoTitleProposal, metaDescriptionProposal]) {
+          if (!p) continue;
+          await markPublished(p.id);
+          published++;
+        }
+      } catch (err) {
+        console.error(`Failed to publish seo_title/meta_description for product ${productId}:`, err);
+        failed += [seoTitleProposal, metaDescriptionProposal].filter(Boolean).length;
+      }
+    }
+
+    if (tagsProposal) {
+      try {
+        await params.catalog.updateProductTags(product.vtexProductId, JSON.parse(tagsProposal.proposedValue) as string[]);
+        await markPublished(tagsProposal.id);
+        published++;
+      } catch (err) {
+        console.error(`Failed to publish tags for product ${productId}:`, err);
+        failed++;
       }
     }
 
@@ -95,8 +138,8 @@ export async function publishApprovedProposals(params: {
             altText,
           });
         }
-        // "structured_data" não é um campo nativo da plataforma nesta v1 — segue apresentado
-        // apenas dentro do CatalogIA por enquanto.
+        // "structured_data"/"keywords"/"attributes_patch" não têm campo nativo equivalente na
+        // plataforma nesta v1 — seguem apresentados apenas dentro do CatalogIA por enquanto.
         await markPublished(proposal.id);
         published++;
       } catch (err) {

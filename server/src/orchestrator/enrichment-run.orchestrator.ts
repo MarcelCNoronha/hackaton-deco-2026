@@ -13,7 +13,7 @@ import { ClaudeClient } from "../clients/claude.client.js";
 import { OpenAiClient } from "../clients/openai.client.js";
 import { GeminiClient } from "../clients/gemini.client.js";
 import { EmbeddingsClient } from "../clients/embeddings.client.js";
-import type { EnrichmentField, LlmClient, LlmProvider } from "../clients/llm-types.js";
+import type { CommunicationTone, DescriptionRichness, EnrichmentField, LlmClient, LlmProvider } from "../clients/llm-types.js";
 import type { CatalogClient } from "../clients/catalog-types.js";
 import type { RequestLogEntry } from "../clients/http.js";
 import { syncCatalogByProductIds, type ProductRow } from "../agents/catalog-reader.agent.js";
@@ -40,6 +40,11 @@ export interface StartEnrichmentRunParams {
   fields?: EnrichmentField[];
   /** Whether to also run the (separate, per-image) alt-text pass. Defaults to true. */
   includeAltText?: boolean;
+  /** How much structure "description" should have — Médio/Bom/Excelente (see field-cost-estimates.ts's
+   *  LEVEL_PACKAGES). Defaults to "plain" (today's behavior) when omitted. */
+  descriptionRichness?: DescriptionRichness;
+  /** Optional style knob for description/bullets/cta. Defaults to "auto" (no explicit instruction). */
+  communicationTone?: CommunicationTone;
   /** Which AI-generated marketing image kinds to produce per product (see the optimization
    *  selector). Undefined/empty means none — image generation is opt-in due to its per-image cost,
    *  unlike the text fields above which default to "all". Requires a Gemini connection; skipped
@@ -251,6 +256,8 @@ export async function executeEnrichmentRun(runId: number, params: StartEnrichmen
                 product,
                 embedding: embeddingByProductId.get(product.id) ?? null,
                 fields: params.fields,
+                descriptionRichness: params.descriptionRichness,
+                communicationTone: params.communicationTone,
               }),
             ),
           )

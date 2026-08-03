@@ -3,17 +3,21 @@ import { useParams } from "react-router-dom";
 import {
   api,
   ApiError,
+  classifyScore,
   type CatalogPlatform,
+  type CategoryScoreThreshold,
   type ContentScore,
   type EnrichmentProposal,
   type EnrichmentRun,
   type GeneratedImage,
+  type ImpactSummary,
   type Product,
   type RunCosts,
 } from "../api/client";
 import { StatTile } from "../components/StatTile";
 import { StatusBadge } from "../components/StatusBadge";
 import { ScoreCompare } from "../components/ScoreCompare";
+import { ImpactSummaryBanner } from "../components/ImpactSummaryBanner";
 import { formatCost } from "../lib/currency";
 
 const FIELD_LABELS: Record<EnrichmentProposal["field"], string> = {
@@ -23,15 +27,52 @@ const FIELD_LABELS: Record<EnrichmentProposal["field"], string> = {
   faq: "FAQ (GEO)",
   benefit_bullets: "Bullets de benefício",
   technical_specs: "Especificações técnicas",
+  seo_title: "Título otimizado para SEO",
+  meta_description: "Meta description",
+  keywords: "Palavras-chave",
+  tags: "Tags de navegação",
+  cta: "Chamada à ação (CTA)",
+  attributes_patch: "Normalização/preenchimento de atributos",
 };
 
-/** description/alt_text store plain text in proposedValue; the rest store a JSON-encoded value —
- *  this renders a readable preview for those instead of showing raw JSON in the diff view. The
- *  underlying textarea below still lets a reviewer edit the raw JSON directly if needed. */
+/** description/alt_text/seo_title/meta_description/cta store plain text in proposedValue; the
+ *  rest store a JSON-encoded value — this renders a readable preview for those instead of showing
+ *  raw JSON in the diff view. The underlying textarea below still lets a reviewer edit the raw
+ *  JSON directly if needed. */
 function ProposalPreview({ proposal }: { proposal: EnrichmentProposal }) {
-  if (proposal.field === "description" || proposal.field === "alt_text") return null;
+  if (["description", "alt_text", "seo_title", "meta_description", "cta"].includes(proposal.field)) return null;
 
   try {
+    if (proposal.field === "keywords") {
+      const keywords = JSON.parse(proposal.proposedValue) as { primary: string[]; secondary: string[] };
+      return (
+        <div style={{ marginBottom: "0.75rem" }}>
+          <div>
+            <span className="muted">Principais: </span>
+            {keywords.primary.join(", ")}
+          </div>
+          <div>
+            <span className="muted">Secundárias: </span>
+            {keywords.secondary.join(", ")}
+          </div>
+        </div>
+      );
+    }
+    if (proposal.field === "tags") {
+      const tags = JSON.parse(proposal.proposedValue) as string[];
+      return (
+        <div style={{ marginBottom: "0.75rem", display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
+          {tags.map((tag, i) => (
+            <span key={i} className="pill">
+              {tag}
+            </span>
+          ))}
+        </div>
+      );
+    }
+    if (proposal.field === "attributes_patch") {
+      return <pre style={{ marginBottom: "0.75rem" }}>{JSON.stringify(JSON.parse(proposal.proposedValue), null, 2)}</pre>;
+    }
     if (proposal.field === "benefit_bullets") {
       const bullets = JSON.parse(proposal.proposedValue) as string[];
       return (
@@ -88,6 +129,16 @@ const PLATFORM_LABELS: Record<CatalogPlatform, string> = {
   shopify: "Shopify",
 };
 
+const TIER_LABELS: Record<"excelente" | "bom" | "medio", string> = {
+  excelente: "Excelente",
+  bom: "Bom",
+  medio: "Médio",
+};
+
+function percent(numerator: number, denominator: number): number {
+  return denominator === 0 ? 100 : Math.round((numerator / denominator) * 100);
+}
+
 export function RunDetail() {
   const { id } = useParams<{ id: string }>();
   const runId = Number(id);
@@ -102,21 +153,25 @@ export function RunDetail() {
   const [resyncingIds, setResyncingIds] = useState<Set<number>>(new Set());
   const [resyncError, setResyncError] = useState<string | null>(null);
   const [generatedImages, setGeneratedImages] = useState<Record<number, GeneratedImage[]>>({});
+  const [thresholds, setThresholds] = useState<CategoryScoreThreshold[]>([]);
+  const [impactSummary, setImpactSummary] = useState<ImpactSummary | null>(null);
   const [generatingFor, setGeneratingFor] = useState<Record<number, "lifestyle" | "feature_callout" | undefined>>({});
   const [imageGenError, setImageGenError] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   async function refresh() {
-    const [runData, proposalsData, scoresData, costsData] = await Promise.all([
+    const [runData, proposalsData, scoresData, costsData, impactData] = await Promise.all([
       api.getRun(runId),
       api.listProposals(runId),
       api.listScores(runId),
       api.runCosts(runId),
+      api.runImpactSummary(runId),
     ]);
     setRun(runData);
     setProposals(proposalsData);
     setScores(scoresData);
     setCosts(costsData);
+    setImpactSummary(impactData);
     // Once the run leaves "running", nothing about it changes anymore — stop polling instead of
     // hitting 4 endpoints every 5s forever for a page the user may just leave open.
     if (runData.status !== "running" && intervalRef.current) {
@@ -129,6 +184,7 @@ export function RunDetail() {
     refresh().catch((err) => console.error("Failed to refresh run", err));
     api.listProducts().then(setProducts);
     api.getCatalogPlatform().then(({ platform }) => setPlatform(platform));
+    api.getOptimizationThresholds().then(({ thresholds }) => setThresholds(thresholds));
     intervalRef.current = setInterval(() => {
       refresh().catch((err) => console.error("Failed to refresh run", err));
     }, 5000);
@@ -223,6 +279,8 @@ export function RunDetail() {
       </div>
 
       <div className="page-content">
+        {impactSummary && <ImpactSummaryBanner summary={impactSummary} />}
+
         <div className="stat-row">
           <StatTile label="Pendentes" value={pendingCount} />
           <StatTile label="Aprovadas" value={approvedCount} />
@@ -304,24 +362,58 @@ export function RunDetail() {
                 <div className="card" style={{ background: "var(--surface-2)", margin: "0 0 1rem" }}>
                   <div className="proposal-header">
                     <h3 style={{ margin: 0 }}>Score de qualidade de conteúdo (antes → depois)</h3>
-                    {proposed.attempts > 1 && (
+                    <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
                       <span className="pill">
-                        Refinado automaticamente em {proposed.attempts} tentativas até atingir score {proposed.overallScore}
+                        Nível: {TIER_LABELS[classifyScore(thresholds, currentProduct?.category ?? null, proposed.overallScore)]}
                       </span>
-                    )}
+                      {proposed.attempts > 1 && (
+                        <span className="pill">
+                          Refinado automaticamente em {proposed.attempts} tentativas até atingir score {proposed.overallScore}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <ScoreCompare label="Score geral" before={original.overallScore} after={proposed.overallScore} />
-                  <ScoreCompare label="Checklist estrutural" before={original.checklistScore} after={proposed.checklistScore} />
+                  <ScoreCompare
+                    label="Completude do catálogo"
+                    before={percent(original.attributesFilled, original.attributesExpected)}
+                    after={percent(proposed.attributesFilled, proposed.attributesExpected)}
+                  />
+                  <ScoreCompare label="SEO" before={original.seoScore} after={proposed.seoScore} />
+                  <ScoreCompare
+                    label="GEO"
+                    before={percent(original.questionsAnswered, original.questionsTotal)}
+                    after={percent(proposed.questionsAnswered, proposed.questionsTotal)}
+                  />
+                  <ScoreCompare label="Conversão" before={original.conversionScore} after={proposed.conversionScore} />
+                  <ScoreCompare label="Legibilidade" before={original.readabilityScore} after={proposed.readabilityScore} />
+                  <ScoreCompare label="Estrutura" before={original.structureScore} after={proposed.structureScore} />
                   <ScoreCompare label="Confiança do comprador" before={original.buyerConfidence} after={proposed.buyerConfidence} />
                   <ScoreCompare
-                    label="Perguntas respondidas (GEO)"
-                    before={original.geoAnswerableCount}
-                    after={proposed.geoAnswerableCount}
-                    max={proposed.geoTotalQuestions}
+                    label="Atributos preenchidos"
+                    before={original.attributesFilled}
+                    after={proposed.attributesFilled}
+                    max={proposed.attributesExpected}
+                  />
+                  <ScoreCompare
+                    label="Perguntas respondidas"
+                    before={original.questionsAnswered}
+                    after={proposed.questionsAnswered}
+                    max={proposed.questionsTotal}
+                  />
+                  <ScoreCompare
+                    label="Consistência dos dados"
+                    before={original.dataConsistencyScore}
+                    after={proposed.dataConsistencyScore}
                   />
                   {proposed.unsupportedClaims.length > 0 && (
                     <p className="muted" style={{ color: "var(--status-warning)" }}>
                       ⚠ Possível alucinação — revisar: {proposed.unsupportedClaims.join("; ")}
+                    </p>
+                  )}
+                  {proposed.catalogIssues.length > 0 && (
+                    <p className="muted" style={{ color: "var(--status-warning)" }}>
+                      ⚠ Possível inconsistência de catálogo: {proposed.catalogIssues.join("; ")}
                     </p>
                   )}
                 </div>
@@ -365,6 +457,14 @@ export function RunDetail() {
                         <div className="muted" style={{ fontSize: "0.72rem", marginTop: "0.3rem" }}>
                           {image.kind === "lifestyle" ? "Ambientada" : "Destaque"} · {formatCost(Number(image.costUsd ?? 0))}
                         </div>
+                        {!image.integrityVerified && (
+                          <div
+                            style={{ fontSize: "0.72rem", marginTop: "0.2rem", color: "var(--status-warning)" }}
+                            title={image.integrityNotes ?? ""}
+                          >
+                            ⚠ Integridade do produto não confirmada
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>

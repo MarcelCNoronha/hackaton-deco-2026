@@ -1,15 +1,39 @@
 import { GoogleGenAI } from "@google/genai";
 import type { RequestLogEntry } from "./http.js";
 import { computeCostUsd } from "./model-recommendations.js";
-import { buildEnrichmentInstructionSuffix, buildEnrichmentSchema, resolveRequestedFields } from "./enrichment-schema.js";
+import {
+  buildDescriptionRichnessSuffix,
+  buildEnrichmentInstructionSuffix,
+  buildEnrichmentSchema,
+  resolveRequestedFields,
+} from "./enrichment-schema.js";
 import {
   GEO_QUESTIONS,
+  type CommunicationTone,
   type ContentEvaluation,
+  type DescriptionRichness,
   type EnrichedContent,
   type EnrichmentField,
   type LlmClient,
   type ReuseReference,
 } from "./llm-types.js";
+
+/** Caps how many existing product photos get sent in one multimodal call (structured_with_image
+ *  richness) — enough to give the model real choice without an unbounded per-product image cost. */
+const MAX_FEATURED_IMAGE_CANDIDATES = 6;
+
+function toneInstruction(tone?: CommunicationTone): string {
+  if (!tone || tone === "auto") return "";
+  const label = { premium: "premium/sofisticado", tecnico: "técnico/direto", casual: "casual/próximo" }[tone];
+  return ` Tom de comunicação: ${label}.`;
+}
+
+async function fetchImageDataBlock(url: string): Promise<{ type: "image"; data: string; mime_type: string }> {
+  const res = await fetch(url);
+  const mimeType = res.headers.get("content-type") ?? "image/jpeg";
+  const data = Buffer.from(await res.arrayBuffer()).toString("base64");
+  return { type: "image", data, mime_type: mimeType };
+}
 
 /** Unlike VTEX/Shopify (see http.ts's requestWithRetry), calls to the Gemini SDK were never
  *  retried at all — a single 429 (e.g. a burst of concurrent per-product calls in one run briefly
@@ -154,6 +178,9 @@ export class GeminiClient implements LlmClient {
     operation: string;
     productId?: number;
     systemInstruction: string;
+    /** A plain object gets JSON.stringify'd as a single text input (the common case). Pass an
+     *  array of content blocks (image/text) directly for a multimodal call — see
+     *  enrichProductContent's structured_with_image branch. */
     input: unknown;
     schema: Record<string, unknown>;
     maxOutputTokens?: number;
@@ -165,7 +192,7 @@ export class GeminiClient implements LlmClient {
         this.client.interactions.create({
           model: this.model,
           system_instruction: params.systemInstruction,
-          input: JSON.stringify(params.input),
+          input: Array.isArray(params.input) ? params.input : JSON.stringify(params.input),
           response_format: { type: "text", mime_type: "application/json", schema: params.schema },
           generation_config: {
             max_output_tokens: params.maxOutputTokens ?? 1500,
@@ -196,8 +223,32 @@ export class GeminiClient implements LlmClient {
     reuseReference?: ReuseReference | null;
     productId?: number;
     fields?: EnrichmentField[];
+    descriptionRichness?: DescriptionRichness;
+    communicationTone?: CommunicationTone;
+    imageUrls?: string[];
   }): Promise<EnrichedContent> {
     const requestedFields = resolveRequestedFields(product.fields);
+    const richness = product.descriptionRichness ?? "plain";
+    const candidateImageUrls = (product.imageUrls ?? []).slice(0, MAX_FEATURED_IMAGE_CANDIDATES);
+    const useVision = richness === "structured_with_image" && candidateImageUrls.length > 0;
+
+    const textPayload = {
+      title: product.title,
+      currentDescription: product.currentDescription,
+      attributes: product.attributes,
+      category: product.category,
+      ...(product.feedback
+        ? {
+            correcaoNecessaria: {
+              perguntasSemResposta: product.feedback.buyerUnanswered,
+              alegacoesNaoSustentadas: product.feedback.unsupportedClaims,
+            },
+          }
+        : {}),
+      ...(product.reuseReference ? { referencia: product.reuseReference } : {}),
+      ...(useVision ? { fotosDisponiveis: candidateImageUrls } : {}),
+    };
+
     return this.callWithSchema<EnrichedContent>({
       operation: "enrichProductContent",
       productId: product.productId,
@@ -216,23 +267,18 @@ export class GeminiClient implements LlmClient {
               ? " Esta é uma correção de uma tentativa anterior que não passou na revisão de qualidade — " +
                 "resolva especificamente os problemas apontados em 'correcaoNecessaria', sem reintroduzi-los."
               : "")) +
-        buildEnrichmentInstructionSuffix(requestedFields),
-      input: {
-        title: product.title,
-        currentDescription: product.currentDescription,
-        attributes: product.attributes,
-        category: product.category,
-        ...(product.feedback
-          ? {
-              correcaoNecessaria: {
-                perguntasSemResposta: product.feedback.buyerUnanswered,
-                alegacoesNaoSustentadas: product.feedback.unsupportedClaims,
-              },
-            }
-          : {}),
-        ...(product.reuseReference ? { referencia: product.reuseReference } : {}),
-      },
-      schema: { type: "object", ...buildEnrichmentSchema(requestedFields) },
+        buildEnrichmentInstructionSuffix(requestedFields) +
+        buildDescriptionRichnessSuffix(richness) +
+        toneInstruction(product.communicationTone) +
+        (useVision
+          ? " As imagens anexadas a esta mensagem, na mesma ordem de 'fotosDisponiveis', são as fotos reais " +
+            "já existentes do produto — use-as para escolher 'featuredImageUrl'."
+          : ""),
+      input: useVision
+        ? [...(await Promise.all(candidateImageUrls.map(fetchImageDataBlock))), { type: "text", text: JSON.stringify(textPayload) }]
+        : textPayload,
+      schema: { type: "object", ...buildEnrichmentSchema(requestedFields, richness) },
+      maxOutputTokens: useVision ? 2500 : 1500,
     });
   }
 
@@ -275,8 +321,34 @@ export class GeminiClient implements LlmClient {
             description:
               "Só quando knownFacts for informado: afirmações do texto que não são suportadas por knownFacts. Vazio caso contrário.",
           },
+          seoScore: {
+            type: "integer",
+            description: "0-100: qualidade de título/meta/palavras-chave/headings para descoberta em busca.",
+          },
+          conversionScore: {
+            type: "integer",
+            description: "0-100: clareza da chamada à ação, benefícios e resposta a objeções de compra.",
+          },
+          dataConsistencyScore: {
+            type: "integer",
+            description: "0-100: o quanto título/descrição/atributos concordam entre si, sem contradição.",
+          },
+          catalogIssues: {
+            type: "array",
+            items: { type: "string" },
+            description: "Informações conflitantes ou claramente ausentes notadas ao avaliar (vazio se nenhuma).",
+          },
         },
-        required: ["buyerConfidence", "buyerUnanswered", "geoAnswerableCount", "unsupportedClaims"],
+        required: [
+          "buyerConfidence",
+          "buyerUnanswered",
+          "geoAnswerableCount",
+          "unsupportedClaims",
+          "seoScore",
+          "conversionScore",
+          "dataConsistencyScore",
+          "catalogIssues",
+        ],
       },
       maxOutputTokens: 800,
     });
@@ -395,6 +467,47 @@ export class GeminiClient implements LlmClient {
       }
     }
     throw lastErr;
+  }
+
+  /** Post-generation integrity gate for generateProductImage: compares the generated image against
+   *  ONE of its reference photos and asks for an objective verdict on whether it's still the same
+   *  product (no shape/color/label/material drift) — scenery/framing/lighting changes are fine.
+   *  Never trusts the generation prompt alone; this is a second, independent multimodal check,
+   *  mirroring the text quality-gate's discipline of judging the *output*, not just instructing it. */
+  async verifyImageIntegrity(params: {
+    referenceImageUrl: string;
+    generatedBase64: string;
+    generatedMimeType: string;
+    productId?: number;
+  }): Promise<{ sameProduct: boolean; notes: string }> {
+    const referenceBlock = await fetchImageDataBlock(params.referenceImageUrl);
+    return this.callWithSchema<{ sameProduct: boolean; notes: string }>({
+      operation: "verifyImageIntegrity",
+      productId: params.productId,
+      systemInstruction:
+        "Você compara duas imagens de um produto de e-commerce: a primeira é uma FOTO DE REFERÊNCIA real do " +
+        "produto; a segunda foi gerada por IA a partir dela. Diga se a imagem gerada mostra EXATAMENTE o " +
+        "mesmo produto (mesma forma, cor, material, rótulo/logo/textura) — mudanças de cenário, enquadramento " +
+        "ou iluminação são aceitáveis; qualquer alteração de forma, cor, material ou rótulo NÃO é. Seja " +
+        "rigoroso: na dúvida, considere que não é o mesmo produto.",
+      input: [
+        referenceBlock,
+        { type: "image", data: params.generatedBase64, mime_type: params.generatedMimeType },
+        { type: "text", text: "Primeira imagem = referência real do produto. Segunda imagem = gerada por IA a partir dela." },
+      ],
+      schema: {
+        type: "object",
+        properties: {
+          sameProduct: {
+            type: "boolean",
+            description: "true somente se for claramente o mesmo produto, sem alteração de forma/cor/material/rótulo.",
+          },
+          notes: { type: "string", description: "Justificativa curta (1 frase) do veredito." },
+        },
+        required: ["sameProduct", "notes"],
+      },
+      maxOutputTokens: 200,
+    });
   }
 
   async testConnection(): Promise<{ ok: boolean; error?: string }> {

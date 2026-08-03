@@ -264,15 +264,11 @@ specs, FAQ, dados estruturados) + alt-text de imagem, sem opção de escolher. A
 - **Geração de vídeo curto** — adiado para 2026-08-04 ("vamos fazer amanhã"). Ainda não
   pesquisado; a geração de imagem (ver abaixo) já dá o padrão de client/agent/rota a seguir.
 
-- **Descrição em HTML rico de verdade (padrão gsuplementos)** — adiado para 2026-08-04. Hoje o
-  prompt de `enrichProductContent` gera a descrição como texto corrido (às vezes com HTML básico
-  vindo do produto original, mas não pedimos explicitamente uma estrutura rica). A ideia é ajustar
-  o prompt/schema pra pedir uma página de alta conversão de verdade — seções, HTML com hierarquia
-  (títulos, blocos de benefício, tabelas), e inserir as imagens já existentes do produto dentro da
-  própria descrição (a mesma técnica confirmada nesta sessão pro FAQ: VTEX/Shopify aceitam HTML
-  completo no campo Descrição, é assim que lojas como a gsuplementos.com.br montam aquele visual).
-  Ainda não desenhado — parte de "trazer o FAQ" já foi feita (`publisher.agent.ts`), falta a
-  descrição em si ganhar essa estrutura mais rica.
+- ~~**Descrição em HTML rico de verdade (padrão gsuplementos)**~~ — **implementado em
+  2026-08-03/04** como os níveis Bom/Excelente (`DescriptionRichness`), ver seção "Score
+  composto, níveis de anúncio e Padrões de Otimização" abaixo — HTML estruturado + imagem
+  embutida no nível Excelente, escolhida por visão multimodal a partir das fotos reais do
+  produto.
 
 ### Geração de imagem por IA (implementado em 2026-08-03, com uma limitação de conta)
 
@@ -338,6 +334,70 @@ inteiro silenciosamente. Trocado pra duck-typing (`err.status === 429`, com fall
 prefixo da mensagem tipo "429 ..."), que não depende de identidade de classe. Confirmado só depois
 de olhar `docker logs -t` com timestamp e comparar contra `finished_at` do run no banco — o run
 terminava exatos ~10ms depois do log de falha, ou seja, sem esperar o backoff.
+
+### Score composto, níveis de anúncio e Padrões de Otimização (2026-08-03/04, quinta rodada)
+
+Expansão grande de escopo, pedida pelo usuário pra sair de "gerador de descrição" pra "motor de
+otimização de catálogo full-funnel", com um olho no critério de Impacto no Negócio do julgamento.
+Decisão explícita de escopo pra caber no prazo: **sem busca ao vivo de SERP/IA** (a ideia original
+de padrões baseados nos top resultados orgânicos do Google/recomendação de IA foi descartada por
+risco de prazo) e **sem instrumentar a loja real** com eventos de engajamento customizados (scroll,
+frete, newsletter) — só o que GA4/GSC já expõem.
+
+- **Score composto de 11 métricas** (`server/src/agents/evaluator.agent.ts`): além de
+  `buyerConfidence`/GEO já existentes, `evaluateContent` (idêntico nos 3 clients Claude/OpenAI/
+  Gemini) agora também julga `seoScore`, `conversionScore`, `dataConsistencyScore` e
+  `catalogIssues`; `structureScore` (HTML real, não só "tem >200 caracteres") e `readabilityScore`
+  são calculados sem chamada de IA (heurística de tamanho de frase/palavras longas), mantendo
+  custo controlado. `overallScore` virou média ponderada dos 8 sub-scores percentuais em vez da
+  média simples de 3. `GEO_QUESTIONS` expandiu de 5 para 11 perguntas (objeção/garantia/
+  comparação/diferencial/entrega inclusos).
+- **3 níveis de anúncio — Médio/Bom/Excelente** (`server/src/clients/llm-types.ts`'s
+  `DescriptionRichness`): todos os 11 campos de conteúdo são gerados nos 3 níveis (o custo de
+  texto é baixo); o que muda é só a `description`: Médio = texto corrido (comportamento antigo),
+  Bom = HTML estruturado (títulos/seções/tabela de specs), Excelente = igual ao Bom **+ uma foto
+  real já existente do produto embutida inline**, escolhida por uma chamada multimodal (visão de
+  verdade, não heurística por nome de arquivo) que identifica o ponto de destaque do texto/
+  atributos e escolhe qual foto ilustra melhor — nunca gera imagem nova nessa parte. Geração de
+  imagem por IA (lifestyle/feature_callout) continua um opt-in independente, nunca padrão em
+  nenhum nível. Seletor "O que otimizar?" (`OptimizationFieldSelector.tsx`) ganhou os 3 botões de
+  nível com custo previsto por pacote, grupos (Conteúdo/Catálogo/SEO & GEO/Conversão) e um
+  seletor de "Tom de comunicação" (premium/técnico/casual).
+- **6 campos novos**: `seo_title`, `meta_description`, `keywords`, `tags`, `cta`,
+  `attributes_patch`. Publicação real onde a plataforma tem campo nativo: `seo_title`/
+  `meta_description` via novo `updateProductSeo` (VTEX: PUT Title/MetaTagDescription; Shopify:
+  `productUpdate` com `seo{title,description}`); `tags` só no Shopify (native field, VTEX fica
+  em-app); `cta` funde na descrição como HTML igual ao FAQ (mesmo mecanismo, extraído em
+  `renderCtaHtml`). `keywords`/`attributes_patch` seguem o precedente de `structured_data`:
+  em-app apenas, sem escrita na plataforma — evita o escopo bem mais arriscado de escrever
+  atributos/categoria em duas plataformas diferentes. Slug/URL amigável ficou **fora do escopo**
+  (mudar URL ao vivo é destrutivo pra SEO se publicado errado).
+- **Padrões de Otimização por Categoria** (Excelente/Bom/Médio): nova tabela
+  `category_score_thresholds` (2 limites editáveis por categoria + linha `'*'` default),
+  repo/rotas (`optimization-thresholds.repo.ts`/`.routes.ts`), tela nova em Connections.tsx
+  espelhando o card visual do "Roteamento de Modelos", e badge de nível no RunDetail calculado
+  no client a partir do `overallScore` + categoria do produto. Segmento de teste: categorias
+  reais de "acabamentos para construção" (mundialacabamentos).
+- **Banner "Impacto Estimado"**: nova agregação (`impact-summary.repo.ts`) com deltas antes/
+  depois (completude do catálogo, SEO, GEO, conversão, consistência) e tempo economizado
+  estimado (constante de 25min manuais/anúncio vs. duração real do run) — por run (`RunDetail`)
+  e pra conta toda (`Impact.tsx`), usando o `StatTile`/`.stat-row` já existentes em vez de um
+  componente de gráfico novo.
+- **Integridade do produto na geração de imagem por IA**: reforço explícito no prompt (proibido
+  alterar forma/cor/material/rótulo) + um **gate de verificação pós-geração** novo
+  (`GeminiClient.verifyImageIntegrity`) — segunda chamada multimodal independente comparando a
+  imagem gerada com a foto de referência; reprovada, tenta de novo (até 2x); esgotado, persiste
+  mesmo assim mas marcada `integrityVerified: false` (nunca esconde, mesmo espírito de
+  `unsupportedClaims` no texto) e aparece como aviso no RunDetail.
+- **Nova aba "Arquitetura"** no menu (acima de Integrações, `web/src/pages/Architecture.tsx`):
+  diagrama Mermaid renderizado no cliente (lib `mermaid` adicionada, import dinâmico — só carrega
+  pra quem abre a aba) a partir de uma única fonte viva (`lib/architecture-diagram.ts`), pra
+  atualizar conforme o pipeline evolui em vez de manter um print estático. Mesmo diagrama também
+  publicado como Artifact standalone pro vídeo/pitch, junto com um mockup de PDP nível Excelente
+  (exemplo de porcelanato, com etiqueta indicando qual campo gera cada bloco).
+- Migração `0017_pretty_kulan_gath.sql` aplicada (colunas novas em `content_scores`/
+  `generated_images`, tabela `category_score_thresholds`, 6 valores novos em `proposal_field`).
+  Build e type-check de `server` e `web` verificados limpos ao final.
 
 ## Formação de equipes
 

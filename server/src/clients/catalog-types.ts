@@ -65,4 +65,13 @@ export interface CatalogClient {
     imageId: string;
     altText: string;
   }): Promise<void>;
+  /** Publishes the seo_title/meta_description proposals — both platforms have a native field for
+   *  these (VTEX: Title/MetaTagDescription on the product record. Shopify: the `seo` input on
+   *  productUpdate), unlike structured_data/benefit_bullets which stay in-app only. Either key may
+   *  be omitted (only the approved one of the pair is sent). */
+  updateProductSeo(externalId: string, seo: { title?: string; metaDescription?: string }): Promise<void>;
+  /** Only Shopify has a native tags field on the product — VTEX has no clean equivalent without
+   *  touching its category tree, so its implementation is a no-op and `tags` proposals stay
+   *  in-app only there (see publisher.agent.ts). */
+  updateProductTags(externalId: string, tags: string[]): Promise<void>;
 }

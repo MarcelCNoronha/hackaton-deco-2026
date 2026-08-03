@@ -6,6 +6,8 @@ import {
   type CatalogListResult,
   type CatalogPlatform,
   type CatalogProductSummary,
+  type CommunicationTone,
+  type DescriptionRichness,
   type EnrichmentField,
   type FreeQuotaStatus,
   type ImageGenKind,
@@ -181,7 +183,13 @@ export function Runs() {
     setPendingSingle(externalId);
   }
 
-  function confirmSingleOptimize(fields: EnrichmentField[], includeAltText: boolean, imageKinds: ImageGenKind[]) {
+  function confirmSingleOptimize(
+    fields: EnrichmentField[],
+    includeAltText: boolean,
+    imageKinds: ImageGenKind[],
+    descriptionRichness: DescriptionRichness,
+    communicationTone: CommunicationTone,
+  ) {
     const externalId = pendingSingle;
     setPendingSingle(null);
     if (!externalId || optimizingRef.current.has(externalId)) return;
@@ -189,7 +197,7 @@ export function Runs() {
     setOptimizingIds(new Set(optimizingRef.current));
     setRunError(null);
     api
-      .createRun({ candidateProductIds: [externalId], fields, includeAltText, imageKinds })
+      .createRun({ candidateProductIds: [externalId], fields, includeAltText, imageKinds, descriptionRichness, communicationTone })
       .then(() => {
         refreshOptimizedCount();
         loadProducts(page);
@@ -210,7 +218,13 @@ export function Runs() {
     setPendingBulk(true);
   }
 
-  function confirmBulkOptimize(fields: EnrichmentField[], includeAltText: boolean, imageKinds: ImageGenKind[]) {
+  function confirmBulkOptimize(
+    fields: EnrichmentField[],
+    includeAltText: boolean,
+    imageKinds: ImageGenKind[],
+    descriptionRichness: DescriptionRichness,
+    communicationTone: CommunicationTone,
+  ) {
     setPendingBulk(false);
     setCreating(true);
     setRunError(null);
@@ -221,8 +235,18 @@ export function Runs() {
           fields,
           includeAltText,
           imageKinds,
+          descriptionRichness,
+          communicationTone,
         }
-      : { candidateProductIds: [...selectedIds], topN: topN ? Number(topN) : undefined, fields, includeAltText, imageKinds };
+      : {
+          candidateProductIds: [...selectedIds],
+          topN: topN ? Number(topN) : undefined,
+          fields,
+          includeAltText,
+          imageKinds,
+          descriptionRichness,
+          communicationTone,
+        };
 
     api
       .createRun(body)
@@ -498,7 +522,9 @@ export function Runs() {
           productCount={1}
           confirmLabel="Confirmar otimização"
           onCancel={() => setPendingSingle(null)}
-          onConfirm={({ fields, includeAltText, imageKinds }) => confirmSingleOptimize(fields, includeAltText, imageKinds)}
+          onConfirm={({ fields, includeAltText, imageKinds, descriptionRichness, communicationTone }) =>
+            confirmSingleOptimize(fields, includeAltText, imageKinds, descriptionRichness, communicationTone)
+          }
         />
       )}
       {pendingBulk && (
@@ -506,7 +532,9 @@ export function Runs() {
           productCount={selectAllMatching ? (topN ? Number(topN) : 50) : selectedIds.size}
           confirmLabel="Confirmar otimização"
           onCancel={() => setPendingBulk(false)}
-          onConfirm={({ fields, includeAltText, imageKinds }) => confirmBulkOptimize(fields, includeAltText, imageKinds)}
+          onConfirm={({ fields, includeAltText, imageKinds, descriptionRichness, communicationTone }) =>
+            confirmBulkOptimize(fields, includeAltText, imageKinds, descriptionRichness, communicationTone)
+          }
         />
       )}
     </>

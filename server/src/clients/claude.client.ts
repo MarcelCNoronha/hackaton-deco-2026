@@ -1,15 +1,35 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { RequestLogEntry } from "./http.js";
 import { computeCostUsd } from "./model-recommendations.js";
-import { buildEnrichmentInstructionSuffix, buildEnrichmentSchema, resolveRequestedFields } from "./enrichment-schema.js";
+import {
+  buildDescriptionRichnessSuffix,
+  buildEnrichmentInstructionSuffix,
+  buildEnrichmentSchema,
+  resolveRequestedFields,
+} from "./enrichment-schema.js";
 import {
   GEO_QUESTIONS,
+  type CommunicationTone,
   type ContentEvaluation,
+  type DescriptionRichness,
   type EnrichedContent,
   type EnrichmentField,
   type LlmClient,
   type ReuseReference,
 } from "./llm-types.js";
+
+const SUPPORTED_MEDIA_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"] as const;
+type SupportedMediaType = (typeof SUPPORTED_MEDIA_TYPES)[number];
+
+/** Caps how many existing product photos get sent in one multimodal call (structured_with_image
+ *  richness) — enough to give the model real choice without an unbounded per-product image cost. */
+const MAX_FEATURED_IMAGE_CANDIDATES = 6;
+
+function toneInstruction(tone?: CommunicationTone): string {
+  if (!tone || tone === "auto") return "";
+  const label = { premium: "premium/sofisticado", tecnico: "técnico/direto", casual: "casual/próximo" }[tone];
+  return ` Tom de comunicação: ${label}.`;
+}
 
 /** Thin client around the Anthropic SDK — content enrichment (text), vision (alt-text), and evaluation.
  *  One instance is bound to a single model (the orchestrator builds one instance per pipeline task,
@@ -109,6 +129,18 @@ export class ClaudeClient implements LlmClient {
     });
   }
 
+  /** Fetches an image and returns it as an Anthropic image content block — shared by
+   *  generateAltText and enrichProductContent's featured-image selection (structured_with_image). */
+  private async fetchImageBlock(url: string): Promise<Anthropic.ImageBlockParam> {
+    const imageResponse = await fetch(url);
+    const contentType = imageResponse.headers.get("content-type") ?? "image/jpeg";
+    const mediaType: SupportedMediaType = (SUPPORTED_MEDIA_TYPES as readonly string[]).includes(contentType)
+      ? (contentType as SupportedMediaType)
+      : "image/jpeg";
+    const data = Buffer.from(await imageResponse.arrayBuffer()).toString("base64");
+    return { type: "image", source: { type: "base64", media_type: mediaType, data } };
+  }
+
   /** Rewrites a product's description for SEO (traditional search) and GEO (AI-assistant citability).
    *  `feedback` carries what the Evaluator found wrong with a *previous* attempt (unanswered buyer
    *  questions, unsupported claims) so the quality-gate retry loop in content-enrichment.agent.ts
@@ -122,8 +154,36 @@ export class ClaudeClient implements LlmClient {
     reuseReference?: ReuseReference | null;
     productId?: number;
     fields?: EnrichmentField[];
+    descriptionRichness?: DescriptionRichness;
+    communicationTone?: CommunicationTone;
+    imageUrls?: string[];
   }): Promise<EnrichedContent> {
     const requestedFields = resolveRequestedFields(product.fields);
+    const richness = product.descriptionRichness ?? "plain";
+    const candidateImageUrls = (product.imageUrls ?? []).slice(0, MAX_FEATURED_IMAGE_CANDIDATES);
+    const useVision = richness === "structured_with_image" && candidateImageUrls.length > 0;
+
+    const textPayload = JSON.stringify({
+      title: product.title,
+      currentDescription: product.currentDescription,
+      attributes: product.attributes,
+      category: product.category,
+      ...(product.feedback
+        ? {
+            correcaoNecessaria: {
+              perguntasSemResposta: product.feedback.buyerUnanswered,
+              alegacoesNaoSustentadas: product.feedback.unsupportedClaims,
+            },
+          }
+        : {}),
+      ...(product.reuseReference ? { referencia: product.reuseReference } : {}),
+      ...(useVision ? { fotosDisponiveis: candidateImageUrls } : {}),
+    });
+
+    const content: Anthropic.MessageParam["content"] = useVision
+      ? [...(await Promise.all(candidateImageUrls.map((url) => this.fetchImageBlock(url)))), { type: "text", text: textPayload }]
+      : textPayload;
+
     return this.callWithTool<EnrichedContent>({
       operation: "enrichProductContent",
       productId: product.productId,
@@ -142,25 +202,18 @@ export class ClaudeClient implements LlmClient {
               ? " Esta é uma correção de uma tentativa anterior que não passou na revisão de qualidade — " +
                 "resolva especificamente os problemas apontados em 'correcaoNecessaria', sem reintroduzi-los."
               : "")) +
-        buildEnrichmentInstructionSuffix(requestedFields),
-      content: JSON.stringify({
-        title: product.title,
-        currentDescription: product.currentDescription,
-        attributes: product.attributes,
-        category: product.category,
-        ...(product.feedback
-          ? {
-              correcaoNecessaria: {
-                perguntasSemResposta: product.feedback.buyerUnanswered,
-                alegacoesNaoSustentadas: product.feedback.unsupportedClaims,
-              },
-            }
-          : {}),
-        ...(product.reuseReference ? { referencia: product.reuseReference } : {}),
-      }),
+        buildEnrichmentInstructionSuffix(requestedFields) +
+        buildDescriptionRichnessSuffix(richness) +
+        toneInstruction(product.communicationTone) +
+        (useVision
+          ? " As imagens anexadas a esta mensagem, na mesma ordem de 'fotosDisponiveis', são as fotos reais " +
+            "already existentes do produto — use-as para escolher 'featuredImageUrl'."
+          : ""),
+      content,
       toolName: "submit_enriched_content",
       toolDescription: "Envia a descrição enriquecida, FAQ e dados estruturados do produto.",
-      inputSchema: { type: "object", ...buildEnrichmentSchema(requestedFields) },
+      inputSchema: { type: "object", ...buildEnrichmentSchema(requestedFields, richness) },
+      maxTokens: useVision ? 2500 : 1500,
     });
   }
 
@@ -208,8 +261,34 @@ export class ClaudeClient implements LlmClient {
             description:
               "Só quando knownFacts for informado: afirmações do texto que não são suportadas por knownFacts. Vazio caso contrário.",
           },
+          seoScore: {
+            type: "integer",
+            description: "0-100: qualidade de título/meta/palavras-chave/headings para descoberta em busca.",
+          },
+          conversionScore: {
+            type: "integer",
+            description: "0-100: clareza da chamada à ação, benefícios e resposta a objeções de compra.",
+          },
+          dataConsistencyScore: {
+            type: "integer",
+            description: "0-100: o quanto título/descrição/atributos concordam entre si, sem contradição.",
+          },
+          catalogIssues: {
+            type: "array",
+            items: { type: "string" },
+            description: "Informações conflitantes ou claramente ausentes notadas ao avaliar (vazio se nenhuma).",
+          },
         },
-        required: ["buyerConfidence", "buyerUnanswered", "geoAnswerableCount", "unsupportedClaims"],
+        required: [
+          "buyerConfidence",
+          "buyerUnanswered",
+          "geoAnswerableCount",
+          "unsupportedClaims",
+          "seoScore",
+          "conversionScore",
+          "dataConsistencyScore",
+          "catalogIssues",
+        ],
       },
       maxTokens: 800,
     });
@@ -217,15 +296,7 @@ export class ClaudeClient implements LlmClient {
 
   /** Analyzes a product image and generates SEO/accessibility-optimized alt-text. */
   async generateAltText(params: { imageUrl: string; productTitle: string; productId?: number }): Promise<string> {
-    const SUPPORTED_MEDIA_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"] as const;
-    type SupportedMediaType = (typeof SUPPORTED_MEDIA_TYPES)[number];
-
-    const imageResponse = await fetch(params.imageUrl);
-    const contentType = imageResponse.headers.get("content-type") ?? "image/jpeg";
-    const mediaType: SupportedMediaType = (SUPPORTED_MEDIA_TYPES as readonly string[]).includes(contentType)
-      ? (contentType as SupportedMediaType)
-      : "image/jpeg";
-    const imageBase64 = Buffer.from(await imageResponse.arrayBuffer()).toString("base64");
+    const imageBlock = await this.fetchImageBlock(params.imageUrl);
 
     return this.loggedCall<string>({
       operation: "generateAltText",
@@ -240,13 +311,7 @@ export class ClaudeClient implements LlmClient {
           messages: [
             {
               role: "user",
-              content: [
-                {
-                  type: "image",
-                  source: { type: "base64", media_type: mediaType, data: imageBase64 },
-                },
-                { type: "text", text: `Produto: ${params.productTitle}` },
-              ],
+              content: [imageBlock, { type: "text", text: `Produto: ${params.productTitle}` }],
             },
           ],
         }),

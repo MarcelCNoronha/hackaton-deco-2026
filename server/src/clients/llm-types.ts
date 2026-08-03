@@ -1,10 +1,21 @@
 export type LlmProvider = "anthropic" | "openai" | "gemini";
 
-/** The 5 fields `enrichProductContent` can produce in one combined call (mirrors `proposal_field`'s
+/** The 11 fields `enrichProductContent` can produce in one combined call (mirrors `proposal_field`'s
  *  text-content values in schema.ts — `alt_text` is a separate, per-image pipeline, see
  *  image-alttext.agent.ts, so it's not part of this set). Used to let a run request only a subset,
  *  trimming both output tokens and which proposal rows get created — see enrichment-schema.ts. */
-export type EnrichmentField = "description" | "benefit_bullets" | "technical_specs" | "faq" | "structured_data";
+export type EnrichmentField =
+  | "description"
+  | "benefit_bullets"
+  | "technical_specs"
+  | "faq"
+  | "structured_data"
+  | "seo_title"
+  | "meta_description"
+  | "keywords"
+  | "tags"
+  | "cta"
+  | "attributes_patch";
 
 export const ALL_ENRICHMENT_FIELDS: EnrichmentField[] = [
   "description",
@@ -12,7 +23,25 @@ export const ALL_ENRICHMENT_FIELDS: EnrichmentField[] = [
   "technical_specs",
   "faq",
   "structured_data",
+  "seo_title",
+  "meta_description",
+  "keywords",
+  "tags",
+  "cta",
+  "attributes_patch",
 ];
+
+/** How much structure the "description" field should have — drives the Excelente/Bom/Médio
+ *  generation packages (see field-cost-estimates.ts): "plain" is today's flowing text, "structured"
+ *  asks for real HTML (headings/sections/spec table), "structured_with_image" additionally embeds
+ *  one of the product's OWN existing photos next to the highlight point extracted from its
+ *  existing text/attributes — never a newly generated image. Defaults to "plain" when omitted, so
+ *  existing callers keep today's behavior unchanged. */
+export type DescriptionRichness = "plain" | "structured" | "structured_with_image";
+
+/** Optional run-level style knob — adjusts tone/vocabulary of description/bullets/cta without
+ *  changing which fields are generated. "auto" (default) leaves today's neutral tone unchanged. */
+export type CommunicationTone = "premium" | "tecnico" | "casual" | "auto";
 
 export interface EnrichedContent {
   description: string;
@@ -28,6 +57,29 @@ export interface EnrichedContent {
   faq?: Array<{ question: string; answer: string }>;
   /** schema.org/Product JSON-LD. Absent when "structured_data" wasn't requested for this run. */
   structuredData?: Record<string, unknown>;
+  /** SEO-optimized, spelling-corrected product title. Absent when "seo_title" wasn't requested. */
+  seoTitle?: string;
+  /** Meta description tag (~150-160 chars). Absent when "meta_description" wasn't requested. */
+  metaDescription?: string;
+  /** Absent when "keywords" wasn't requested for this run. */
+  keywords?: { primary: string[]; secondary: string[] };
+  /** Absent when "tags" wasn't requested for this run. */
+  tags?: string[];
+  /** Short call-to-action line, merged into the description like the FAQ block (see
+   *  publisher.agent.ts) rather than published as its own field. Absent when "cta" wasn't requested. */
+  cta?: string;
+  /** Proposed fixes/additions to `attributes` (normalized values, filled-in gaps) — never removes an
+   *  existing key. Absent when "attributes_patch" wasn't requested for this run. */
+  attributesPatch?: Record<string, string>;
+  /** Advisory-only suggestion, never auto-published — always returned when the model has an opinion,
+   *  regardless of field selection (it's cheap, comes from the same call). */
+  suggestedCategory?: string;
+  /** Only set when `descriptionRichness` was "structured_with_image": one of the product's own
+   *  existing photo URLs (never invented — must match one of the URLs sent in the request) chosen
+   *  to illustrate the highlight point pulled from the product's existing text/attributes, plus a
+   *  short caption naming that point. */
+  featuredImageUrl?: string;
+  imageCaption?: string;
 }
 
 export interface ContentEvaluation {
@@ -35,6 +87,10 @@ export interface ContentEvaluation {
   buyerUnanswered: string[]; // questions a shopper would still have
   geoAnswerableCount: number; // out of GEO_QUESTIONS.length
   unsupportedClaims: string[]; // claims not grounded in knownFacts (only checked when knownFacts is passed)
+  seoScore: number; // 0-100 — title/meta/keywords/heading quality for search discoverability
+  conversionScore: number; // 0-100 — CTA clarity, benefit framing, objection handling
+  dataConsistencyScore: number; // 0-100 — agreement between title/description/attributes
+  catalogIssues: string[]; // conflicting or missing catalog info spotted while judging
 }
 
 /** Already-approved content from a near-duplicate product, handed to the LLM to adapt instead of
@@ -49,13 +105,22 @@ export interface ReuseReference {
   structuredData: Record<string, unknown>;
 }
 
-/** Fixed rubric so "before" and "after" are always judged on the exact same questions. */
+/** Fixed rubric so "before" and "after" are always judged on the exact same questions — doubles as
+ *  the "Perguntas respondidas" composite-score metric (see evaluator.agent.ts), so its length (11)
+ *  is also `questionsTotal`. Expanded from the original 5 (use-case/compatibility/material/
+ *  dimensions/care) with objection- and comparison-style questions real buyers also ask. */
 export const GEO_QUESTIONS = [
   "Para que serve este produto / em que situação usar?",
   "Com o que ele é compatível ou combina?",
   "Qual o material ou composição?",
   "Quais as dimensões, tamanho ou capacidade?",
   "Existe alguma restrição de uso ou cuidado especial?",
+  "Qual a garantia ou política de troca/devolução?",
+  "Como ele se compara a outras variações ou produtos similares?",
+  "Qual o principal diferencial em relação a alternativas mais baratas?",
+  "Para quem (perfil de comprador/uso) este produto é indicado?",
+  "Como é feita a instalação, montagem ou aplicação?",
+  "O preço se justifica pelo que o produto entrega?",
 ];
 
 /** Common surface every provider (Anthropic, OpenAI, Gemini) implements — lets each pipeline task
@@ -75,6 +140,14 @@ export interface LlmClient {
     /** Which fields to request beyond "description" (always requested — the quality-gate loop is
      *  anchored on it). Defaults to ALL_ENRICHMENT_FIELDS when omitted. See enrichment-schema.ts. */
     fields?: EnrichmentField[];
+    /** Defaults to "plain" (today's behavior) when omitted. */
+    descriptionRichness?: DescriptionRichness;
+    /** Defaults to "auto" (no explicit tone instruction) when omitted. */
+    communicationTone?: CommunicationTone;
+    /** The product's own existing photo URLs — only read when `descriptionRichness` is
+     *  "structured_with_image", to let the model pick (via real vision, not filename guessing)
+     *  which existing photo best illustrates the highlight point it extracts from the text. */
+    imageUrls?: string[];
   }): Promise<EnrichedContent>;
 
   evaluateContent(params: { text: string; knownFacts?: string | null; productId?: number }): Promise<ContentEvaluation>;

@@ -1,10 +1,10 @@
-import { ALL_ENRICHMENT_FIELDS, type EnrichmentField } from "./llm-types.js";
+import { ALL_ENRICHMENT_FIELDS, type DescriptionRichness, type EnrichmentField } from "./llm-types.js";
 
 interface FieldSpec {
   /** camelCase key as it appears in EnrichedContent / the JSON schema sent to the model. */
   property: string;
   schema: Record<string, unknown>;
-  /** Only the 4 "extra" fields need a prompt fragment — description's instructions live in each
+  /** Only the "extra" fields need a prompt fragment — description's instructions live in each
    *  client's base system prompt since it's always requested. */
   promptFragment?: string;
 }
@@ -67,6 +67,70 @@ const FIELD_SPECS: Record<EnrichmentField, FieldSpec> = {
       "category, additionalProperty a partir de technicalSpecs) — NUNCA inclua price, offers ou availability, " +
       "esses dados são preenchidos separadamente com informação real",
   },
+  seo_title: {
+    property: "seoTitle",
+    schema: {
+      type: "string",
+      description:
+        "Título otimizado para SEO: corrige ortografia/caixa-alta indevida, remove ruído, inclui a palavra-chave " +
+        "principal — continua sendo o mesmo produto, nunca inventa modelo/marca diferente.",
+    },
+    promptFragment:
+      "'seoTitle' — título otimizado para SEO a partir do título atual (correção ortográfica/padronização, " +
+      "palavra-chave principal no início, sem caixa-alta abusiva), sem mudar de que produto se trata",
+  },
+  meta_description: {
+    property: "metaDescription",
+    schema: {
+      type: "string",
+      description: "Meta description de ~150-160 caracteres, resumindo o principal benefício + uma chamada à ação.",
+    },
+    promptFragment: "'metaDescription' — meta description de 150 a 160 caracteres, com o principal benefício e uma chamada à ação",
+  },
+  keywords: {
+    property: "keywords",
+    schema: {
+      type: "object",
+      properties: {
+        primary: { type: "array", items: { type: "string" }, description: "3 a 5 termos de busca principais." },
+        secondary: { type: "array", items: { type: "string" }, description: "5 a 10 termos secundários/long-tail." },
+      },
+      required: ["primary", "secondary"],
+    },
+    promptFragment:
+      "'keywords' com 'primary' (3 a 5 termos de busca principais) e 'secondary' (5 a 10 termos secundários/long-tail), " +
+      "baseados no que o produto realmente é",
+  },
+  tags: {
+    property: "tags",
+    schema: {
+      type: "array",
+      items: { type: "string" },
+      description: "5 a 10 tags curtas pra navegação/filtro do catálogo (não confundir com keywords de busca).",
+    },
+    promptFragment: "'tags' — 5 a 10 tags curtas de navegação/filtro do catálogo",
+  },
+  cta: {
+    property: "cta",
+    schema: {
+      type: "string",
+      description: "Uma frase curta de chamada à ação, específica pro produto (não genérica tipo \"compre agora\").",
+    },
+    promptFragment: "'cta' — uma frase curta de chamada à ação específica pro produto, não genérica",
+  },
+  attributes_patch: {
+    property: "attributesPatch",
+    schema: {
+      type: "object",
+      description:
+        "Apenas chaves de 'attributes' que precisam de correção/normalização, ou chaves claramente ausentes que dá " +
+        "pra inferir com segurança do texto/attributes existentes — nunca remove uma chave existente, nunca inventa " +
+        "um valor sem base nos dados fornecidos.",
+    },
+    promptFragment:
+      "'attributesPatch' — objeto só com atributos a corrigir/normalizar ou preencher (nunca remover, nunca inventar " +
+      "sem base no que já foi fornecido)",
+  },
 };
 
 /** "description" is always requested — the retry/scoring loop in content-enrichment.agent.ts is
@@ -88,11 +152,59 @@ export function buildEnrichmentInstructionSuffix(fields: EnrichmentField[]): str
   return " Gere também: " + fragments.join("; ") + ".";
 }
 
+/** `suggestedCategory` is always offered as an optional output regardless of field selection — it's
+ *  advisory-only (never auto-published, never becomes a proposal row, see publisher.agent.ts), just
+ *  shown as a hint in RunDetail, so it doesn't need a checkbox/EnrichmentField of its own. */
+const SUGGESTED_CATEGORY_PROPERTY = {
+  suggestedCategory: {
+    type: "string",
+    description:
+      "Só preencha se a categoria atual do produto parecer errada ou ausente — sugestão de categoria mais " +
+      "adequada. Omita se a categoria atual já estiver correta.",
+  },
+};
+
 /** Builds the `{properties, required}` pair every provider's schema/tool-input shares (Claude's
  *  `input_schema`, OpenAI's `parameters`, Gemini's `schema` are otherwise byte-identical JSON
- *  Schema objects) — restricted to exactly the requested fields. */
-export function buildEnrichmentSchema(fields: EnrichmentField[]): { properties: Record<string, unknown>; required: string[] } {
-  const properties: Record<string, unknown> = {};
+ *  Schema objects) — restricted to exactly the requested fields, plus the always-available
+ *  `suggestedCategory` and (when `richness` embeds an image) `featuredImageUrl`/`imageCaption`. */
+export function buildEnrichmentSchema(
+  fields: EnrichmentField[],
+  richness: DescriptionRichness = "plain",
+): { properties: Record<string, unknown>; required: string[] } {
+  const properties: Record<string, unknown> = { ...SUGGESTED_CATEGORY_PROPERTY };
   for (const field of fields) properties[FIELD_SPECS[field].property] = FIELD_SPECS[field].schema;
+  if (richness === "structured_with_image") {
+    properties.featuredImageUrl = {
+      type: "string",
+      description:
+        "A URL EXATA de uma das fotos fornecidas (nunca invente uma URL) que melhor ilustra o ponto de destaque " +
+        "do produto — omita se nenhuma foto fornecida servir bem.",
+    };
+    properties.imageCaption = {
+      type: "string",
+      description: "Legenda curta descrevendo o ponto de destaque ilustrado por 'featuredImageUrl'.",
+    };
+  }
+  // suggestedCategory/featuredImageUrl/imageCaption are intentionally NOT in `required` — they're
+  // optional-when-applicable, unlike the requested content fields which the model must always fill.
   return { properties, required: fields.map((field) => FIELD_SPECS[field].property) };
+}
+
+/** Extra instruction appended when "description" should be more than flowing text — see
+ *  `DescriptionRichness`. Returns "" for "plain" so existing prompts are byte-identical to before. */
+export function buildDescriptionRichnessSuffix(richness: DescriptionRichness): string {
+  if (richness === "plain") return "";
+  const structured =
+    " A 'description' deve ser HTML estruturado de verdade (não apenas texto corrido): use <h2>/<h3> para " +
+    "seções, <p> para parágrafos, e uma <table> para especificações técnicas quando fizer sentido.";
+  if (richness === "structured") return structured;
+  return (
+    structured +
+    " Além disso, identifique o principal ponto de destaque do produto usando SOMENTE o texto/atributos já " +
+    "existentes (nunca invente um diferencial não mencionado), escolha entre as fotos fornecidas a que melhor " +
+    "ilustra esse ponto, preencha 'featuredImageUrl' com a URL exata de uma delas e 'imageCaption' com uma " +
+    "legenda curta, e embuta essa mesma imagem dentro do HTML da description (uma tag <img src=\"...\"> próxima " +
+    "à seção que fala desse destaque)."
+  );
 }

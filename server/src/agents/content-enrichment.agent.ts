@@ -1,9 +1,35 @@
 import { db } from "../db/client.js";
 import { enrichmentProposals } from "../db/schema.js";
-import { ALL_ENRICHMENT_FIELDS, type EnrichedContent, type EnrichmentField, type LlmClient } from "../clients/llm-types.js";
+import {
+  ALL_ENRICHMENT_FIELDS,
+  type CommunicationTone,
+  type DescriptionRichness,
+  type EnrichedContent,
+  type EnrichmentField,
+  type LlmClient,
+} from "../clients/llm-types.js";
 import type { ProductRow } from "./catalog-reader.agent.js";
 import { computeContentScore, persistContentScore, scoreContent, type ComputedContentScore } from "./evaluator.agent.js";
 import { findReuseDonor } from "../repositories/product-similarity.repo.js";
+
+interface VtexImage {
+  ImageUrl: string;
+  ImageName?: string;
+  ImageText?: string;
+  Id?: string | number;
+}
+
+/** Embeds the featured image the model chose (structured_with_image only) into the description
+ *  HTML, right before its closing tag if one is detectable, otherwise appended — the model is
+ *  instructed to already place an <img> itself, but this guarantees the image shows up even if it
+ *  forgets, without ever inventing a URL not present in `imageUrls`. */
+function ensureFeaturedImageEmbedded(description: string, featuredImageUrl: string, imageCaption?: string): string {
+  if (description.includes(featuredImageUrl)) return description;
+  const figure = `<figure class="catalogia-featured-image"><img src="${featuredImageUrl}" alt="${
+    imageCaption ?? ""
+  }" />${imageCaption ? `<figcaption>${imageCaption}</figcaption>` : ""}</figure>`;
+  return `${description}\n${figure}`;
+}
 
 /** Below this score, or without at least this much improvement over the original, the draft
  *  is considered not good enough to hand to a human — the agent retries with specific feedback
@@ -47,13 +73,17 @@ function buildProposalRows(params: {
   const rows: (typeof enrichmentProposals.$inferInsert)[] = [];
 
   if (selected.has("description")) {
+    const description =
+      enriched.featuredImageUrl
+        ? ensureFeaturedImageEmbedded(enriched.description, enriched.featuredImageUrl, enriched.imageCaption)
+        : enriched.description;
     rows.push({
       runId,
       productId: product.id,
       field: "description",
       agent: "content",
       originalValue: product.description,
-      proposedValue: enriched.description,
+      proposedValue: description,
       ...reuseFields,
     });
   }
@@ -101,6 +131,72 @@ function buildProposalRows(params: {
       ...reuseFields,
     });
   }
+  if (selected.has("seo_title") && enriched.seoTitle) {
+    rows.push({
+      runId,
+      productId: product.id,
+      field: "seo_title",
+      agent: "content",
+      originalValue: product.title,
+      proposedValue: enriched.seoTitle,
+      ...reuseFields,
+    });
+  }
+  if (selected.has("meta_description") && enriched.metaDescription) {
+    rows.push({
+      runId,
+      productId: product.id,
+      field: "meta_description",
+      agent: "content",
+      originalValue: null,
+      proposedValue: enriched.metaDescription,
+      ...reuseFields,
+    });
+  }
+  if (selected.has("keywords") && enriched.keywords) {
+    rows.push({
+      runId,
+      productId: product.id,
+      field: "keywords",
+      agent: "content",
+      originalValue: null,
+      proposedValue: JSON.stringify(enriched.keywords),
+      ...reuseFields,
+    });
+  }
+  if (selected.has("tags") && enriched.tags) {
+    rows.push({
+      runId,
+      productId: product.id,
+      field: "tags",
+      agent: "content",
+      originalValue: null,
+      proposedValue: JSON.stringify(enriched.tags),
+      ...reuseFields,
+    });
+  }
+  if (selected.has("cta") && enriched.cta) {
+    rows.push({
+      runId,
+      productId: product.id,
+      field: "cta",
+      agent: "content",
+      originalValue: null,
+      proposedValue: enriched.cta,
+      ...reuseFields,
+    });
+  }
+  if (selected.has("attributes_patch") && enriched.attributesPatch) {
+    rows.push({
+      runId,
+      productId: product.id,
+      field: "attributes_patch",
+      agent: "content",
+      originalValue: JSON.stringify(product.attributes),
+      proposedValue: JSON.stringify(enriched.attributesPatch),
+      ...reuseFields,
+    });
+  }
   return rows;
 }
 
@@ -124,9 +220,16 @@ export async function proposeContentEnrichment(params: {
    *  "description" is always generated internally regardless (the quality-gate loop needs it to
    *  score anything at all) but only surfaces as a proposal row when it's in this list too. */
   fields?: EnrichmentField[];
+  descriptionRichness?: DescriptionRichness;
+  communicationTone?: CommunicationTone;
 }): Promise<{ attempts: number; finalScore: number; reused: boolean }> {
   const { contentLlm, evaluatorLlm, runId, product } = params;
   const fields = params.fields ?? ALL_ENRICHMENT_FIELDS;
+  const descriptionRichness = params.descriptionRichness ?? "plain";
+  const imageUrls =
+    descriptionRichness === "structured_with_image"
+      ? ((product.images as VtexImage[]) ?? []).map((img) => img.ImageUrl)
+      : undefined;
 
   const originalScore = await scoreContent({
     llm: evaluatorLlm,
@@ -136,6 +239,7 @@ export async function proposeContentEnrichment(params: {
     text: product.description,
     hasStructuredData: false,
     faqCount: 0,
+    originalAttributes: product.attributes as Record<string, unknown>,
   });
 
   const knownFacts = JSON.stringify({
@@ -154,6 +258,9 @@ export async function proposeContentEnrichment(params: {
       reuseReference: donor.reference,
       productId: product.id,
       fields,
+      descriptionRichness,
+      communicationTone: params.communicationTone,
+      imageUrls,
     });
 
     const score = await computeContentScore({
@@ -163,6 +270,10 @@ export async function proposeContentEnrichment(params: {
       faqCount: enriched.faq?.length ?? 0,
       knownFacts,
       productId: product.id,
+      seoTitle: enriched.seoTitle,
+      metaDescription: enriched.metaDescription,
+      originalAttributes: product.attributes as Record<string, unknown>,
+      attributesPatch: enriched.attributesPatch,
     });
 
     const donorRows = buildProposalRows({
@@ -195,6 +306,9 @@ export async function proposeContentEnrichment(params: {
       feedback,
       productId: product.id,
       fields,
+      descriptionRichness,
+      communicationTone: params.communicationTone,
+      imageUrls,
     });
 
     const score = await computeContentScore({
@@ -204,6 +318,10 @@ export async function proposeContentEnrichment(params: {
       faqCount: enriched.faq?.length ?? 0,
       knownFacts,
       productId: product.id,
+      seoTitle: enriched.seoTitle,
+      metaDescription: enriched.metaDescription,
+      originalAttributes: product.attributes as Record<string, unknown>,
+      attributesPatch: enriched.attributesPatch,
     });
 
     if (!best || score.overallScore > best.score.overallScore) {

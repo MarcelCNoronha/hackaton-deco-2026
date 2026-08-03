@@ -1,15 +1,32 @@
 import OpenAI from "openai";
 import type { RequestLogEntry } from "./http.js";
 import { computeCostUsd } from "./model-recommendations.js";
-import { buildEnrichmentInstructionSuffix, buildEnrichmentSchema, resolveRequestedFields } from "./enrichment-schema.js";
+import {
+  buildDescriptionRichnessSuffix,
+  buildEnrichmentInstructionSuffix,
+  buildEnrichmentSchema,
+  resolveRequestedFields,
+} from "./enrichment-schema.js";
 import {
   GEO_QUESTIONS,
+  type CommunicationTone,
   type ContentEvaluation,
+  type DescriptionRichness,
   type EnrichedContent,
   type EnrichmentField,
   type LlmClient,
   type ReuseReference,
 } from "./llm-types.js";
+
+/** Caps how many existing product photos get sent in one multimodal call (structured_with_image
+ *  richness) — enough to give the model real choice without an unbounded per-product image cost. */
+const MAX_FEATURED_IMAGE_CANDIDATES = 6;
+
+function toneInstruction(tone?: CommunicationTone): string {
+  if (!tone || tone === "auto") return "";
+  const label = { premium: "premium/sofisticado", tecnico: "técnico/direto", casual: "casual/próximo" }[tone];
+  return ` Tom de comunicação: ${label}.`;
+}
 
 /** Thin client around the OpenAI Responses API — same shape/logging contract as ClaudeClient, so
  *  every pipeline task can pick either provider without the agents caring which one they got.
@@ -119,8 +136,32 @@ export class OpenAiClient implements LlmClient {
     reuseReference?: ReuseReference | null;
     productId?: number;
     fields?: EnrichmentField[];
+    descriptionRichness?: DescriptionRichness;
+    communicationTone?: CommunicationTone;
+    imageUrls?: string[];
   }): Promise<EnrichedContent> {
     const requestedFields = resolveRequestedFields(product.fields);
+    const richness = product.descriptionRichness ?? "plain";
+    const candidateImageUrls = (product.imageUrls ?? []).slice(0, MAX_FEATURED_IMAGE_CANDIDATES);
+    const useVision = richness === "structured_with_image" && candidateImageUrls.length > 0;
+
+    const textPayload = JSON.stringify({
+      title: product.title,
+      currentDescription: product.currentDescription,
+      attributes: product.attributes,
+      category: product.category,
+      ...(product.feedback
+        ? {
+            correcaoNecessaria: {
+              perguntasSemResposta: product.feedback.buyerUnanswered,
+              alegacoesNaoSustentadas: product.feedback.unsupportedClaims,
+            },
+          }
+        : {}),
+      ...(product.reuseReference ? { referencia: product.reuseReference } : {}),
+      ...(useVision ? { fotosDisponiveis: candidateImageUrls } : {}),
+    });
+
     return this.callWithTool<EnrichedContent>({
       operation: "enrichProductContent",
       productId: product.productId,
@@ -139,35 +180,30 @@ export class OpenAiClient implements LlmClient {
               ? " Esta é uma correção de uma tentativa anterior que não passou na revisão de qualidade — " +
                 "resolva especificamente os problemas apontados em 'correcaoNecessaria', sem reintroduzi-los."
               : "")) +
-        buildEnrichmentInstructionSuffix(requestedFields),
+        buildEnrichmentInstructionSuffix(requestedFields) +
+        buildDescriptionRichnessSuffix(richness) +
+        toneInstruction(product.communicationTone) +
+        (useVision
+          ? " As imagens anexadas a esta mensagem, na mesma ordem de 'fotosDisponiveis', são as fotos reais " +
+            "já existentes do produto — use-as para escolher 'featuredImageUrl'."
+          : ""),
       input: [
         {
           role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: JSON.stringify({
-                title: product.title,
-                currentDescription: product.currentDescription,
-                attributes: product.attributes,
-                category: product.category,
-                ...(product.feedback
-                  ? {
-                      correcaoNecessaria: {
-                        perguntasSemResposta: product.feedback.buyerUnanswered,
-                        alegacoesNaoSustentadas: product.feedback.unsupportedClaims,
-                      },
-                    }
-                  : {}),
-                ...(product.reuseReference ? { referencia: product.reuseReference } : {}),
-              }),
-            },
-          ],
+          content: useVision
+            ? [
+                ...candidateImageUrls.map(
+                  (url) => ({ type: "input_image", image_url: url, detail: "auto" }) as const,
+                ),
+                { type: "input_text", text: textPayload },
+              ]
+            : [{ type: "input_text", text: textPayload }],
         },
       ],
       toolName: "submit_enriched_content",
       toolDescription: "Envia a descrição enriquecida, FAQ e dados estruturados do produto.",
-      parameters: { type: "object", ...buildEnrichmentSchema(requestedFields) },
+      parameters: { type: "object", ...buildEnrichmentSchema(requestedFields, richness) },
+      maxOutputTokens: useVision ? 2500 : 1500,
     });
   }
 
@@ -222,8 +258,34 @@ export class OpenAiClient implements LlmClient {
             description:
               "Só quando knownFacts for informado: afirmações do texto que não são suportadas por knownFacts. Vazio caso contrário.",
           },
+          seoScore: {
+            type: "integer",
+            description: "0-100: qualidade de título/meta/palavras-chave/headings para descoberta em busca.",
+          },
+          conversionScore: {
+            type: "integer",
+            description: "0-100: clareza da chamada à ação, benefícios e resposta a objeções de compra.",
+          },
+          dataConsistencyScore: {
+            type: "integer",
+            description: "0-100: o quanto título/descrição/atributos concordam entre si, sem contradição.",
+          },
+          catalogIssues: {
+            type: "array",
+            items: { type: "string" },
+            description: "Informações conflitantes ou claramente ausentes notadas ao avaliar (vazio se nenhuma).",
+          },
         },
-        required: ["buyerConfidence", "buyerUnanswered", "geoAnswerableCount", "unsupportedClaims"],
+        required: [
+          "buyerConfidence",
+          "buyerUnanswered",
+          "geoAnswerableCount",
+          "unsupportedClaims",
+          "seoScore",
+          "conversionScore",
+          "dataConsistencyScore",
+          "catalogIssues",
+        ],
       },
       maxOutputTokens: 800,
     });

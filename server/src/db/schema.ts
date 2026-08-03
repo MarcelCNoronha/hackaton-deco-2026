@@ -27,6 +27,12 @@ export const proposalFieldEnum = pgEnum("proposal_field", [
   "faq",
   "benefit_bullets",
   "technical_specs",
+  "seo_title",
+  "meta_description",
+  "keywords",
+  "tags",
+  "cta",
+  "attributes_patch",
 ]);
 export const proposalAgentEnum = pgEnum("proposal_agent", ["content", "image"]);
 export const proposalStatusEnum = pgEnum("proposal_status", [
@@ -98,6 +104,11 @@ export const generatedImages = pgTable("generated_images", {
   mimeType: text("mime_type").notNull(),
   imageBase64: text("image_base64").notNull(),
   costUsd: numeric("cost_usd"),
+  // Result of the post-generation integrity gate (see image-generation.agent.ts): a second
+  // multimodal call comparing the generated image against the reference photo, checking it's
+  // still the same product (no shape/color/label/material drift) before it's ever shown/published.
+  integrityVerified: boolean("integrity_verified").notNull().default(false),
+  integrityNotes: text("integrity_notes"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
   productIdIdx: index("generated_images_product_id_idx").on(table.productId),
@@ -167,8 +178,12 @@ export const enrichmentProposals = pgTable("enrichment_proposals", {
 }));
 
 /** Before/after content quality score for a product within a run — the "does this actually help
- *  the user" evidence that doesn't have to wait on Google's crawl/re-rank lag. checklistScore is
- *  computed with no AI call (structural signals only); the rest comes from one Claude judge call. */
+ *  the user" evidence that doesn't have to wait on Google's crawl/re-rank lag. Most sub-scores are
+ *  computed with no AI call (deterministic structural/readability/completeness signals); the
+ *  AI-judged ones (buyerConfidence, seoScore, conversionScore, dataConsistencyScore, geo answer
+ *  count) come from one evaluateContent call. checklistScore/geoAnswerableCount/geoTotalQuestions
+ *  are kept for backward compatibility with rows written before the composite score existed —
+ *  new code should read structureScore/questionsAnswered/questionsTotal instead (same values). */
 export const contentScores = pgTable("content_scores", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
   runId: bigint("run_id", { mode: "number" })
@@ -185,12 +200,35 @@ export const contentScores = pgTable("content_scores", {
   geoTotalQuestions: integer("geo_total_questions").notNull(),
   unsupportedClaims: jsonb("unsupported_claims").notNull().default(sql`'[]'::jsonb`),
   overallScore: integer("overall_score").notNull(),
+  // Composite sub-scores (0-100), added for the Excelente/Bom/Médio classification system —
+  // see optimization-thresholds.repo.ts.
+  seoScore: integer("seo_score").notNull().default(0),
+  conversionScore: integer("conversion_score").notNull().default(0),
+  readabilityScore: integer("readability_score").notNull().default(0),
+  structureScore: integer("structure_score").notNull().default(0),
+  dataConsistencyScore: integer("data_consistency_score").notNull().default(0),
+  catalogIssues: jsonb("catalog_issues").notNull().default(sql`'[]'::jsonb`),
+  attributesFilled: integer("attributes_filled").notNull().default(0),
+  attributesExpected: integer("attributes_expected").notNull().default(0),
+  questionsAnswered: integer("questions_answered").notNull().default(0),
+  questionsTotal: integer("questions_total").notNull().default(0),
   // How many quality-gate drafts it took to land on this score — always 1 for "original".
   attempts: integer("attempts").notNull().default(1),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
   runIdIdx: index("content_scores_run_id_idx").on(table.runId),
 }));
+
+/** Per-category (or `'*'` for the catalog-wide default) score thresholds used to classify a
+ *  product's contentScores.overallScore into Excelente/Bom/Médio — see
+ *  optimization-thresholds.repo.ts. Editable from Connections.tsx, mirroring modelRouting's
+ *  single-row-per-key upsert shape. */
+export const categoryScoreThresholds = pgTable("category_score_thresholds", {
+  category: text("category").primaryKey(),
+  excellentMin: integer("excellent_min").notNull().default(85),
+  goodMin: integer("good_min").notNull().default(60),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 /** Fine-grained log of every external API call — proves retry/error handling actually works. */
 export const agentRequestLogs = pgTable("agent_request_logs", {

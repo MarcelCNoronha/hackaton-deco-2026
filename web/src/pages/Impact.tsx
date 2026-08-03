@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api, type CatalogFilterOptions, type Product, type ProductMetric } from "../api/client";
+import { api, type CatalogFilterOptions, type ImpactSummary, type Product, type ProductMetric } from "../api/client";
 import { CatalogFilterBar } from "../components/CatalogFilterBar";
+import { ImpactSummaryBanner } from "../components/ImpactSummaryBanner";
 import { shortId } from "../lib/format";
 
 export function Impact() {
@@ -12,6 +13,7 @@ export function Impact() {
     return fromQuery ? Number(fromQuery) : null;
   });
   const [metrics, setMetrics] = useState<ProductMetric[]>([]);
+  const [impactSummary, setImpactSummary] = useState<ImpactSummary | null>(null);
 
   const [search, setSearch] = useState("");
   const [categoryId, setCategoryId] = useState("");
@@ -23,6 +25,7 @@ export function Impact() {
     api.catalogFilters()
       .then(setFilters)
       .catch(() => setFilters({ categories: [], brands: [] }));
+    api.overallImpactSummary().then(setImpactSummary);
   }, []);
 
   useEffect(() => {
@@ -62,6 +65,8 @@ export function Impact() {
       </div>
 
       <div className="page-content">
+        {impactSummary && <ImpactSummaryBanner summary={impactSummary} />}
+
         <section className="card">
           <CatalogFilterBar
             search={search}
