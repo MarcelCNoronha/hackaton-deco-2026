@@ -1,4 +1,4 @@
-import { ApiError, GoogleGenAI } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import type { RequestLogEntry } from "./http.js";
 import { computeCostUsd } from "./model-recommendations.js";
 import { buildEnrichmentInstructionSuffix, buildEnrichmentSchema, resolveRequestedFields } from "./enrichment-schema.js";
@@ -39,8 +39,25 @@ function isPermanentlyExhausted(message: string): boolean {
   return /limit:\s*0\b/.test(message);
 }
 
+/** Duck-typed instead of `instanceof ApiError` — verified live in production that the thrown
+ *  error's class identity doesn't reliably match across this package's ESM/CJS module boundary
+ *  (instanceof silently returned false, skipping every retry). `.status` is a plain property on
+ *  the real error either way; the message-prefix fallback (Google's errors read e.g. "429 You
+ *  exceeded...") covers any shape that doesn't carry it. */
+function extractStatusCode(err: unknown): number | null {
+  if (err && typeof err === "object" && "status" in err && typeof (err as { status: unknown }).status === "number") {
+    return (err as { status: number }).status;
+  }
+  if (err instanceof Error) {
+    const match = err.message.match(/^(\d{3})\b/);
+    if (match) return Number(match[1]);
+  }
+  return null;
+}
+
 function isRetryableGeminiError(err: unknown): boolean {
-  return err instanceof ApiError && (err.status === 429 || err.status >= 500);
+  const status = extractStatusCode(err);
+  return status === 429 || (status !== null && status >= 500);
 }
 
 interface GeminiInteraction {

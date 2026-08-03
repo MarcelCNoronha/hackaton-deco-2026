@@ -329,6 +329,16 @@ aparecer direto em `docker logs`, sem precisar consultar o banco. Não corrigido
 limite de concorrência entre produtos do mesmo run (todos disparam ao mesmo tempo) — ideia pra
 amanhã, se o problema persistir mesmo com billing ativado.
 
+**Correção sobre a correção (mesmo dia, direto em produção)**: o primeiro deploy do retry não
+funcionou — os logs novos apareciam (`console.error` ok) mas nenhuma tentativa 2/3 ou 3/3 rodava
+mesmo em erros claramente "retryable" (`limit: 5`, não `limit: 0`). Causa: o check usava
+`err instanceof ApiError` (classe importada de `@google/genai`), e por algum motivo de
+ESM/CJS/module-resolution isso deu `false` em produção mesmo pro erro certo — pulando o retry
+inteiro silenciosamente. Trocado pra duck-typing (`err.status === 429`, com fallback de regex no
+prefixo da mensagem tipo "429 ..."), que não depende de identidade de classe. Confirmado só depois
+de olhar `docker logs -t` com timestamp e comparar contra `finished_at` do run no banco — o run
+terminava exatos ~10ms depois do log de falha, ou seja, sem esperar o backoff.
+
 ## Formação de equipes
 
 - 1 a 5 pessoas por equipe (pode ser solo)
