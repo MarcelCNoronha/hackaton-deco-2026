@@ -1,6 +1,6 @@
 import { eq, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { agentRequestLogs, enrichmentRuns } from "../db/schema.js";
+import { agentRequestLogs, contentScores, enrichmentProposals, enrichmentRuns } from "../db/schema.js";
 import { getConnectionCredentials } from "../repositories/connections.repo.js";
 import { getCatalogPlatform } from "../repositories/catalog-settings.repo.js";
 import { getModelRouting, type ModelRoutingRow } from "../repositories/model-routing.repo.js";
@@ -183,6 +183,16 @@ export async function executeEnrichmentRun(runId: number, params: StartEnrichmen
   const topN = params.topN ?? (params.catalogFilter ? 50 : undefined);
 
   try {
+    // BullMQ retries this whole function (same runId) up to 3x on an uncaught throw — without
+    // this, a failure partway through (e.g. the cost aggregate or final status update below)
+    // would re-run the entire LLM pipeline and leave every successfully-processed product with
+    // duplicate proposal/score rows from each attempt. Clearing this run's own rows first makes a
+    // retry produce the same clean result a fresh run would, not an accumulation. Cost logs
+    // (agent_request_logs) are deliberately kept across retries — that's the audit trail proving
+    // what was actually spent, including on attempts that didn't finish.
+    await db.delete(enrichmentProposals).where(eq(enrichmentProposals.runId, runId));
+    await db.delete(contentScores).where(eq(contentScores.runId, runId));
+
     const { catalog, gsc, ga4, embeddings, contentLlm, evaluatorLlm, imageLlm } = await requireConnectedClients(runId);
 
     const candidateProductIds = await resolveCandidateProductIds(catalog, params);

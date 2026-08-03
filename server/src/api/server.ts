@@ -18,7 +18,21 @@ import { usersRoutes } from "./routes/users.routes.js";
 
 const app = Fastify({ logger: true });
 
-await app.register(cors, { origin: true, credentials: true });
+// `origin: true` reflects whatever Origin the request sends, which — combined with
+// `credentials: true` (cookies) — lets ANY site make authenticated requests on a logged-in user's
+// behalf. Allowlist instead: the configured production URL plus the local Vite dev server.
+// "https://app.assessoriadigitalvicosa.com.br" is listed explicitly (not just via APP_BASE_URL) as
+// a safety net — if that env var isn't actually set in the deployed environment yet, this CORS
+// change must not be the thing that locks the real production frontend out.
+const allowedOrigins = new Set(
+  [env.APP_BASE_URL, "https://app.assessoriadigitalvicosa.com.br", "http://localhost:5173", "http://127.0.0.1:5173"].filter(
+    (v): v is string => Boolean(v),
+  ),
+);
+await app.register(cors, {
+  origin: (origin, cb) => cb(null, !origin || allowedOrigins.has(origin)),
+  credentials: true,
+});
 await app.register(cookie, { secret: env.SESSION_COOKIE_SECRET, hook: "onRequest" });
 
 app.get("/api/health", async () => ({ ok: true }));

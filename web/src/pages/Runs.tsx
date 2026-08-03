@@ -133,18 +133,16 @@ export function Runs() {
   }
 
   useEffect(() => {
-    refreshOptimizedCount();
-    refreshPendingReviewCount();
-    refreshAvgPrecision();
-    refreshQuotaAlerts();
+    function refreshStats() {
+      refreshOptimizedCount().catch((err) => console.error("Failed to refresh stats", err));
+      refreshPendingReviewCount().catch((err) => console.error("Failed to refresh stats", err));
+      refreshAvgPrecision().catch((err) => console.error("Failed to refresh stats", err));
+      refreshQuotaAlerts().catch((err) => console.error("Failed to refresh stats", err));
+    }
+    refreshStats();
     loadFilters();
     loadProducts(1);
-    const interval = setInterval(() => {
-      refreshOptimizedCount();
-      refreshPendingReviewCount();
-      refreshAvgPrecision();
-      refreshQuotaAlerts();
-    }, 30_000);
+    const interval = setInterval(refreshStats, 30_000);
     return () => clearInterval(interval);
   }, []);
 

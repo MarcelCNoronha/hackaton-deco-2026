@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import {
   api,
@@ -100,6 +100,7 @@ export function RunDetail() {
   const [publishError, setPublishError] = useState<string | null>(null);
   const [resyncingIds, setResyncingIds] = useState<Set<number>>(new Set());
   const [resyncError, setResyncError] = useState<string | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   async function refresh() {
     const [runData, proposalsData, scoresData, costsData] = await Promise.all([
@@ -112,14 +113,24 @@ export function RunDetail() {
     setProposals(proposalsData);
     setScores(scoresData);
     setCosts(costsData);
+    // Once the run leaves "running", nothing about it changes anymore — stop polling instead of
+    // hitting 4 endpoints every 5s forever for a page the user may just leave open.
+    if (runData.status !== "running" && intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
   }
 
   useEffect(() => {
-    refresh();
+    refresh().catch((err) => console.error("Failed to refresh run", err));
     api.listProducts().then(setProducts);
     api.getCatalogPlatform().then(({ platform }) => setPlatform(platform));
-    const interval = setInterval(refresh, 5000);
-    return () => clearInterval(interval);
+    intervalRef.current = setInterval(() => {
+      refresh().catch((err) => console.error("Failed to refresh run", err));
+    }, 5000);
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
   }, [runId]);
 
   /** Re-fetches one product from the active catalog platform without running a whole new

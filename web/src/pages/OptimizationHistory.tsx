@@ -27,8 +27,10 @@ export function OptimizationHistory() {
     api.catalogFilters()
       .then(setFilters)
       .catch(() => setFilters({ categories: [], brands: [] }));
-    refresh();
-    const interval = setInterval(refresh, 5000);
+    refresh().catch((err) => console.error("Failed to refresh run history", err));
+    const interval = setInterval(() => {
+      refresh().catch((err) => console.error("Failed to refresh run history", err));
+    }, 5000);
     return () => clearInterval(interval);
   }, []);
 

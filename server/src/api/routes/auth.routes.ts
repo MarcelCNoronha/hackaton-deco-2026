@@ -10,6 +10,7 @@ import { generateToken, hashToken } from "../../auth/tokens.js";
 import { decryptCredentials } from "../../security/encryption.js";
 import { buildEmailClient, buildPasswordResetEmail } from "../../clients/email.client.js";
 import { env } from "../../config/env.js";
+import { checkRateLimit, recordAttempt } from "../../auth/rate-limit.js";
 
 /** Prefer the server-configured base URL over the request's `Origin` header — that header is
  *  client-supplied, so trusting it lets an attacker redirect a real password-reset/invite email's
@@ -24,32 +25,13 @@ const DEVICE_COOKIE = "device_token";
 const DEVICE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
 
-// In-memory login throttle (email+ip -> attempts) — resets on server restart, which is fine for
-// this scope; mirrors Mundial's 5-attempts guard without needing a dedicated table.
-const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+// Valkey-backed (rate-limit.ts) rather than an in-memory Map — shared across every server
+// instance and surviving restarts, so it can't be bypassed just by hitting a different container
+// or waiting out a redeploy.
 const MAX_LOGIN_ATTEMPTS = 5;
-const LOGIN_WINDOW_MS = 15 * 60 * 1000;
-
-function checkLoginThrottle(key: string): boolean {
-  const entry = loginAttempts.get(key);
-  const now = Date.now();
-  if (!entry || entry.resetAt < now) return true;
-  return entry.count < MAX_LOGIN_ATTEMPTS;
-}
-
-function recordLoginAttempt(key: string, success: boolean): void {
-  if (success) {
-    loginAttempts.delete(key);
-    return;
-  }
-  const now = Date.now();
-  const entry = loginAttempts.get(key);
-  if (!entry || entry.resetAt < now) {
-    loginAttempts.set(key, { count: 1, resetAt: now + LOGIN_WINDOW_MS });
-  } else {
-    entry.count += 1;
-  }
-}
+const LOGIN_WINDOW_SECONDS = 15 * 60;
+const MAX_TWO_FACTOR_ATTEMPTS = 5;
+const TWO_FACTOR_WINDOW_SECONDS = 15 * 60;
 
 function publicUser(user: typeof users.$inferSelect) {
   return {
@@ -70,8 +52,8 @@ const resetBody = z.object({ token: z.string().min(1), password: z.string().min(
 export async function authRoutes(app: FastifyInstance) {
   app.post("/api/auth/login", async (req, reply) => {
     const body = loginBody.parse(req.body);
-    const throttleKey = `${body.email.toLowerCase()}|${req.ip}`;
-    if (!checkLoginThrottle(throttleKey)) {
+    const throttleKey = `login:${body.email.toLowerCase()}|${req.ip}`;
+    if (!(await checkRateLimit(throttleKey, MAX_LOGIN_ATTEMPTS))) {
       return reply.status(429).send({ error: "Muitas tentativas — aguarde alguns minutos e tente de novo." });
     }
 
@@ -79,10 +61,10 @@ export async function authRoutes(app: FastifyInstance) {
     const genericError = { error: "E-mail ou senha inválidos." };
 
     if (!user || !user.isActive || !(await verifyPassword(body.password, user.passwordHash))) {
-      recordLoginAttempt(throttleKey, false);
+      await recordAttempt(throttleKey, false, LOGIN_WINDOW_SECONDS);
       return reply.status(401).send(genericError);
     }
-    recordLoginAttempt(throttleKey, true);
+    await recordAttempt(throttleKey, true, LOGIN_WINDOW_SECONDS);
 
     if (!user.twoFactorEnabled) {
       await createSession({ userId: user.id, twoFactorPending: false, req, reply });
@@ -114,11 +96,20 @@ export async function authRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: "2FA não está configurado para este usuário." });
     }
 
+    // Keyed by the pending session id — that id is what an attacker with a stolen/planted cookie
+    // would replay guesses against, and it's constant for the lifetime of this one challenge.
+    const throttleKey = `2fa:${ctx.session.id}`;
+    if (!(await checkRateLimit(throttleKey, MAX_TWO_FACTOR_ATTEMPTS))) {
+      return reply.status(429).send({ error: "Muitas tentativas — aguarde alguns minutos e tente de novo." });
+    }
+
     const secret = decryptCredentials<string>(ctx.user.twoFactorSecretEncrypted);
     const result = await verify({ secret, token: body.code });
     if (!result.valid) {
+      await recordAttempt(throttleKey, false, TWO_FACTOR_WINDOW_SECONDS);
       return reply.status(401).send({ error: "Código inválido." });
     }
+    await recordAttempt(throttleKey, true, TWO_FACTOR_WINDOW_SECONDS);
 
     await rotateSessionAfterTwoFactor({ pendingSessionId: ctx.session.id, userId: ctx.user.id, req, reply });
 
