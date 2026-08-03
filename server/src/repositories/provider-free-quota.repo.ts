@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, eq, gte, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { agentRequestLogs, providerFreeQuotas } from "../db/schema.js";
 import type { LlmProvider } from "../clients/llm-types.js";

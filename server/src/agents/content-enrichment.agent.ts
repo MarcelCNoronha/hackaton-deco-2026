@@ -165,9 +165,17 @@ export async function proposeContentEnrichment(params: {
       productId: product.id,
     });
 
-    await db.insert(enrichmentProposals).values(
-      buildProposalRows({ runId, product, enriched, fields, reuse: { productId: donor.productId, similarity: donor.similarity } }),
-    );
+    const donorRows = buildProposalRows({
+      runId,
+      product,
+      enriched,
+      fields,
+      reuse: { productId: donor.productId, similarity: donor.similarity },
+    });
+    // Drizzle's `.values([])` throws — reachable when the user deselects every field the model
+    // actually returned (e.g. only unchecking benefit_bullets/technical_specs/faq, all of which
+    // come back empty/omitted).
+    if (donorRows.length > 0) await db.insert(enrichmentProposals).values(donorRows);
 
     await persistContentScore({ runId, productId: product.id, target: "proposed", score, attempts: 1 });
 
@@ -213,7 +221,8 @@ export async function proposeContentEnrichment(params: {
   const { enriched, score } = best!;
   const finalAttempts = Math.min(attempts, MAX_ATTEMPTS);
 
-  await db.insert(enrichmentProposals).values(buildProposalRows({ runId, product, enriched, fields }));
+  const rows = buildProposalRows({ runId, product, enriched, fields });
+  if (rows.length > 0) await db.insert(enrichmentProposals).values(rows);
 
   await persistContentScore({ runId, productId: product.id, target: "proposed", score, attempts: finalAttempts });
 

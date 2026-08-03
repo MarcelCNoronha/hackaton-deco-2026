@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
+import { PasswordInput } from "../components/PasswordInput";
 
 export function Account() {
   const { user, refresh } = useAuth();
@@ -127,15 +128,8 @@ export function Account() {
         <section className="card">
           <h2>Alterar senha</h2>
           <form onSubmit={handlePasswordSubmit} className="form-grid">
-            <input
-              type="password"
-              placeholder="Senha atual"
-              value={currentPassword}
-              onChange={(e) => setCurrentPassword(e.target.value)}
-              required
-            />
-            <input
-              type="password"
+            <PasswordInput placeholder="Senha atual" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} required />
+            <PasswordInput
               placeholder="Nova senha (mín. 8 caracteres)"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
@@ -153,8 +147,7 @@ export function Account() {
             <>
               <p className="muted">2FA está ativado na sua conta.</p>
               <form onSubmit={handleDisableTwoFactor} className="form-grid">
-                <input
-                  type="password"
+                <PasswordInput
                   placeholder="Senha atual"
                   value={disablePassword}
                   onChange={(e) => setDisablePassword(e.target.value)}

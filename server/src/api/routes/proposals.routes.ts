@@ -8,7 +8,6 @@ import { requireAuth } from "../../auth/guards.js";
 const reviewBody = z.object({
   status: z.enum(["approved", "rejected", "edited"]),
   proposedValue: z.string().optional(),
-  reviewedBy: z.string().optional(),
 });
 
 export async function proposalsRoutes(app: FastifyInstance) {
@@ -29,7 +28,7 @@ export async function proposalsRoutes(app: FastifyInstance) {
       .set({
         status: body.status,
         ...(body.proposedValue !== undefined ? { proposedValue: body.proposedValue } : {}),
-        reviewedBy: body.reviewedBy ?? "unknown",
+        reviewedBy: req.authUser!.email,
         reviewedAt: new Date(),
       })
       .where(eq(enrichmentProposals.id, proposalId))

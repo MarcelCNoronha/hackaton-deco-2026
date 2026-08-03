@@ -32,6 +32,16 @@ interface GraphQlResponse<T> {
 export class ShopifyClient implements CatalogClient {
   readonly platform = "shopify" as const;
   private readonly endpoint: string;
+  // Shopify's GraphQL API only supports forward cursor pagination (no jumping straight to page N
+  // the way VTEX's REST _from/_to does) — this instance-scoped map remembers, for each page
+  // number already reached ON THIS CLIENT INSTANCE, the cursor to fetch the next one. That's
+  // exactly how callers that page through sequentially on one instance use this (the "otimização
+  // total" candidate-gathering loop in enrichment-run.orchestrator.ts, which previously re-fetched
+  // page 1's results on every iteration here — silently duplicating every product up to 4x and
+  // burning 4x the LLM cost per run). A caller that builds a fresh client per HTTP request (the
+  // Produtos browser's paginated list) still can't jump to page 2+ without re-walking from page 1
+  // first — a real limitation, not silently wrong data, tracked as a follow-up.
+  private readonly cursorForNextPage = new Map<number, string | null>();
 
   constructor(
     private readonly credentials: ShopifyCredentials,
@@ -86,19 +96,28 @@ export class ShopifyClient implements CatalogClient {
           featuredImage: { url: string } | null;
           variants: { nodes: Array<{ sku: string | null }> };
         }>;
-        pageInfo: { hasNextPage: boolean };
+        pageInfo: { hasNextPage: boolean; endCursor: string | null };
       };
     };
 
+    // undefined (page 1, or a page never reached sequentially on this instance yet) means "start
+    // from the beginning" — see the field comment on cursorForNextPage above.
+    const after = params.page > 1 ? this.cursorForNextPage.get(params.page) : undefined;
+
     const data = await this.graphql<Resp>(
       "listProducts",
-      `query ListProducts($first: Int!, $query: String) {
-        products(first: $first, query: $query) {
+      `query ListProducts($first: Int!, $query: String, $after: String) {
+        products(first: $first, query: $query, after: $after) {
           nodes { id title handle productType vendor featuredImage { url } variants(first: 1) { nodes { sku } } }
-          pageInfo { hasNextPage }
+          pageInfo { hasNextPage endCursor }
         }
       }`,
-      { first: params.pageSize, query: filters.join(" ") || null },
+      { first: params.pageSize, query: filters.join(" ") || null, after: after ?? null },
+    );
+
+    this.cursorForNextPage.set(
+      params.page + 1,
+      data.products.pageInfo.hasNextPage ? data.products.pageInfo.endCursor : null,
     );
 
     return {

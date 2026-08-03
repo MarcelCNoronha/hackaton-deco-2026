@@ -8,7 +8,6 @@ import {
   type EnrichmentField,
   type FreeQuotaStatus,
 } from "../api/client";
-import type { EnrichmentRun } from "../api/client";
 import { StatTile } from "../components/StatTile";
 import { CatalogFilterBar } from "../components/CatalogFilterBar";
 import { OptimizationFieldSelector } from "../components/OptimizationFieldSelector";
@@ -365,7 +364,7 @@ export function Runs() {
                           <div className="muted" style={{ fontSize: "0.72rem", marginTop: "0.3rem" }}>
                             {new Date(item.optimizedAt).toLocaleDateString("pt-BR")} · {formatCost(item.optimizationCostUsd ?? 0)}
                           </div>
-                          <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.35rem", flexWrap: "wrap" }}>
+                          <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.35rem", flexWrap: "wrap", justifyContent: "center" }}>
                             <Link
                               to={`/runs/${item.lastRunId}`}
                               className="link-button"
@@ -402,14 +401,20 @@ export function Runs() {
                             target="_blank"
                             rel="noreferrer"
                             className="link-button"
-                            style={{ display: "block", fontSize: "0.85rem", padding: "0.55rem 1.1rem" }}
+                            style={{ display: "block", fontSize: "0.85rem", padding: "0.55rem 1.1rem", ...toneStyle("good") }}
                           >
                             Ver Ativo ↗
                           </a>
                           <button
                             type="button"
                             className="link-button"
-                            style={{ display: "block", marginTop: "0.4rem", background: "transparent", border: "none" }}
+                            style={{
+                              display: "block",
+                              marginTop: "0.4rem",
+                              background: "transparent",
+                              border: "none",
+                              color: "var(--status-warning)",
+                            }}
                             onClick={() => handleOptimizeOne(item.externalId)}
                             disabled={optimizingIds.has(item.externalId)}
                           >
@@ -419,6 +424,7 @@ export function Runs() {
                       ) : (
                         <button
                           type="button"
+                          style={item.optimizedAt ? { background: "var(--status-warning)" } : undefined}
                           onClick={() => handleOptimizeOne(item.externalId)}
                           disabled={optimizingIds.has(item.externalId)}
                         >

@@ -7,6 +7,7 @@ import { requireAdmin } from "../../auth/guards.js";
 import { hashPassword } from "../../auth/password.js";
 import { generateToken, hashToken } from "../../auth/tokens.js";
 import { buildAccountSetupEmail, buildEmailClient } from "../../clients/email.client.js";
+import { resolveAppBaseUrl } from "./auth.routes.js";
 
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
 const SECTIONS = ["connections", "publish", "users"] as const;
@@ -80,8 +81,7 @@ export async function usersRoutes(app: FastifyInstance) {
       })
       .returning();
 
-    const origin = (req.headers.origin as string | undefined) ?? "http://localhost:5173";
-    const setupUrl = await issueSetupLink(created.id, created.email, origin);
+    const setupUrl = await issueSetupLink(created.id, created.email, resolveAppBaseUrl(req));
     return reply.send({ user: publicUser(created), setupUrl });
   });
 
@@ -122,8 +122,7 @@ export async function usersRoutes(app: FastifyInstance) {
     const target = await db.query.users.findFirst({ where: eq(users.id, targetId) });
     if (!target) return reply.status(404).send({ error: "Usuário não encontrado." });
 
-    const origin = (req.headers.origin as string | undefined) ?? "http://localhost:5173";
-    const resetUrl = await issueSetupLink(targetId, target.email, origin);
+    const resetUrl = await issueSetupLink(targetId, target.email, resolveAppBaseUrl(req));
     return reply.send({ resetUrl });
   });
 

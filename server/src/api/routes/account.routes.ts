@@ -8,7 +8,7 @@ import { twoFactorTrustedDevices, users } from "../../db/schema.js";
 import { requireAuth } from "../../auth/guards.js";
 import { hashPassword, verifyPassword } from "../../auth/password.js";
 import { destroyOtherSessionsForUser, getSessionContext } from "../../auth/session.js";
-import { encryptCredentials } from "../../security/encryption.js";
+import { decryptCredentials, encryptCredentials } from "../../security/encryption.js";
 
 const profileBody = z.object({ name: z.string().min(1) });
 const passwordBody = z.object({ currentPassword: z.string().min(1), newPassword: z.string().min(8) });
@@ -39,7 +39,10 @@ export async function accountRoutes(app: FastifyInstance) {
   app.post("/api/account/two-factor/setup", { preHandler: requireAuth }, async (req, reply) => {
     const user = req.authUser!;
     const secret = generateSecret();
-    await db.update(users).set({ pendingTwoFactorSecret: secret, updatedAt: new Date() }).where(eq(users.id, user.id));
+    await db
+      .update(users)
+      .set({ pendingTwoFactorSecret: encryptCredentials(secret), updatedAt: new Date() })
+      .where(eq(users.id, user.id));
 
     const uri = generateURI({ issuer: "CatalogIA", label: user.email, secret });
     const qrDataUrl = await QRCode.toDataURL(uri);
@@ -53,7 +56,8 @@ export async function accountRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: "Nenhuma configuração de 2FA em andamento — inicie de novo." });
     }
 
-    const result = await verify({ secret: user.pendingTwoFactorSecret, token: body.code });
+    const pendingSecret = decryptCredentials<string>(user.pendingTwoFactorSecret);
+    const result = await verify({ secret: pendingSecret, token: body.code });
     if (!result.valid) {
       return reply.status(401).send({ error: "Código inválido." });
     }
@@ -61,7 +65,7 @@ export async function accountRoutes(app: FastifyInstance) {
     await db
       .update(users)
       .set({
-        twoFactorSecretEncrypted: encryptCredentials(user.pendingTwoFactorSecret),
+        twoFactorSecretEncrypted: encryptCredentials(pendingSecret),
         twoFactorEnabled: true,
         pendingTwoFactorSecret: null,
         updatedAt: new Date(),

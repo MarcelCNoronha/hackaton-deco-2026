@@ -1,14 +1,24 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { eq, and, isNull, gt } from "drizzle-orm";
 import { verify } from "otplib";
 import { db } from "../../db/client.js";
 import { passwordResetTokens, twoFactorTrustedDevices, users } from "../../db/schema.js";
 import { hashPassword, verifyPassword } from "../../auth/password.js";
-import { createSession, destroyAllSessionsForUser, destroySession, getSessionContext, markSessionFullyAuthenticated } from "../../auth/session.js";
+import { createSession, destroyAllSessionsForUser, destroySession, getSessionContext, rotateSessionAfterTwoFactor } from "../../auth/session.js";
 import { generateToken, hashToken } from "../../auth/tokens.js";
 import { decryptCredentials } from "../../security/encryption.js";
 import { buildEmailClient, buildPasswordResetEmail } from "../../clients/email.client.js";
+import { env } from "../../config/env.js";
+
+/** Prefer the server-configured base URL over the request's `Origin` header — that header is
+ *  client-supplied, so trusting it lets an attacker redirect a real password-reset/invite email's
+ *  link to an attacker-controlled domain by just setting a different Origin on the request that
+ *  triggers it. Falls back to Origin (then localhost) only when APP_BASE_URL isn't set, so local
+ *  dev keeps working without extra config. */
+export function resolveAppBaseUrl(req: FastifyRequest): string {
+  return env.APP_BASE_URL ?? (req.headers.origin as string | undefined) ?? "http://localhost:5173";
+}
 
 const DEVICE_COOKIE = "device_token";
 const DEVICE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -110,7 +120,7 @@ export async function authRoutes(app: FastifyInstance) {
       return reply.status(401).send({ error: "Código inválido." });
     }
 
-    await markSessionFullyAuthenticated(ctx.session.id);
+    await rotateSessionAfterTwoFactor({ pendingSessionId: ctx.session.id, userId: ctx.user.id, req, reply });
 
     if (body.rememberDevice) {
       const deviceToken = generateToken();
@@ -157,8 +167,7 @@ export async function authRoutes(app: FastifyInstance) {
       expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS),
     });
 
-    const origin = (req.headers.origin as string | undefined) ?? "http://localhost:5173";
-    const resetUrl = `${origin}/reset-password?token=${token}`;
+    const resetUrl = `${resolveAppBaseUrl(req)}/reset-password?token=${token}`;
 
     const emailClient = buildEmailClient();
     if (!emailClient) {

@@ -24,17 +24,24 @@ import { buildGoogleAuthUrl, exchangeGoogleAuthCode } from "../../clients/google
 import { RECOMMENDATIONS, resolveModel } from "../../clients/model-recommendations.js";
 import { requireSection } from "../../auth/guards.js";
 
+// Both fields end up interpolated straight into a request URL (see vtex.client.ts's constructor)
+// alongside the account's AppKey/AppToken — an unvalidated value like "evil.com/" would send those
+// credentials to an attacker-controlled host. Restricted to what a real VTEX subdomain/environment
+// segment can contain.
+const VTEX_SEGMENT = /^[a-z0-9-]+$/;
 const vtexBody = z.object({
   displayName: z.string().min(1),
-  account: z.string().min(1),
-  environment: z.string().min(1).default("vtexcommercestable"),
+  account: z.string().min(1).regex(VTEX_SEGMENT, "Deve conter apenas letras minúsculas, números e hífen."),
+  environment: z.string().min(1).regex(VTEX_SEGMENT, "Deve conter apenas letras minúsculas, números e hífen.").default("vtexcommercestable"),
   appKey: z.string().min(1),
   appToken: z.string().min(1),
 });
 
+// Same concern as VTEX above — shopDomain is interpolated into the GraphQL endpoint URL alongside
+// the store's access token.
 const shopifyBody = z.object({
   displayName: z.string().min(1),
-  shopDomain: z.string().min(1),
+  shopDomain: z.string().min(1).regex(/^[a-z0-9-]+\.myshopify\.com$/, "Deve ser o domínio *.myshopify.com da loja."),
   accessToken: z.string().min(1),
 });
 

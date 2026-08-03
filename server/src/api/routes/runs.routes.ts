@@ -62,7 +62,19 @@ export async function runsRoutes(app: FastifyInstance) {
     }
 
     const { runId } = await createEnrichmentRun(body);
-    await enqueueEnrichmentRun({ runId, ...body });
+    try {
+      await enqueueEnrichmentRun({ runId, ...body });
+    } catch (err) {
+      // The run row is already committed as "running" — if it never actually gets a worker (e.g.
+      // Redis unreachable), it would otherwise stay "running" forever and permanently block
+      // publishing (POST /:id/publish 409s on that status). Mark it failed instead so it's visible
+      // and re-runnable.
+      await db
+        .update(enrichmentRuns)
+        .set({ status: "failed", finishedAt: new Date(), errorMessage: err instanceof Error ? err.message : String(err) })
+        .where(eq(enrichmentRuns.id, runId));
+      throw err;
+    }
     return reply.status(202).send({ runId });
   });
 

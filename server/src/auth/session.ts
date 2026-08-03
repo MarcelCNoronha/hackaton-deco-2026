@@ -71,8 +71,18 @@ export async function getSessionContext(req: FastifyRequest): Promise<SessionCon
   return { session, user };
 }
 
-export async function markSessionFullyAuthenticated(sessionId: string): Promise<void> {
-  await db.update(sessions).set({ twoFactorPending: false }).where(eq(sessions.id, sessionId));
+/** Elevates a 2FA-pending session to fully authenticated by deleting it and issuing a brand new
+ *  session, rather than flipping `twoFactorPending` on the same row — a session cookie planted
+ *  before the 2FA challenge (fixation) would otherwise ride along into a fully-authenticated
+ *  session just by having its owner complete 2FA. */
+export async function rotateSessionAfterTwoFactor(params: {
+  pendingSessionId: string;
+  userId: number;
+  req: FastifyRequest;
+  reply: FastifyReply;
+}): Promise<void> {
+  await db.delete(sessions).where(eq(sessions.id, params.pendingSessionId));
+  await createSession({ userId: params.userId, twoFactorPending: false, req: params.req, reply: params.reply });
 }
 
 export async function destroySession(req: FastifyRequest, reply: FastifyReply): Promise<void> {

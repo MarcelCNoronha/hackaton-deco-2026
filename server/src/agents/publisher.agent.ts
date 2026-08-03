@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { enrichmentProposals, products } from "../db/schema.js";
 import type { CatalogClient } from "../clients/catalog-types.js";
@@ -13,12 +13,18 @@ export async function publishApprovedProposals(params: {
     where: and(eq(enrichmentProposals.runId, params.runId), eq(enrichmentProposals.status, "approved")),
   });
 
+  // A product with multiple approved proposals (e.g. description + several alt-texts) would
+  // otherwise refetch the same row once per proposal — one batched lookup instead.
+  const productIds = [...new Set(approved.map((p) => p.productId))];
+  const productRows = productIds.length ? await db.query.products.findMany({ where: inArray(products.id, productIds) }) : [];
+  const productById = new Map(productRows.map((p) => [p.id, p]));
+
   let published = 0;
   let failed = 0;
 
   for (const proposal of approved) {
     try {
-      const product = await db.query.products.findFirst({ where: eq(products.id, proposal.productId) });
+      const product = productById.get(proposal.productId);
       if (!product) throw new Error(`Product ${proposal.productId} not found`);
 
       if (proposal.field === "description") {

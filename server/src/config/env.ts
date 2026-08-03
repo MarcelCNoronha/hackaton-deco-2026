@@ -20,6 +20,12 @@ const envSchema = z.object({
   // Google/OpenAI-optional integrations elsewhere in this app.
   RESEND_API_KEY: z.string().optional(),
   RESEND_FROM_EMAIL: z.string().optional(),
+  // Base URL used to build password-reset/invite links (e.g. "https://app.example.com").
+  // Deliberately NOT derived from the request's Origin header — that header is
+  // client-supplied and trusting it lets an attacker redirect a real reset email's link
+  // to an attacker-controlled domain. Falls back to the request Origin (then localhost)
+  // only when unset, so local dev keeps working without extra config.
+  APP_BASE_URL: z.string().url().optional(),
 });
 
 export const env = envSchema.parse(process.env);

@@ -3,6 +3,7 @@ import {
   bigint,
   bigserial,
   boolean,
+  index,
   integer,
   jsonb,
   numeric,
@@ -75,7 +76,9 @@ export const products = pgTable("products", {
   embedding: vector("embedding", { dimensions: 1536 }),
   lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => ({
+  vtexProductIdIdx: index("products_vtex_product_id_idx").on(table.vtexProductId),
+}));
 
 /** GSC/GA4 snapshots per product, used to prioritize and to prove before/after impact. */
 export const productMetrics = pgTable("product_metrics", {
@@ -94,7 +97,9 @@ export const productMetrics = pgTable("product_metrics", {
   conversionRate: numeric("conversion_rate"),
   revenue: numeric("revenue"),
   fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => ({
+  productIdIdx: index("product_metrics_product_id_idx").on(table.productId),
+}));
 
 /** Top-level tracking for one enrichment pipeline execution — mirrors Mundial's integration_sync_runs. */
 export const enrichmentRuns = pgTable("enrichment_runs", {
@@ -132,7 +137,11 @@ export const enrichmentProposals = pgTable("enrichment_proposals", {
   reusedFromProductId: bigint("reused_from_product_id", { mode: "number" }).references(() => products.id),
   reusedSimilarity: numeric("reused_similarity"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => ({
+  runIdIdx: index("enrichment_proposals_run_id_idx").on(table.runId),
+  productIdIdx: index("enrichment_proposals_product_id_idx").on(table.productId),
+  statusIdx: index("enrichment_proposals_status_idx").on(table.status),
+}));
 
 /** Before/after content quality score for a product within a run — the "does this actually help
  *  the user" evidence that doesn't have to wait on Google's crawl/re-rank lag. checklistScore is
@@ -156,7 +165,9 @@ export const contentScores = pgTable("content_scores", {
   // How many quality-gate drafts it took to land on this score — always 1 for "original".
   attempts: integer("attempts").notNull().default(1),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => ({
+  runIdIdx: index("content_scores_run_id_idx").on(table.runId),
+}));
 
 /** Fine-grained log of every external API call — proves retry/error handling actually works. */
 export const agentRequestLogs = pgTable("agent_request_logs", {
@@ -180,7 +191,9 @@ export const agentRequestLogs = pgTable("agent_request_logs", {
   costUsd: numeric("cost_usd"),
   productId: bigint("product_id", { mode: "number" }).references(() => products.id),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => ({
+  runIdIdx: index("agent_request_logs_run_id_idx").on(table.runId),
+}));
 
 /** Which provider+model runs each pipeline task — always exactly 3 rows (one per task), upserted
  *  together from the Connections panel's "Roteamento de modelos" section. Replaces the old
@@ -260,7 +273,9 @@ export const sessions = pgTable("sessions", {
   lastActivityAt: timestamp("last_activity_at", { withTimezone: true }).notNull().defaultNow(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => ({
+  userIdIdx: index("sessions_user_id_idx").on(table.userId),
+}));
 
 /** One-time password-reset tokens — `tokenHash` (sha256 of the raw token) is stored, never the raw
  *  token itself, same as the raw token never touching disk anywhere except the one-time link shown

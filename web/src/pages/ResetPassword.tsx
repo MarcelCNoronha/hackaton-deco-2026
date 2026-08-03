@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
+import { PasswordInput } from "../components/PasswordInput";
 
 export function ResetPassword() {
   const [params] = useSearchParams();
@@ -52,16 +53,14 @@ export function ResetPassword() {
           <form onSubmit={handleSubmit}>
             <h1 style={{ fontSize: "1.15rem", margin: "0 0 0.3rem" }}>Definir nova senha</h1>
             <div className="auth-form">
-              <input
-                type="password"
+              <PasswordInput
                 placeholder="Nova senha (mín. 8 caracteres)"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoFocus
                 required
               />
-              <input
-                type="password"
+              <PasswordInput
                 placeholder="Confirmar nova senha"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}

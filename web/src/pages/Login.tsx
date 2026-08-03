@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
+import { PasswordInput } from "../components/PasswordInput";
 
 export function Login() {
   const navigate = useNavigate();
@@ -73,13 +74,7 @@ export function Login() {
                 autoFocus
                 required
               />
-              <input
-                type="password"
-                placeholder="Senha"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
+              <PasswordInput placeholder="Senha" value={password} onChange={(e) => setPassword(e.target.value)} required />
             </div>
             {error && <div className="banner">{error}</div>}
             <div className="actions" style={{ flexDirection: "column" }}>
