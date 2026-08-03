@@ -1,23 +1,23 @@
 :root {
   color-scheme: dark;
-  --page-plane: #0d0d0d;
-  --surface-1: #1a1a19;
-  --surface-2: #201f1e;
-  --text-primary: #ffffff;
-  --text-secondary: #c3c2b7;
-  --text-muted: #898781;
-  --gridline: #2c2c2a;
-  --baseline: #383835;
-  --border: rgba(255, 255, 255, 0.1);
+  --page-plane: #0b0e17;
+  --surface-1: #121828;
+  --surface-2: #1a2137;
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #8b93a7;
+  --gridline: #232a42;
+  --baseline: #2a3350;
+  --border: rgba(148, 163, 184, 0.16);
 
-  --accent: #3987e5;
-  --accent-soft: rgba(57, 135, 229, 0.16);
-  --accent-faint: rgba(57, 135, 229, 0.45);
+  --accent: #3b82f6;
+  --accent-soft: rgba(59, 130, 246, 0.16);
+  --accent-faint: rgba(59, 130, 246, 0.45);
 
-  --status-good: #0ca30c;
-  --status-warning: #fab219;
-  --status-serious: #ec835a;
-  --status-critical: #e66767;
+  --status-good: #22c55e;
+  --status-warning: #f59e0b;
+  --status-serious: #fb7185;
+  --status-critical: #ef4444;
 
   --radius-sm: 6px;
   --radius-md: 10px;
@@ -333,6 +333,39 @@ a {
   color: var(--status-critical);
 }
 
+.status-filter-tile {
+  grid-column: span 2;
+}
+
+.status-filter-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.2rem;
+}
+
+.pill-btn {
+  padding: 0.3rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.pill-btn:hover {
+  filter: brightness(1.15);
+}
+
+.pill-btn.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
 /* ---------- Cards ---------- */
 
 .card {
@@ -385,6 +418,37 @@ select {
 .form-grid input,
 .form-grid select {
   flex: 1 1 200px;
+}
+
+.search-input-wrap {
+  position: relative;
+  flex: 1 1 200px;
+  display: flex;
+}
+
+.search-input-wrap input {
+  flex: 1 1 auto;
+  width: 100%;
+  padding-left: 2.1rem;
+}
+
+.search-input-icon {
+  position: absolute;
+  left: 0.7rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  font-size: 1rem;
+  pointer-events: none;
+}
+
+.filter-submit-btn {
+  background: var(--text-primary);
+  color: var(--page-plane);
+}
+
+.filter-submit-btn:hover:not(:disabled) {
+  filter: brightness(0.92);
 }
 
 .form-grid input:focus,

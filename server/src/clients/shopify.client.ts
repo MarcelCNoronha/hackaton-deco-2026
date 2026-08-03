@@ -115,14 +115,26 @@ export class ShopifyClient implements CatalogClient {
     };
   }
 
+  /** Root-level `productTypes`/`productVendors` return every distinct value storefront-wide —
+   *  verified live against a real store. Shopify has no separate id for either (unlike VTEX's
+   *  numeric category/brand ids), so the string itself doubles as id and label; listProducts'
+   *  `product_type:"..."`/`vendor:"..."` search filters accept that same string back. */
   async listFilterOptions(): Promise<CatalogFilterOptions> {
-    // Shopify doesn't expose a single stable "list all distinct product types/vendors" query the
-    // way VTEX exposes a category tree + brand list — the free-text search in listProducts()
-    // still works standalone. Populating these dropdowns properly needs a real store to confirm
-    // the right query (candidates: paginating distinct `productType`/`vendor` off `products`, or
-    // the shop-level `productTypes`/`productVendors` connections) — left empty until then rather
-    // than shipping a guessed query that would fail at runtime.
-    return { categories: [], brands: [] };
+    type Resp = {
+      productTypes: { edges: Array<{ node: string }> };
+      productVendors: { edges: Array<{ node: string }> };
+    };
+    const data = await this.graphql<Resp>(
+      "listFilterOptions",
+      `query ListFilterOptions {
+        productTypes(first: 250) { edges { node } }
+        productVendors(first: 250) { edges { node } }
+      }`,
+    );
+    return {
+      categories: data.productTypes.edges.filter((e) => e.node).map((e) => ({ id: e.node, name: e.node })),
+      brands: data.productVendors.edges.filter((e) => e.node).map((e) => ({ id: e.node, name: e.node })),
+    };
   }
 
   async getProduct(externalId: string): Promise<CatalogProductDetail> {

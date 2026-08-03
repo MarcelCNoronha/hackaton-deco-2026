@@ -15,11 +15,16 @@ export function CatalogFilterBar(props: {
 }) {
   return (
     <form onSubmit={props.onSubmit} className="form-grid">
-      <input
-        placeholder={props.searchPlaceholder ?? "Buscar por nome ou SKU"}
-        value={props.search}
-        onChange={(e) => props.setSearch(e.target.value)}
-      />
+      <span className="search-input-wrap">
+        <span className="search-input-icon" aria-hidden="true">
+          ⌕
+        </span>
+        <input
+          placeholder={props.searchPlaceholder ?? "Buscar por nome ou SKU"}
+          value={props.search}
+          onChange={(e) => props.setSearch(e.target.value)}
+        />
+      </span>
       <select value={props.categoryId} onChange={(e) => props.setCategoryId(e.target.value)}>
         <option value="">Todas as categorias</option>
         {props.filters?.categories.map((c) => (
@@ -36,7 +41,9 @@ export function CatalogFilterBar(props: {
           </option>
         ))}
       </select>
-      <button type="submit">Buscar</button>
+      <button type="submit" className="filter-submit-btn">
+        Filtrar
+      </button>
     </form>
   );
 }

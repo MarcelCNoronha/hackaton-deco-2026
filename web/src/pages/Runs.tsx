@@ -263,6 +263,35 @@ export function Runs() {
           <StatTile label="Total Otimizados" value={optimizedCount} />
           <StatTile label="A Validar" value={pendingReviewCount} />
           <StatTile label="Taxa de Precisão" value={avgPrecision !== null ? `${Math.round(avgPrecision)}%` : "—"} />
+          <div className="stat-tile status-filter-tile">
+            <span className="stat-label">Filtro de Status</span>
+            <div className="status-filter-pills">
+              <button
+                type="button"
+                className={`pill-btn ${statusFilter.size === 3 ? "is-active" : ""}`}
+                onClick={() => setStatusFilter(new Set(["none", "pending", "published"]))}
+              >
+                Todos
+              </button>
+              {(Object.keys(STATUS_GROUP_LABELS) as StatusGroup[]).map((group) => (
+                <button
+                  key={group}
+                  type="button"
+                  className={`pill-btn ${statusFilter.size !== 3 && statusFilter.has(group) ? "is-active" : ""}`}
+                  onClick={() =>
+                    setStatusFilter((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(group)) next.delete(group);
+                      else next.add(group);
+                      return next;
+                    })
+                  }
+                >
+                  {STATUS_GROUP_LABELS[group]}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         <section className="card">
@@ -278,29 +307,6 @@ export function Runs() {
             filters={filters}
             onSubmit={handleSearch}
           />
-
-          <div className="actions" style={{ marginTop: "0.6rem", alignItems: "center" }}>
-            <span className="muted" style={{ fontSize: "0.8rem" }}>
-              Status:
-            </span>
-            {(Object.keys(STATUS_GROUP_LABELS) as StatusGroup[]).map((group) => (
-              <button
-                key={group}
-                type="button"
-                className={statusFilter.has(group) ? "" : "secondary"}
-                onClick={() =>
-                  setStatusFilter((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(group)) next.delete(group);
-                    else next.add(group);
-                    return next;
-                  })
-                }
-              >
-                {STATUS_GROUP_LABELS[group]}
-              </button>
-            ))}
-          </div>
 
           {catalogError && (
             <div className="banner" style={{ marginTop: "0.75rem" }}>
@@ -336,7 +342,9 @@ export function Runs() {
                       </div>
                       {item.category && <span className="pill product-tag">{item.category}</span>}
                       <div className="product-row-title">{item.title}</div>
-                      {item.url && (
+                      {/* Only shown here when there's no "Ver Ativo" action button already covering
+                          the same link (published items) — avoids showing the same link twice. */}
+                      {item.url && item.optimizationStatus !== "published" && (
                         <a href={item.url} target="_blank" rel="noreferrer" className="link-button" style={{ fontSize: "0.75rem" }}>
                           Ver na loja ↗
                         </a>
@@ -387,13 +395,36 @@ export function Runs() {
                       )}
                     </div>
                     <div className="product-row-action">
-                      <button
-                        type="button"
-                        onClick={() => handleOptimizeOne(item.externalId)}
-                        disabled={optimizingIds.has(item.externalId)}
-                      >
-                        {optimizingIds.has(item.externalId) ? "Enviando…" : item.optimizedAt ? "Refazer" : "Otimizar"}
-                      </button>
+                      {item.optimizationStatus === "published" && item.url ? (
+                        <>
+                          <a
+                            href={item.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="link-button"
+                            style={{ display: "block", fontSize: "0.85rem", padding: "0.55rem 1.1rem" }}
+                          >
+                            Ver Ativo ↗
+                          </a>
+                          <button
+                            type="button"
+                            className="link-button"
+                            style={{ display: "block", marginTop: "0.4rem", background: "transparent", border: "none" }}
+                            onClick={() => handleOptimizeOne(item.externalId)}
+                            disabled={optimizingIds.has(item.externalId)}
+                          >
+                            {optimizingIds.has(item.externalId) ? "Enviando…" : "🪄 Refazer"}
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleOptimizeOne(item.externalId)}
+                          disabled={optimizingIds.has(item.externalId)}
+                        >
+                          {optimizingIds.has(item.externalId) ? "Enviando…" : `🪄 ${item.optimizedAt ? "Refazer" : "Otimizar"}`}
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
