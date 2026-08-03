@@ -20,8 +20,10 @@ import { syncCatalogByProductIds, type ProductRow } from "../agents/catalog-read
 import { prioritizeProducts } from "../agents/analyst.agent.js";
 import { proposeContentEnrichment } from "../agents/content-enrichment.agent.js";
 import { proposeImageAltText } from "../agents/image-alttext.agent.js";
+import { generateProductImage } from "../agents/image-generation.agent.js";
 import { publishApprovedProposals } from "../agents/publisher.agent.js";
 import { buildEmbeddingText, saveEmbedding } from "../repositories/product-similarity.repo.js";
+import { IMAGE_GENERATION_MODEL } from "../clients/model-recommendations.js";
 
 export interface StartEnrichmentRunParams {
   /** Seleção manual de produtos. Exatamente um entre isto e catalogFilter é esperado. */
@@ -38,6 +40,11 @@ export interface StartEnrichmentRunParams {
   fields?: EnrichmentField[];
   /** Whether to also run the (separate, per-image) alt-text pass. Defaults to true. */
   includeAltText?: boolean;
+  /** Which AI-generated marketing image kinds to produce per product (see the optimization
+   *  selector). Undefined/empty means none — image generation is opt-in due to its per-image cost,
+   *  unlike the text fields above which default to "all". Requires a Gemini connection; skipped
+   *  (per-product, not run-wide) for any product with zero reference images to compose from. */
+  imageKinds?: Array<"lifestyle" | "feature_callout">;
 }
 
 /** Safety ceiling on how many products a catalogFilter run fetches to consider for ranking —
@@ -71,15 +78,24 @@ async function buildCatalogClient(logger: (entry: RequestLogEntry) => void | Pro
   return new ShopifyClient(credentials as ShopifyCredentials, logger);
 }
 
-async function requireConnectedClients(runId: number) {
+async function requireConnectedClients(runId: number, imageKinds?: Array<"lifestyle" | "feature_callout">) {
   const logger = makeRequestLogger(runId);
 
-  const [catalog, googleCreds, openaiCreds, routing] = await Promise.all([
+  const [catalog, googleCreds, openaiCreds, geminiCreds, routing] = await Promise.all([
     buildCatalogClient(logger),
     getConnectionCredentials("google"),
     getConnectionCredentials("openai"),
+    imageKinds && imageKinds.length > 0 ? getConnectionCredentials<"gemini">("gemini") : Promise.resolve(null),
     getModelRouting(),
   ]);
+
+  // Only required when the user actually opted into image generation for this run (see
+  // imageKinds on StartEnrichmentRunParams) — unlike the routed content/eval/alt-text providers,
+  // Gemini for image generation is never picked via model_routing (there's no non-Gemini option).
+  if (imageKinds && imageKinds.length > 0 && !geminiCreds) {
+    throw new Error("Conexão Gemini não está configurada — necessária para gerar imagens com IA. Configure no painel de Integrações primeiro.");
+  }
+  const imageGemini = geminiCreds ? new GeminiClient(geminiCreds.apiKey, IMAGE_GENERATION_MODEL, logger) : null;
 
   // Google (GSC/GA4) is only needed to *rank* candidates when topN trims a larger pool — a run
   // without topN, or with candidateProductIds already at the target size, doesn't need it at all.
@@ -115,6 +131,7 @@ async function requireConnectedClients(runId: number) {
     gsc,
     ga4,
     embeddings,
+    imageGemini,
     contentLlm: clientFor("contentEnrichment"),
     evaluatorLlm: clientFor("evaluator"),
     imageLlm: clientFor("imageAltText"),
@@ -193,7 +210,10 @@ export async function executeEnrichmentRun(runId: number, params: StartEnrichmen
     await db.delete(enrichmentProposals).where(eq(enrichmentProposals.runId, runId));
     await db.delete(contentScores).where(eq(contentScores.runId, runId));
 
-    const { catalog, gsc, ga4, embeddings, contentLlm, evaluatorLlm, imageLlm } = await requireConnectedClients(runId);
+    const { catalog, gsc, ga4, embeddings, imageGemini, contentLlm, evaluatorLlm, imageLlm } = await requireConnectedClients(
+      runId,
+      params.imageKinds,
+    );
 
     const candidateProductIds = await resolveCandidateProductIds(catalog, params);
     const syncedProducts = await syncCatalogByProductIds(catalog, candidateProductIds);
@@ -218,8 +238,9 @@ export async function executeEnrichmentRun(runId: number, params: StartEnrichmen
     // distinct from `undefined`, which keeps the pre-existing "all 5 fields" default.
     const runContent = !params.fields || params.fields.length > 0;
     const runAltText = params.includeAltText ?? true;
+    const imageKinds = params.imageKinds ?? [];
 
-    const [contentResults, imageResults] = await Promise.all([
+    const [contentResults, imageResults, imageGenResults] = await Promise.all([
       runContent
         ? Promise.allSettled(
             targetProducts.map((product) =>
@@ -237,11 +258,21 @@ export async function executeEnrichmentRun(runId: number, params: StartEnrichmen
       runAltText
         ? Promise.allSettled(targetProducts.map((product) => proposeImageAltText({ llm: imageLlm, runId, product })))
         : Promise.resolve([]),
+      // One task per (product, kind) pair — a product with no reference images fails just that
+      // pair (see generateProductImage's guard), never the whole run.
+      imageKinds.length > 0 && imageGemini
+        ? Promise.allSettled(
+            targetProducts.flatMap((product) =>
+              imageKinds.map((kind) => generateProductImage({ gemini: imageGemini, product, kind })),
+            ),
+          )
+        : Promise.resolve([]),
     ]);
 
-    const failures = [...contentResults, ...imageResults].filter((r) => r.status === "rejected");
-    const totalTasks = contentResults.length + imageResults.length;
+    const failures = [...contentResults, ...imageResults, ...imageGenResults].filter((r) => r.status === "rejected");
+    const totalTasks = contentResults.length + imageResults.length + imageGenResults.length;
     const durationMs = Date.now() - startedAt;
+    const imagesGenerated = imageGenResults.filter((r) => r.status === "fulfilled").length;
 
     const fulfilledContent = contentResults.filter(
       (r): r is PromiseFulfilledResult<{ attempts: number; finalScore: number; reused: boolean }> =>
@@ -276,6 +307,7 @@ export async function executeEnrichmentRun(runId: number, params: StartEnrichmen
           avgFinalContentScore: Math.round(avgFinalScore),
           totalCostUsd: Number(costRow?.totalCostUsd ?? 0),
           reusedCount,
+          imagesGenerated,
         },
       })
       .where(eq(enrichmentRuns.id, runId));

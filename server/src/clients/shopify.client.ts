@@ -82,7 +82,7 @@ export class ShopifyClient implements CatalogClient {
   async listProducts(params: CatalogListParams): Promise<CatalogListResult> {
     const filters: string[] = [];
     if (params.search) filters.push(params.search);
-    if (params.categoryId) filters.push(`product_type:${JSON.stringify(params.categoryId)}`);
+    if (params.categoryId) filters.push(`collection_id:${params.categoryId}`);
     if (params.brandId) filters.push(`vendor:${JSON.stringify(params.brandId)}`);
 
     type Resp = {
@@ -139,24 +139,26 @@ export class ShopifyClient implements CatalogClient {
     };
   }
 
-  /** Root-level `productTypes`/`productVendors` return every distinct value storefront-wide —
-   *  verified live against a real store. Shopify has no separate id for either (unlike VTEX's
-   *  numeric category/brand ids), so the string itself doubles as id and label; listProducts'
-   *  `product_type:"..."`/`vendor:"..."` search filters accept that same string back. */
+  /** "Categoria" for Shopify is real Collections (verified live: `collections(first)` root query +
+   *  `collection_id:<numericId>` product search filter both work against a real store) — matching
+   *  what the product list's "Coleção" column already shows, instead of the `productType` field
+   *  used before. `productVendors` (brand filter) is unrelated and unchanged. Collection GIDs
+   *  (`gid://shopify/Collection/123`) are trimmed to the trailing numeric id, which is what the
+   *  `collection_id:` search filter expects back. */
   async listFilterOptions(): Promise<CatalogFilterOptions> {
     type Resp = {
-      productTypes: { edges: Array<{ node: string }> };
+      collections: { edges: Array<{ node: { id: string; title: string } }> };
       productVendors: { edges: Array<{ node: string }> };
     };
     const data = await this.graphql<Resp>(
       "listFilterOptions",
       `query ListFilterOptions {
-        productTypes(first: 250) { edges { node } }
+        collections(first: 250, sortKey: TITLE) { edges { node { id title } } }
         productVendors(first: 250) { edges { node } }
       }`,
     );
     return {
-      categories: data.productTypes.edges.filter((e) => e.node).map((e) => ({ id: e.node, name: e.node })),
+      categories: data.collections.edges.map((e) => ({ id: e.node.id.split("/").pop()!, name: e.node.title })),
       brands: data.productVendors.edges.filter((e) => e.node).map((e) => ({ id: e.node, name: e.node })),
     };
   }

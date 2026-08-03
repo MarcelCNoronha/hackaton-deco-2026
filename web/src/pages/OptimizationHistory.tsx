@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, type CatalogFilterOptions, type EnrichmentRun } from "../api/client";
+import { api, type CatalogFilterOptions, type CatalogPlatform, type EnrichmentRun } from "../api/client";
 import { StatTile } from "../components/StatTile";
 import { StatusBadge } from "../components/StatusBadge";
 import { CatalogFilterBar } from "../components/CatalogFilterBar";
@@ -12,6 +12,7 @@ export function OptimizationHistory() {
   const [categoryId, setCategoryId] = useState("");
   const [brandId, setBrandId] = useState("");
   const [filters, setFilters] = useState<CatalogFilterOptions | null>(null);
+  const [platform, setPlatform] = useState<CatalogPlatform>("vtex");
 
   // Background polling always re-applies whatever was last searched, without refetching on every
   // keystroke — the ref sidesteps the interval closure going stale without needing a draft/applied
@@ -27,6 +28,7 @@ export function OptimizationHistory() {
     api.catalogFilters()
       .then(setFilters)
       .catch(() => setFilters({ categories: [], brands: [] }));
+    api.getCatalogPlatform().then(({ platform }) => setPlatform(platform));
     refresh().catch((err) => console.error("Failed to refresh run history", err));
     const interval = setInterval(() => {
       refresh().catch((err) => console.error("Failed to refresh run history", err));
@@ -82,6 +84,7 @@ export function OptimizationHistory() {
             setBrandId={setBrandId}
             filters={filters}
             onSubmit={handleSearch}
+            platform={platform}
           />
 
           {runs.length === 0 ? (

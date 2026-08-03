@@ -36,6 +36,8 @@ export interface CatalogFilterOptions {
 
 export interface CatalogListParams {
   search?: string;
+  /** VTEX: category id (tree node). Shopify: Collection id — filters by the same Collections
+   *  membership shown in the product list's "Coleção" column, not the productType field. */
   categoryId?: string;
   brandId?: string;
   page: number;

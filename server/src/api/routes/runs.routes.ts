@@ -32,6 +32,7 @@ const createRunBody = z
     topN: z.number().int().positive().optional(),
     fields: z.array(z.enum(ALL_ENRICHMENT_FIELDS as [EnrichmentField, ...EnrichmentField[]])).optional(),
     includeAltText: z.boolean().optional(),
+    imageKinds: z.array(z.enum(["lifestyle", "feature_callout"])).optional(),
   })
   .refine((body) => Boolean(body.candidateProductIds) !== Boolean(body.catalogFilter), {
     message: "Informe exatamente um entre candidateProductIds (seleção manual) e catalogFilter (otimização total).",

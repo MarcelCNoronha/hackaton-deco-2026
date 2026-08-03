@@ -1,5 +1,5 @@
 import { ALL_ENRICHMENT_FIELDS, type EnrichmentField } from "../clients/llm-types.js";
-import { priceForModel } from "../clients/model-recommendations.js";
+import { IMAGE_GENERATION_PRICE_PER_IMAGE, priceForModel } from "../clients/model-recommendations.js";
 import { getModelRouting } from "../repositories/model-routing.repo.js";
 
 /** Rough output-token sizes per field, calibrated against the typical response size each field's
@@ -26,7 +26,8 @@ const ALT_TEXT_OUTPUT_TOKENS_PER_IMAGE = 40;
  *  actually billed once the run executes. */
 const AVG_IMAGES_PER_PRODUCT = 4;
 
-export type EstimableField = EnrichmentField | "alt_text";
+export type ImageGenKind = "lifestyle" | "feature_callout";
+export type EstimableField = EnrichmentField | "alt_text" | ImageGenKind;
 
 export interface FieldCostEstimate {
   field: EstimableField;
@@ -41,6 +42,8 @@ const FIELD_LABELS: Record<EstimableField, string> = {
   faq: "FAQ (GEO)",
   structured_data: "Dados estruturados (schema.org)",
   alt_text: "Alt-text de imagens",
+  lifestyle: "Foto ambientada gerada por IA",
+  feature_callout: "Foto de destaque gerada por IA",
 };
 
 /** Estimates a per-field cost preview for `productCount` products, using whichever provider/model
@@ -79,6 +82,12 @@ export async function estimateFieldCosts(productCount: number): Promise<{
       ((ALT_TEXT_INPUT_TOKENS_PER_IMAGE / 1_000_000) * imagePricing.input +
         (ALT_TEXT_OUTPUT_TOKENS_PER_IMAGE / 1_000_000) * imagePricing.output),
   });
+
+  // Flat per-image price (not token-based, see IMAGE_GENERATION_PRICE_PER_IMAGE) — one image per
+  // product per selected kind, unlike alt-text's per-catalog-image average above.
+  for (const kind of ["lifestyle", "feature_callout"] as const) {
+    estimates.push({ field: kind, label: FIELD_LABELS[kind], estimatedCostUsd: productCount * IMAGE_GENERATION_PRICE_PER_IMAGE });
+  }
 
   return {
     estimates,

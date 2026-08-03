@@ -8,6 +8,7 @@ import {
   type CatalogProductSummary,
   type EnrichmentField,
   type FreeQuotaStatus,
+  type ImageGenKind,
 } from "../api/client";
 import { StatTile } from "../components/StatTile";
 import { CatalogFilterBar } from "../components/CatalogFilterBar";
@@ -180,7 +181,7 @@ export function Runs() {
     setPendingSingle(externalId);
   }
 
-  function confirmSingleOptimize(fields: EnrichmentField[], includeAltText: boolean) {
+  function confirmSingleOptimize(fields: EnrichmentField[], includeAltText: boolean, imageKinds: ImageGenKind[]) {
     const externalId = pendingSingle;
     setPendingSingle(null);
     if (!externalId || optimizingRef.current.has(externalId)) return;
@@ -188,7 +189,7 @@ export function Runs() {
     setOptimizingIds(new Set(optimizingRef.current));
     setRunError(null);
     api
-      .createRun({ candidateProductIds: [externalId], fields, includeAltText })
+      .createRun({ candidateProductIds: [externalId], fields, includeAltText, imageKinds })
       .then(() => {
         refreshOptimizedCount();
         loadProducts(page);
@@ -209,7 +210,7 @@ export function Runs() {
     setPendingBulk(true);
   }
 
-  function confirmBulkOptimize(fields: EnrichmentField[], includeAltText: boolean) {
+  function confirmBulkOptimize(fields: EnrichmentField[], includeAltText: boolean, imageKinds: ImageGenKind[]) {
     setPendingBulk(false);
     setCreating(true);
     setRunError(null);
@@ -219,8 +220,9 @@ export function Runs() {
           topN: topN ? Number(topN) : undefined,
           fields,
           includeAltText,
+          imageKinds,
         }
-      : { candidateProductIds: [...selectedIds], topN: topN ? Number(topN) : undefined, fields, includeAltText };
+      : { candidateProductIds: [...selectedIds], topN: topN ? Number(topN) : undefined, fields, includeAltText, imageKinds };
 
     api
       .createRun(body)
@@ -280,6 +282,11 @@ export function Runs() {
                   className={`pill-btn ${statusFilter.size !== 3 && statusFilter.has(group) ? "is-active" : ""}`}
                   onClick={() =>
                     setStatusFilter((prev) => {
+                      // Coming from "Todos" (all 3 selected), clicking one filter narrows down to
+                      // just that one — the opposite of a plain toggle, which would instead have
+                      // *removed* it and left the other two selected (the one just clicked ending
+                      // up the only unselected one, backwards from what clicking it should mean).
+                      if (prev.size === 3) return new Set([group]);
                       const next = new Set(prev);
                       if (next.has(group)) next.delete(group);
                       else next.add(group);
@@ -306,6 +313,7 @@ export function Runs() {
             setBrandId={setBrandId}
             filters={filters}
             onSubmit={handleSearch}
+            platform={platform}
           />
 
           {catalogError && (
@@ -490,7 +498,7 @@ export function Runs() {
           productCount={1}
           confirmLabel="Confirmar otimização"
           onCancel={() => setPendingSingle(null)}
-          onConfirm={({ fields, includeAltText }) => confirmSingleOptimize(fields, includeAltText)}
+          onConfirm={({ fields, includeAltText, imageKinds }) => confirmSingleOptimize(fields, includeAltText, imageKinds)}
         />
       )}
       {pendingBulk && (
@@ -498,7 +506,7 @@ export function Runs() {
           productCount={selectAllMatching ? (topN ? Number(topN) : 50) : selectedIds.size}
           confirmLabel="Confirmar otimização"
           onCancel={() => setPendingBulk(false)}
-          onConfirm={({ fields, includeAltText }) => confirmBulkOptimize(fields, includeAltText)}
+          onConfirm={({ fields, includeAltText, imageKinds }) => confirmBulkOptimize(fields, includeAltText, imageKinds)}
         />
       )}
     </>

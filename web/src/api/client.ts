@@ -120,7 +120,8 @@ export const ALL_ENRICHMENT_FIELDS: EnrichmentField[] = [
   "faq",
   "structured_data",
 ];
-export type EstimableField = EnrichmentField | "alt_text";
+export type ImageGenKind = "lifestyle" | "feature_callout";
+export type EstimableField = EnrichmentField | "alt_text" | ImageGenKind;
 
 export interface FieldCostEstimate {
   field: EstimableField;
@@ -315,6 +316,7 @@ export const api = {
     topN?: number;
     fields?: EnrichmentField[];
     includeAltText?: boolean;
+    imageKinds?: ImageGenKind[];
   }) => request<{ runId: number }>("/runs", { method: "POST", body: JSON.stringify(body) }),
   fieldCostEstimates: (productCount: number) =>
     request<{ estimates: FieldCostEstimate[]; note: string }>(`/runs/field-estimates?productCount=${productCount}`),

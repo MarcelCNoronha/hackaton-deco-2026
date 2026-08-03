@@ -1,22 +1,35 @@
 import { useEffect, useState } from "react";
-import { api, ALL_ENRICHMENT_FIELDS, type EnrichmentField, type EstimableField, type FieldCostEstimate } from "../api/client";
+import {
+  api,
+  ALL_ENRICHMENT_FIELDS,
+  type EnrichmentField,
+  type EstimableField,
+  type FieldCostEstimate,
+  type ImageGenKind,
+} from "../api/client";
 import { formatCost } from "../lib/currency";
 
 interface Props {
   productCount: number;
   confirmLabel: string;
   onCancel: () => void;
-  onConfirm: (selection: { fields: EnrichmentField[]; includeAltText: boolean }) => void;
+  onConfirm: (selection: { fields: EnrichmentField[]; includeAltText: boolean; imageKinds: ImageGenKind[] }) => void;
 }
 
 const ALT_TEXT_LABEL_FALLBACK = "Alt-text de imagens";
+const IMAGE_GEN_KINDS: Array<{ kind: ImageGenKind; fallbackLabel: string }> = [
+  { kind: "lifestyle", fallbackLabel: "Foto ambientada gerada por IA" },
+  { kind: "feature_callout", fallbackLabel: "Foto de destaque gerada por IA" },
+];
 
 /** Confirmation step before creating a run: pick which fields to generate and see an estimated
  *  cost per field (fetched from whichever provider/model is actually routed) before committing —
  *  the LLM call itself only requests the fields still checked here (see enrichment-schema.ts). */
 export function OptimizationFieldSelector({ productCount, confirmLabel, onCancel, onConfirm }: Props) {
   const [checked, setChecked] = useState<Record<EstimableField, boolean>>(() => {
-    const initial = { alt_text: true } as Record<EstimableField, boolean>;
+    // Image generation defaults OFF (unlike the text fields/alt-text) — it has a real, non-trivial
+    // per-image cost and isn't something every run needs, so it should be an explicit opt-in.
+    const initial = { alt_text: true, lifestyle: false, feature_callout: false } as Record<EstimableField, boolean>;
     for (const field of ALL_ENRICHMENT_FIELDS) initial[field] = true;
     return initial;
   });
@@ -60,6 +73,7 @@ export function OptimizationFieldSelector({ productCount, confirmLabel, onCancel
     onConfirm({
       fields: ALL_ENRICHMENT_FIELDS.filter((field) => checked[field]),
       includeAltText: checked.alt_text,
+      imageKinds: IMAGE_GEN_KINDS.map((i) => i.kind).filter((kind) => checked[kind]),
     });
   }
 
@@ -91,6 +105,13 @@ export function OptimizationFieldSelector({ productCount, confirmLabel, onCancel
         <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", marginTop: "0.75rem" }}>
           {ALL_ENRICHMENT_FIELDS.map((field) => renderRow(field, field))}
           {renderRow("alt_text", ALT_TEXT_LABEL_FALLBACK)}
+        </div>
+
+        <p className="muted" style={{ fontSize: "0.78rem", marginTop: "0.9rem", marginBottom: "0.3rem" }}>
+          Imagens com IA (opcional, custo por imagem gerada)
+        </p>
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+          {IMAGE_GEN_KINDS.map(({ kind, fallbackLabel }) => renderRow(kind, fallbackLabel))}
         </div>
 
         {note && (

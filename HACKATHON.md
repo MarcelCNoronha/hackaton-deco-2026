@@ -264,6 +264,16 @@ specs, FAQ, dados estruturados) + alt-text de imagem, sem opção de escolher. A
 - **Geração de vídeo curto** — adiado para 2026-08-04 ("vamos fazer amanhã"). Ainda não
   pesquisado; a geração de imagem (ver abaixo) já dá o padrão de client/agent/rota a seguir.
 
+- **Descrição em HTML rico de verdade (padrão gsuplementos)** — adiado para 2026-08-04. Hoje o
+  prompt de `enrichProductContent` gera a descrição como texto corrido (às vezes com HTML básico
+  vindo do produto original, mas não pedimos explicitamente uma estrutura rica). A ideia é ajustar
+  o prompt/schema pra pedir uma página de alta conversão de verdade — seções, HTML com hierarquia
+  (títulos, blocos de benefício, tabelas), e inserir as imagens já existentes do produto dentro da
+  própria descrição (a mesma técnica confirmada nesta sessão pro FAQ: VTEX/Shopify aceitam HTML
+  completo no campo Descrição, é assim que lojas como a gsuplementos.com.br montam aquele visual).
+  Ainda não desenhado — parte de "trazer o FAQ" já foi feita (`publisher.agent.ts`), falta a
+  descrição em si ganhar essa estrutura mais rica.
+
 ### Geração de imagem por IA (implementado em 2026-08-03, com uma limitação de conta)
 
 Feature nova: gera foto "ambientada" (produto em cenário de uso real) ou de "destaque" (close-up
@@ -284,6 +294,19 @@ pro modelo de imagem no tier gratuito — ou seja, geração de imagem simplesme
 disponível na cota grátis do Gemini, precisa de billing ativado no projeto Google AI Studio/Cloud
 pra essa chamada específica funcionar (as chamadas de texto continuam funcionando no grátis
 normalmente). Não testado ponta-a-ponta com uma imagem real até ativar billing.
+
+**Integrado ao seletor de otimização (2026-08-03)**: até aqui a geração de imagem só existia como
+botão avulso por produto em RunDetail — agora "Foto ambientada"/"Foto de destaque" também aparecem
+como checkboxes opcionais (desmarcados por padrão, custo por imagem) no modal "O que otimizar?",
+rodando junto com o resto do run via `imageKinds` em `StartEnrichmentRunParams`. Exige conexão
+Gemini configurada quando marcado; falha por produto (sem imagem de referência) não derruba o run
+inteiro. Custo por imagem entra no agregado `totalCostUsd` do run normalmente.
+
+**Filtro de categoria/coleção corrigido para Shopify (2026-08-03)**: o filtro "categoria" da tela de
+Produtos usava `productType`, que não é o mesmo conceito mostrado na coluna "Coleção" da listagem.
+Trocado para usar Collections de verdade (`collections` root query + filtro `collection_id:<id>` na
+busca de produtos, verificado ao vivo contra uma loja real). VTEX continua com filtro por árvore de
+categorias, sem mudança.
 
 ## Formação de equipes
 
