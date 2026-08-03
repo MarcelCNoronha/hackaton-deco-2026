@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { ApiError, GoogleGenAI } from "@google/genai";
 import type { RequestLogEntry } from "./http.js";
 import { computeCostUsd } from "./model-recommendations.js";
 import { buildEnrichmentInstructionSuffix, buildEnrichmentSchema, resolveRequestedFields } from "./enrichment-schema.js";
@@ -10,6 +10,38 @@ import {
   type LlmClient,
   type ReuseReference,
 } from "./llm-types.js";
+
+/** Unlike VTEX/Shopify (see http.ts's requestWithRetry), calls to the Gemini SDK were never
+ *  retried at all — a single 429 (e.g. a burst of concurrent per-product calls in one run briefly
+ *  exceeding a free-tier RPM cap) failed that call immediately and permanently. Retrying here
+ *  mirrors the same backoff pattern for the SDK surface. */
+const GEMINI_MAX_ATTEMPTS = 3;
+const GEMINI_BASE_DELAY_MS = 3000;
+/** Wait at most this long per attempt even when Google's own error suggests longer — bounds how
+ *  long one product's failure can stall the rest of the run. */
+const GEMINI_MAX_BACKOFF_MS = 20_000;
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Google's 429 message embeds a suggested wait (e.g. "Please retry in 51.6s") — parsed out so a
+ *  real signal is honored (capped by GEMINI_MAX_BACKOFF_MS) instead of only guessing via backoff. */
+function parseSuggestedRetryDelayMs(message: string): number | null {
+  const match = message.match(/retry in ([\d.]+)s/i);
+  return match ? Number(match[1]) * 1000 : null;
+}
+
+/** A `limit: 0` quota (seen on the image-generation model when a project's billing doesn't cover
+ *  it) can never succeed no matter how long we wait, unlike a `limit: 5`-style RPM cap that
+ *  resets on its own — retrying that would just waste time and hold up the rest of the run. */
+function isPermanentlyExhausted(message: string): boolean {
+  return /limit:\s*0\b/.test(message);
+}
+
+function isRetryableGeminiError(err: unknown): boolean {
+  return err instanceof ApiError && (err.status === 429 || err.status >= 500);
+}
 
 interface GeminiInteraction {
   output_text?: string;
@@ -39,42 +71,56 @@ export class GeminiClient implements LlmClient {
     call: () => Promise<GeminiInteraction>;
     extract: (interaction: GeminiInteraction) => T;
   }): Promise<T> {
-    const startedAt = Date.now();
-    try {
-      const interaction = await params.call();
-      const inputTokens = interaction.usage?.total_input_tokens ?? 0;
-      const outputTokens = interaction.usage?.total_output_tokens ?? 0;
-      const costUsd = computeCostUsd("gemini", this.model, inputTokens, outputTokens);
-      await this.onAttempt?.({
-        provider: "gemini",
-        operation: params.operation,
-        endpoint: "https://generativelanguage.googleapis.com/v1beta/interactions",
-        method: "POST",
-        success: true,
-        attempt: 1,
-        durationMs: Date.now() - startedAt,
-        model: this.model,
-        inputTokens,
-        outputTokens,
-        costUsd,
-        productId: params.productId,
-      });
-      return params.extract(interaction);
-    } catch (err) {
-      await this.onAttempt?.({
-        provider: "gemini",
-        operation: params.operation,
-        endpoint: "https://generativelanguage.googleapis.com/v1beta/interactions",
-        method: "POST",
-        success: false,
-        attempt: 1,
-        durationMs: Date.now() - startedAt,
-        error: err instanceof Error ? err.message : String(err),
-        model: this.model,
-        productId: params.productId,
-      });
-      throw err;
+    let lastErr: unknown;
+
+    for (let attempt = 1; attempt <= GEMINI_MAX_ATTEMPTS; attempt++) {
+      const startedAt = Date.now();
+      try {
+        const interaction = await params.call();
+        const inputTokens = interaction.usage?.total_input_tokens ?? 0;
+        const outputTokens = interaction.usage?.total_output_tokens ?? 0;
+        const costUsd = computeCostUsd("gemini", this.model, inputTokens, outputTokens);
+        await this.onAttempt?.({
+          provider: "gemini",
+          operation: params.operation,
+          endpoint: "https://generativelanguage.googleapis.com/v1beta/interactions",
+          method: "POST",
+          success: true,
+          attempt,
+          durationMs: Date.now() - startedAt,
+          model: this.model,
+          inputTokens,
+          outputTokens,
+          costUsd,
+          productId: params.productId,
+        });
+        return params.extract(interaction);
+      } catch (err) {
+        lastErr = err;
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`[gemini] ${params.operation} failed (attempt ${attempt}/${GEMINI_MAX_ATTEMPTS}, productId=${params.productId ?? "n/a"}): ${message}`);
+        await this.onAttempt?.({
+          provider: "gemini",
+          operation: params.operation,
+          endpoint: "https://generativelanguage.googleapis.com/v1beta/interactions",
+          method: "POST",
+          success: false,
+          attempt,
+          durationMs: Date.now() - startedAt,
+          error: message,
+          model: this.model,
+          productId: params.productId,
+        });
+
+        const retryable = isRetryableGeminiError(err) && !isPermanentlyExhausted(message);
+        if (!retryable || attempt === GEMINI_MAX_ATTEMPTS) throw err;
+
+        const backoffMs = GEMINI_BASE_DELAY_MS * 2 ** (attempt - 1);
+        const suggestedMs = parseSuggestedRetryDelayMs(message);
+        await sleep(Math.min(suggestedMs ?? backoffMs, GEMINI_MAX_BACKOFF_MS));
+      }
     }
+    throw lastErr;
   }
 
   /** Enforces the response as JSON matching `schema` via `response_format` — tried forced
@@ -253,71 +299,85 @@ export class GeminiClient implements LlmClient {
     costUsd: number;
     productId?: number;
   }): Promise<{ mimeType: string; base64: string }> {
-    const startedAt = Date.now();
-    try {
-      const imageBlocks = await Promise.all(
-        params.referenceImageUrls.map(async (url) => {
-          const res = await fetch(url);
-          const mimeType = res.headers.get("content-type") ?? "image/jpeg";
-          const data = Buffer.from(await res.arrayBuffer()).toString("base64");
-          return { type: "image" as const, data, mime_type: mimeType };
-        }),
-      );
+    let lastErr: unknown;
 
-      const interaction = (await this.client.interactions.create({
-        model: this.model,
-        input: [...imageBlocks, { type: "text", text: params.prompt }],
-        // Verified live: an explicit `delivery` value (either "inline" or "uri") is rejected on
-        // this model ("Image delivery mode is not supported") — must be omitted entirely, which
-        // then returns inline base64 data by default. `thinking_level` also only accepts
-        // "low"/"high" here, not "minimal" (that's valid for the text models elsewhere in this
-        // file, not the image ones).
-        response_format: { type: "image", aspect_ratio: "1:1", image_size: "1K" },
-        generation_config: { thinking_level: "low" },
-      })) as unknown as GeminiInteraction;
+    for (let attempt = 1; attempt <= GEMINI_MAX_ATTEMPTS; attempt++) {
+      const startedAt = Date.now();
+      try {
+        const imageBlocks = await Promise.all(
+          params.referenceImageUrls.map(async (url) => {
+            const res = await fetch(url);
+            const mimeType = res.headers.get("content-type") ?? "image/jpeg";
+            const data = Buffer.from(await res.arrayBuffer()).toString("base64");
+            return { type: "image" as const, data, mime_type: mimeType };
+          }),
+        );
 
-      let mimeType = interaction.output_image?.mime_type ?? "image/jpeg";
-      let base64 = interaction.output_image?.data;
-      if (!base64 && interaction.output_image?.uri) {
-        // Not expected given the above, but harmless to also handle a hosted-URI response —
-        // fetched and re-encoded as base64 immediately since that URI is likely transient.
-        const res = await fetch(interaction.output_image.uri);
-        mimeType = res.headers.get("content-type") ?? mimeType;
-        base64 = Buffer.from(await res.arrayBuffer()).toString("base64");
+        const interaction = (await this.client.interactions.create({
+          model: this.model,
+          input: [...imageBlocks, { type: "text", text: params.prompt }],
+          // Verified live: an explicit `delivery` value (either "inline" or "uri") is rejected on
+          // this model ("Image delivery mode is not supported") — must be omitted entirely, which
+          // then returns inline base64 data by default. `thinking_level` also only accepts
+          // "low"/"high" here, not "minimal" (that's valid for the text models elsewhere in this
+          // file, not the image ones).
+          response_format: { type: "image", aspect_ratio: "1:1", image_size: "1K" },
+          generation_config: { thinking_level: "low" },
+        })) as unknown as GeminiInteraction;
+
+        let mimeType = interaction.output_image?.mime_type ?? "image/jpeg";
+        let base64 = interaction.output_image?.data;
+        if (!base64 && interaction.output_image?.uri) {
+          // Not expected given the above, but harmless to also handle a hosted-URI response —
+          // fetched and re-encoded as base64 immediately since that URI is likely transient.
+          const res = await fetch(interaction.output_image.uri);
+          mimeType = res.headers.get("content-type") ?? mimeType;
+          base64 = Buffer.from(await res.arrayBuffer()).toString("base64");
+        }
+        if (!base64) {
+          throw new Error("Gemini did not return an output image");
+        }
+
+        await this.onAttempt?.({
+          provider: "gemini",
+          operation: "generateProductImage",
+          endpoint: "https://generativelanguage.googleapis.com/v1beta/interactions",
+          method: "POST",
+          success: true,
+          attempt,
+          durationMs: Date.now() - startedAt,
+          model: this.model,
+          costUsd: params.costUsd,
+          productId: params.productId,
+        });
+
+        return { mimeType, base64 };
+      } catch (err) {
+        lastErr = err;
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`[gemini] generateProductImage failed (attempt ${attempt}/${GEMINI_MAX_ATTEMPTS}, productId=${params.productId ?? "n/a"}): ${message}`);
+        await this.onAttempt?.({
+          provider: "gemini",
+          operation: "generateProductImage",
+          endpoint: "https://generativelanguage.googleapis.com/v1beta/interactions",
+          method: "POST",
+          success: false,
+          attempt,
+          durationMs: Date.now() - startedAt,
+          error: message,
+          model: this.model,
+          productId: params.productId,
+        });
+
+        const retryable = isRetryableGeminiError(err) && !isPermanentlyExhausted(message);
+        if (!retryable || attempt === GEMINI_MAX_ATTEMPTS) throw err;
+
+        const backoffMs = GEMINI_BASE_DELAY_MS * 2 ** (attempt - 1);
+        const suggestedMs = parseSuggestedRetryDelayMs(message);
+        await sleep(Math.min(suggestedMs ?? backoffMs, GEMINI_MAX_BACKOFF_MS));
       }
-      if (!base64) {
-        throw new Error("Gemini did not return an output image");
-      }
-
-      await this.onAttempt?.({
-        provider: "gemini",
-        operation: "generateProductImage",
-        endpoint: "https://generativelanguage.googleapis.com/v1beta/interactions",
-        method: "POST",
-        success: true,
-        attempt: 1,
-        durationMs: Date.now() - startedAt,
-        model: this.model,
-        costUsd: params.costUsd,
-        productId: params.productId,
-      });
-
-      return { mimeType, base64 };
-    } catch (err) {
-      await this.onAttempt?.({
-        provider: "gemini",
-        operation: "generateProductImage",
-        endpoint: "https://generativelanguage.googleapis.com/v1beta/interactions",
-        method: "POST",
-        success: false,
-        attempt: 1,
-        durationMs: Date.now() - startedAt,
-        error: err instanceof Error ? err.message : String(err),
-        model: this.model,
-        productId: params.productId,
-      });
-      throw err;
     }
+    throw lastErr;
   }
 
   async testConnection(): Promise<{ ok: boolean; error?: string }> {

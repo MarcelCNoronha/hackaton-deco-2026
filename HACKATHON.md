@@ -308,6 +308,27 @@ Trocado para usar Collections de verdade (`collections` root query + filtro `col
 busca de produtos, verificado ao vivo contra uma loja real). VTEX continua com filtro por árvore de
 categorias, sem mudança.
 
+**Bug real encontrado em produção no primeiro teste (2026-08-03): a chave Gemini de produção NÃO
+está no plano pago pra geração de imagem** — investigado direto no banco (`agent_request_logs` do
+run que travou): os erros são `429 ... limit: 0, model: gemini-2.5-flash-preview-image` (geração de
+imagem) e `429 ... limit: 5, model: gemini-3.6-flash` (texto), ambas assinaturas clássicas de
+free-tier — isso contradiz o que foi confirmado antes ("na vps é um plano pro"). Precisa checar se
+a chave usada em produção realmente pertence ao projeto Google Cloud com billing ativado, ou se é
+uma chave diferente/de outro projeto. **Adiado pra amanhã (2026-08-04) por pedido do usuário.**
+
+Enquanto isso, corrigido o efeito colateral real: as chamadas Gemini (`gemini.client.ts`) nunca
+tinham retry/backoff (diferente de VTEX/Shopify, que já usam `requestWithRetry` em `http.ts`) — uma
+única resposta 429 falhava a chamada na hora e pra sempre. Como o run dispara as chamadas de todos
+os produtos em paralelo sem limite de concorrência, um burst de poucos produtos já estourava o
+limite de 5 RPM do free-tier e derrubava várias chamadas de uma vez, dando a impressão de "uma
+falha trava as demais". Agora `loggedCall`/`generateProductImage` tentam de novo com backoff
+exponencial (até 3 tentativas, respeitando o "retry in Xs" do próprio erro do Google quando
+presente, limitado a 20s de espera) — exceto quando o erro é `limit: 0` (aí é permanente, tentar de
+novo não adianta, falha rápido). Também adicionado `console.error` em toda tentativa que falha, pra
+aparecer direto em `docker logs`, sem precisar consultar o banco. Não corrigido ainda: a falta de um
+limite de concorrência entre produtos do mesmo run (todos disparam ao mesmo tempo) — ideia pra
+amanhã, se o problema persistir mesmo com billing ativado.
+
 ## Formação de equipes
 
 - 1 a 5 pessoas por equipe (pode ser solo)
