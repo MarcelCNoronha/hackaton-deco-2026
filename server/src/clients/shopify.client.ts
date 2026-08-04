@@ -343,10 +343,16 @@ export class ShopifyClient implements CatalogClient {
     for (const def of defs) {
       const name = this.normalizeForMatch(def.name);
       const key = this.normalizeForMatch(def.key);
+      // Both sides of a substring comparison must clear the length floor — guarding only `target`
+      // still let a short EXISTING field name (e.g. "cor") match inside an unrelated longer label
+      // (e.g. "decoração" contains "cor") purely by coincidence, in a language full of short common
+      // words. Exact equality is always allowed regardless of length.
       const matches =
         target === name ||
         target === key ||
-        (target.length >= 4 && (name.includes(target) || target.includes(name) || key.includes(target) || target.includes(key)));
+        (target.length >= 4 &&
+          ((name.length >= 4 && (name.includes(target) || target.includes(name))) ||
+            (key.length >= 4 && (key.includes(target) || target.includes(key)))));
       if (matches) return { namespace: def.namespace, key: def.key, type: def.type };
     }
     return null;

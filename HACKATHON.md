@@ -344,7 +344,7 @@ de padrões baseados nos top resultados orgânicos do Google/recomendação de I
 risco de prazo) e **sem instrumentar a loja real** com eventos de engajamento customizados (scroll,
 frete, newsletter) — só o que GA4/GSC já expõem.
 
-- **Score composto de 11 métricas** (`server/src/agents/evaluator.agent.ts`): além de
+- **Score composto de 8 sub-scores** (`server/src/agents/evaluator.agent.ts`): além de
   `buyerConfidence`/GEO já existentes, `evaluateContent` (idêntico nos 3 clients Claude/OpenAI/
   Gemini) agora também julga `seoScore`, `conversionScore`, `dataConsistencyScore` e
   `catalogIssues`; `structureScore` (HTML real, não só "tem >200 caracteres") e `readabilityScore`
@@ -368,7 +368,8 @@ frete, newsletter) — só o que GA4/GSC já expõem.
   `meta_description` via novo `updateProductSeo` (VTEX: PUT Title/MetaTagDescription; Shopify:
   `productUpdate` com `seo{title,description}`); `tags` só no Shopify (native field, VTEX fica
   em-app); `cta` funde na descrição como HTML igual ao FAQ (mesmo mecanismo, extraído em
-  `renderCtaHtml`). `keywords`/`attributes_patch` seguem o precedente de `structured_data`:
+  `renderCtaBlock` — renomeado depois, na rodada de Configuração de PDP). `keywords`/
+  `attributes_patch` seguem o precedente de `structured_data`:
   em-app apenas, sem escrita na plataforma — evita o escopo bem mais arriscado de escrever
   atributos/categoria em duas plataformas diferentes. Slug/URL amigável ficou **fora do escopo**
   (mudar URL ao vivo é destrutivo pra SEO se publicado errado).
@@ -485,6 +486,68 @@ IA escrever `<h2>`/`<table>` livremente; bullets/specs/FAQ/CTA sempre foram dado
 - Diagrama de arquitetura (`architecture-diagram.ts`) atualizado com o nó de Configuração de PDP
   alimentando o Publisher — prática combinada com o usuário: toda mudança de peso a partir de
   agora atualiza a documentação viva (diagrama/referência de APIs) e este arquivo, não só o código.
+
+### Auditoria pós-implementação + preview de PDP (2026-08-05, sexta rodada continuada)
+
+Rodada de auditoria pedida pelo usuário ("analisar inconsistências e falhas") com 3 buscas em
+paralelo (código morto, corretude das features menos testadas, documentação vs. código real).
+Achados corrigidos na hora:
+
+- **Bug real em `resolvePdpTemplate`**: quando a categoria do produto é nula/vazia (comum —
+  Shopify sem `productType`, VTEX sem categoria resolvida), a função pulava a consulta ao banco
+  inteira e nunca considerava o template `'*'` configurado pelo usuário, caindo direto no padrão
+  de fábrica. Corrigido pra sempre consultar e só pular o match "específico" quando não há
+  categoria.
+- **Falso positivo no casamento de metafield do Shopify**: `findMatchingDefinition` só
+  garantia tamanho mínimo do lado do rótulo novo, não do nome/chave já existente — um campo
+  curto como "Cor" podia casar por substring dentro de qualquer palavra que contivesse essas
+  letras (ex: "Decoração"). Corrigido exigindo tamanho mínimo dos dois lados da comparação.
+- **Gate de integridade de imagem não distinguia erro de rede de reprovação real** — uma falha
+  de conexão na chamada de verificação descartava a imagem já gerada (e já cobrada) inteira, em
+  vez de registrar "não verificado" e seguir. Agora envolto em try/catch próprio.
+- **Publicar imagem não verificada só tinha aviso visual, não bloqueio de verdade** — um humano
+  podia clicar "Publicar na loja" mesmo com o aviso de integridade não confirmada. Agora a rota
+  `POST /api/products/:id/generated-images/:imageId/publish` recusa (400) se
+  `integrityVerified` for falso, e o botão fica desabilitado no RunDetail.
+- **Documentação com números errados**: "score composto de 11 métricas" corrigido pra "8
+  sub-scores" em `architecture-diagram.ts`, `pipeline-flow.ts`, `docs/README.md` e
+  `HACKATHON.md` (o 11 vinha de `GEO_QUESTIONS.length`, sem relação com a contagem de
+  sub-scores). Referência a `renderCtaHtml` (renomeada pra `renderCtaBlock`) corrigida.
+  `api-reference.ts` ganhou as entradas que faltavam (embeddings da OpenAI pro RAG de produtos
+  quase-duplicados; envio de e-mail via Resend).
+- Cruft identificado mas **deixado pra depois por decisão do usuário**: as colunas
+  `content_scores.checklistScore`/`geoAnswerableCount`/`geoTotalQuestions` ficaram só-escrita
+  (nunca lidas pelo frontend) desde que o score composto de 8 sub-scores as substituiu — baixo
+  impacto, não vale a migração extra agora.
+- **Item "Arquitetura" removido do menu** (duplicava a página "Documentação", que já linka pra
+  ela) — a rota continua existindo, só não é mais um item de topo.
+- **Configuração de PDP ganhou abas por nível + preview visual real**: em vez de 3 cards
+  empilhados, agora é uma aba por nível (Médio/Bom/Excelente) com um preview ao lado — renderizado
+  no servidor pela mesma função (`renderPdpHtml`, agora exportada de `publisher.agent.ts`) que
+  publica de verdade, com dado de exemplo genérico (nunca uma foto de estoque real) — pra nunca
+  divergir do que a publicação realmente produz. Nova rota `POST /api/pdp-templates/preview`.
+
+### Reorganização da documentação no app + preview de PDP configurável (2026-08-05)
+
+Ajustes de UX pedidos pelo usuário depois de revisar a navegação:
+
+- **"Arquitetura" saiu do menu principal** — ficava duplicada com "Documentação", que já linka
+  pra ela.
+- **Referência de APIs virou página própria** (`/api-reference`, `web/src/pages/ApiReference.tsx`),
+  separada de "Arquitetura" (que ficou só com diagrama + fluxo + riscos) — a página única estava
+  ficando longa/confusa. Ganhou uma aba por sistema (VTEX, Shopify, GSC, GA4, Claude, OpenAI,
+  Gemini, Resend) em vez de tudo empilhado.
+- **Documentação, Arquitetura e Referência de APIs agora exigem permissão de Integrações** — antes
+  estavam abertas pra qualquer usuário logado.
+- **Links de Artifact removidos da Documentação e do `docs/README.md`** — a aba Arquitetura no
+  app já é mais completa (tem Fluxo atual/Riscos que os Artifacts não têm) e manter as duas
+  versões em sincronia era a mesma duplicação que a auditoria de código morto apontou. Os
+  Artifacts publicados continuam existindo (não foram deletados), só não são mais referenciados
+  como parte da documentação oficial.
+- **Configuração de PDP ganhou preview visual configurável**: abas por nível + um preview ao
+  lado renderizado pela mesma função (`renderPdpHtml`) que publica de verdade, com conteúdo de
+  exemplo genérico — inspirado no mockup do porcelanato, mas dinâmico em vez de estático. Nova
+  rota `POST /api/pdp-templates/preview`.
 
 ## Formação de equipes
 

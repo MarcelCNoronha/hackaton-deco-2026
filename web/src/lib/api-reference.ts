@@ -344,8 +344,8 @@ export const API_REFERENCE: ApiSystem[] = [
   },
   {
     key: "openai",
-    title: "OpenAI (GPT)",
-    baseUrl: "https://api.openai.com/v1/responses (via SDK)",
+    title: "OpenAI (GPT + Embeddings)",
+    baseUrl: "https://api.openai.com/v1/responses e /v1/embeddings (via SDK)",
     auth: "API key (SDK)",
     retry: "Sem retry próprio neste client — cada chamada é tentada uma vez",
     operations: [
@@ -380,6 +380,16 @@ export const API_REFERENCE: ApiSystem[] = [
         kind: "read",
         fields: "—",
         purpose: "Valida a chave OpenAI salva.",
+      },
+      {
+        name: "embed (EmbeddingsClient)",
+        method: "embeddings.create",
+        endpoint: "/v1/embeddings",
+        kind: "read",
+        fields: "input: textos do produto → vetores de 1536 dimensões",
+        purpose:
+          "Gera embeddings pra detecção de produtos quase-duplicados (reaproveita conteúdo já aprovado em vez de gerar de novo) — nunca usado pra geração de conteúdo em si.",
+        caveat: "Sempre via OpenAI, mesmo quando o provedor roteado pra enriquecimento é outro — opcional (sem conexão OpenAI, todo produto passa por geração completa).",
       },
     ],
   },
@@ -439,6 +449,24 @@ export const API_REFERENCE: ApiSystem[] = [
         kind: "read",
         fields: "—",
         purpose: "Valida a chave Gemini salva.",
+      },
+    ],
+  },
+  {
+    key: "resend",
+    title: "Resend (e-mail)",
+    baseUrl: "resend.emails.send (via SDK)",
+    auth: "API key (RESEND_API_KEY)",
+    retry: "Sem retry próprio — uma tentativa",
+    operations: [
+      {
+        name: "send (ResendEmailClient)",
+        method: "resend.emails.send",
+        endpoint: "—",
+        kind: "write",
+        fields: "from, to, subject, html",
+        purpose: "Envia e-mail de redefinição de senha e de configuração de conta (convite de usuário).",
+        caveat: "Sem RESEND_API_KEY/RESEND_FROM_EMAIL configurados, o link é retornado direto na resposta da API em vez de enviado por e-mail (fallback usado em dev).",
       },
     ],
   },

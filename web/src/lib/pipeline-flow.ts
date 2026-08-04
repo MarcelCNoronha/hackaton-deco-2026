@@ -33,7 +33,7 @@ export const PIPELINE_FLOW: FlowStage[] = [
       "Catalog Reader sincroniza os produtos escolhidos da plataforma ativa.",
       "Analyst prioriza por sinais de GSC/GA4 (casamento por URL) se o Top N cortar a lista.",
       "Content Enrichment chama o LLM roteado — consulta metafields conhecidos antes (Shopify) e usa visão real quando o nível pede imagem.",
-      "Evaluator julga o rascunho na régua de 11 métricas; se não bate a nota mínima, volta com feedback pro LLM, até 3 tentativas, sempre guardando a melhor.",
+      "Evaluator julga o rascunho na régua de 8 sub-scores (SEO, GEO, conversão, legibilidade, estrutura, confiança do comprador, completude, consistência); se não bate a nota mínima, volta com feedback pro LLM, até 3 tentativas, sempre guardando a melhor.",
       "Produto muito parecido com outro já aprovado reaproveita o conteúdo (RAG) em vez de gastar as 3 tentativas.",
       "Image Alt-Text roda separado, por imagem.",
       "Geração de imagem por IA (se marcada): gera + gate de integridade (segunda IA confirma que é o mesmo produto; reprovado, tenta de novo até 2x; esgotado, salva mas marca como não verificado).",
@@ -43,7 +43,7 @@ export const PIPELINE_FLOW: FlowStage[] = [
     title: "4. Revisão humana (RunDetail)",
     steps: [
       "Cada campo gerado é uma proposta separada (aprovar/editar/rejeitar).",
-      "Score antes→depois nas 11 métricas, badge de nível, banner de Impacto Estimado, fotos geradas (com aviso se a integridade não foi confirmada).",
+      "Score antes→depois nos 8 sub-scores + score geral, badge de nível, banner de Impacto Estimado, fotos geradas (com aviso se a integridade não foi confirmada).",
     ],
   },
   {

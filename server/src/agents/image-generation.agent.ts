@@ -72,20 +72,28 @@ export async function generateProductImage(params: {
     });
     best = generated;
 
-    const verdict = await gemini.verifyImageIntegrity({
-      referenceImageUrl: referenceImageUrls[0],
-      generatedBase64: generated.base64,
-      generatedMimeType: generated.mimeType,
-      productId: product.id,
-    });
-    integrityNotes = verdict.notes;
-    if (verdict.sameProduct) {
-      integrityVerified = true;
-      break;
+    // A thrown error here (network blip, transient 5xx) is NOT a rejection verdict — treating it
+    // as one would discard an already-generated, already-billed image over a connectivity issue
+    // instead of just recording that verification couldn't be completed this attempt.
+    try {
+      const verdict = await gemini.verifyImageIntegrity({
+        referenceImageUrl: referenceImageUrls[0],
+        generatedBase64: generated.base64,
+        generatedMimeType: generated.mimeType,
+        productId: product.id,
+      });
+      integrityNotes = verdict.notes;
+      if (verdict.sameProduct) {
+        integrityVerified = true;
+        break;
+      }
+      console.error(
+        `[image-generation] integrity check failed for product ${product.id} (attempt ${attempt}/${MAX_INTEGRITY_ATTEMPTS}): ${verdict.notes}`,
+      );
+    } catch (err) {
+      integrityNotes = `Verificação de integridade falhou (erro técnico, não reprovação): ${err instanceof Error ? err.message : String(err)}`;
+      console.error(`[image-generation] integrity check errored for product ${product.id} (attempt ${attempt}/${MAX_INTEGRITY_ATTEMPTS}):`, err);
     }
-    console.error(
-      `[image-generation] integrity check failed for product ${product.id} (attempt ${attempt}/${MAX_INTEGRITY_ATTEMPTS}): ${verdict.notes}`,
-    );
   }
 
   // best is guaranteed set: the loop always runs at least once. Persisted even when never

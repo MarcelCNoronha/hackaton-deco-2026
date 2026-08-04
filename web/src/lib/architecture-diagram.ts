@@ -12,7 +12,7 @@ export const ARCHITECTURE_DIAGRAM = `flowchart TB
     cr["Catalog Reader — sincroniza produtos"]
     an["Analyst — prioriza por sinais de GSC/GA4"]
     ce["Content Enrichment — nível Médio / Bom / Excelente"]
-    ev["Evaluator — score composto de 11 métricas"]
+    ev["Evaluator — score composto (8 sub-scores)"]
     ig["Image Generation — lifestyle / feature callout"]
     iv["Gate de integridade — mesmo produto?"]
     alt["Image Alt-Text"]

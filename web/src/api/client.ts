@@ -399,6 +399,8 @@ export const api = {
   getPdpTemplates: () => request<{ platform: CatalogPlatform; templates: PdpTemplate[] }>("/pdp-templates"),
   setPdpTemplate: (body: { level: DescriptionRichness; blocks: PdpBlock[] }) =>
     request<{ platform: CatalogPlatform; templates: PdpTemplate[] }>("/pdp-templates", { method: "PUT", body: JSON.stringify(body) }),
+  previewPdpTemplate: (body: { level: DescriptionRichness; blocks: PdpBlock[] }) =>
+    request<{ html: string }>("/pdp-templates/preview", { method: "POST", body: JSON.stringify(body) }),
 
   getCatalogPlatform: () => request<{ platform: CatalogPlatform }>("/catalog/platform"),
   setCatalogPlatform: (platform: CatalogPlatform) =>

@@ -52,12 +52,14 @@ export async function resolvePdpTemplate(
   category: string | null,
   level: DescriptionRichness,
 ): Promise<PdpBlock[]> {
-  const rows = category
-    ? await db.query.pdpTemplates.findMany({
-        where: and(eq(pdpTemplates.platform, platform), eq(pdpTemplates.level, level)),
-      })
-    : [];
-  const specific = rows.find((r) => r.category === category);
+  // Always query — a product with no resolved category (common: Shopify with an empty
+  // productType, VTEX when the category lookup failed) still must see the merchant's configured
+  // '*' catalog-wide default instead of silently falling through to the hardcoded factory
+  // default. Only the "specific category override" half of the lookup needs `category` truthy.
+  const rows = await db.query.pdpTemplates.findMany({
+    where: and(eq(pdpTemplates.platform, platform), eq(pdpTemplates.level, level)),
+  });
+  const specific = category ? rows.find((r) => r.category === category) : undefined;
   const fallback = rows.find((r) => r.category === DEFAULT_PDP_CATEGORY);
   const row = specific ?? fallback;
   return (row?.blocks as PdpBlock[] | undefined) ?? defaultBlocksFor(level);

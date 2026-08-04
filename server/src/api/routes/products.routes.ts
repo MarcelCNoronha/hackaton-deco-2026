@@ -107,6 +107,13 @@ export async function productsRoutes(app: FastifyInstance) {
       if (!product) return reply.status(404).send({ error: "Produto não encontrado" });
       const image = await db.query.generatedImages.findFirst({ where: eq(generatedImages.id, Number(req.params.imageId)) });
       if (!image || image.productId !== product.id) return reply.status(404).send({ error: "Imagem não encontrada" });
+      if (!image.integrityVerified) {
+        // Enforced here, not just as a UI warning — "nunca publicar uma imagem enganosa" holds
+        // even if a human clicks past the warning shown in RunDetail.
+        return reply.status(400).send({
+          error: "Integridade do produto não confirmada para esta imagem — não pode ser publicada. Gere uma nova imagem.",
+        });
+      }
       if (!env.APP_BASE_URL) {
         return reply.status(400).send({ error: "APP_BASE_URL não configurado — necessário pra plataforma buscar a imagem." });
       }

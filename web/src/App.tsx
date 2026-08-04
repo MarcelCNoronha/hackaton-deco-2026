@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { Architecture } from "./pages/Architecture";
+import { ApiReference } from "./pages/ApiReference";
 import { Documentation } from "./pages/Documentation";
 import { PdpConfig } from "./pages/PdpConfig";
 import { Connections } from "./pages/Connections";
@@ -52,12 +53,11 @@ function AppShell() {
           </NavLink>
         </nav>
         <nav className="sidebar-nav sidebar-nav--account">
-          <NavLink to="/architecture">
-            <span className="nav-icon">🕸</span> <span className="nav-label">Arquitetura</span>
-          </NavLink>
-          <NavLink to="/documentation">
-            <span className="nav-icon">📄</span> <span className="nav-label">Documentação</span>
-          </NavLink>
+          {can("connections") && (
+            <NavLink to="/documentation">
+              <span className="nav-icon">📄</span> <span className="nav-label">Documentação</span>
+            </NavLink>
+          )}
           {can("connections") && (
             <NavLink to="/pdp-config">
               <span className="nav-icon">🧩</span> <span className="nav-label">Configuração de PDP</span>
@@ -98,8 +98,9 @@ function AppShell() {
           <Route path="/runs/:id" element={<RunDetail />} />
           <Route path="/impact" element={<Impact />} />
           <Route path="/account" element={<Account />} />
-          <Route path="/architecture" element={<Architecture />} />
-          <Route path="/documentation" element={<Documentation />} />
+          {can("connections") && <Route path="/architecture" element={<Architecture />} />}
+          {can("connections") && <Route path="/api-reference" element={<ApiReference />} />}
+          {can("connections") && <Route path="/documentation" element={<Documentation />} />}
           {can("connections") && <Route path="/pdp-config" element={<PdpConfig />} />}
           {can("connections") && <Route path="/connections" element={<Connections />} />}
           {can("users") && <Route path="/users" element={<Users />} />}

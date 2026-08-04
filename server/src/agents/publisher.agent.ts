@@ -54,7 +54,7 @@ function renderFeaturedImageBlock(url: string, caption: string): string {
   }</figure>`;
 }
 
-interface BlockData {
+export interface BlockData {
   description?: string;
   bullets?: string[];
   specs?: Array<{ label: string; value: string }>;
@@ -65,8 +65,10 @@ interface BlockData {
 
 /** Assembles the final description HTML strictly following `blocks`' order — a block is skipped
  *  whenever its data wasn't approved for this product (e.g. no featured_image proposal, or the
- *  merchant's template doesn't include a block at all). */
-function renderPdpHtml(blocks: PdpBlock[], level: DescriptionRichness, data: BlockData): string {
+ *  merchant's template doesn't include a block at all). Exported so the "Configuração de PDP"
+ *  preview (pdp-templates.routes.ts) renders with the EXACT same function that actually publishes
+ *  — a preview that could drift from real behavior would be worse than no preview at all. */
+export function renderPdpHtml(blocks: PdpBlock[], level: DescriptionRichness, data: BlockData): string {
   const parts: string[] = [];
   for (const block of blocks) {
     if (block === "description" && data.description) parts.push(renderDescriptionBlock(data.description));

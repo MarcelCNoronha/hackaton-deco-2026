@@ -505,7 +505,8 @@ export function RunDetail() {
                             className="link-button"
                             style={{ fontSize: "0.72rem", marginTop: "0.3rem" }}
                             onClick={() => handlePublishImage(productId, image.id)}
-                            disabled={publishingImageId === image.id}
+                            disabled={publishingImageId === image.id || !image.integrityVerified}
+                            title={!image.integrityVerified ? "Integridade não confirmada — gere uma nova imagem para publicar." : undefined}
                           >
                             {publishingImageId === image.id ? "Publicando…" : "Publicar na loja"}
                           </button>
