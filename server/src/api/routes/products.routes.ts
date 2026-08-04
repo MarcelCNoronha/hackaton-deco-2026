@@ -6,6 +6,7 @@ import { enrichmentProposals, generatedImages, products } from "../../db/schema.
 import { requireAuth } from "../../auth/guards.js";
 import { syncProduct } from "../../agents/catalog-reader.agent.js";
 import { extractManufacturerFacts } from "../../agents/reference-facts.agent.js";
+import { extractManufacturerReferenceImage } from "../../agents/manufacturer-image.agent.js";
 import { generateProductImage } from "../../agents/image-generation.agent.js";
 import { getProductRealImpact } from "../../agents/impact.agent.js";
 import { requireActiveCatalogClient } from "./catalog.routes.js";
@@ -109,7 +110,7 @@ export async function productsRoutes(app: FastifyInstance) {
         return updated;
       }
 
-      const { facts, warning } = await extractManufacturerFacts(body.manufacturerReferenceUrl);
+      const { facts, warning, imageUrls } = await extractManufacturerFacts(body.manufacturerReferenceUrl);
       const [updated] = await db
         .update(products)
         .set({
@@ -119,6 +120,27 @@ export async function productsRoutes(app: FastifyInstance) {
         })
         .where(eq(products.id, product.id))
         .returning();
+
+      // Best-effort, never blocks saving the reference/facts above — same discipline as
+      // extractManufacturerFacts itself. Runs after the DB write so a slow/failed image download
+      // never delays the merchant seeing their facts saved.
+      if (imageUrls.length > 0) {
+        try {
+          const geminiCreds = await getConnectionCredentials<"gemini">("gemini");
+          const gemini = geminiCreds ? new GeminiClient(geminiCreds.apiKey, IMAGE_GENERATION_MODEL, makeRequestLogger()) : null;
+          const existingImageUrl = (product.images as Array<{ ImageUrl: string }>)[0]?.ImageUrl ?? null;
+          await extractManufacturerReferenceImage({
+            gemini,
+            productId: product.id,
+            sourceUrl: body.manufacturerReferenceUrl,
+            imageUrls,
+            existingImageUrl,
+          });
+        } catch (err) {
+          console.error(`[manufacturer-image] extraction failed for product ${product.id}:`, err);
+        }
+      }
+
       return { ...updated, warning };
     } catch (err) {
       return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });

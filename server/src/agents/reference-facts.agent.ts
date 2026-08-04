@@ -1,4 +1,4 @@
-import { fetchPageText } from "../clients/web-fetch.client.js";
+import { fetchManufacturerPage } from "../clients/web-fetch.client.js";
 import { resolveLlmClient } from "../lib/llm-client-resolver.js";
 
 // `type: "object"` at the top level is load-bearing — see reference-structure.agent.ts's
@@ -35,6 +35,10 @@ const SYSTEM_INSTRUCTION =
 export interface ExtractedManufacturerFacts {
   facts: Record<string, string>;
   warning: string | null;
+  /** Candidate product-photo URLs found on the same page — see web-fetch.client.ts's
+   *  fetchManufacturerPage. Consumed by manufacturer-image.agent.ts to turn one of them into a
+   *  real, publishable photo; empty when the page had no likely candidate. */
+  imageUrls: string[];
 }
 
 /** Fetches a product-specific reference URL (typically the manufacturer's own page for that exact
@@ -44,7 +48,7 @@ export interface ExtractedManufacturerFacts {
  *  Used as grounding to reduce hallucinated specs (see enrichment-schema.ts's
  *  especificacoesFabricante payload field). */
 export async function extractManufacturerFacts(url: string): Promise<ExtractedManufacturerFacts> {
-  const page = await fetchPageText(url);
+  const page = await fetchManufacturerPage(url);
   const llm = await resolveLlmClient("contentEnrichment");
   const { facts } = await llm.extractStructuredData<FactsResponse>({
     operation: "extractManufacturerFacts",
@@ -55,5 +59,6 @@ export async function extractManufacturerFacts(url: string): Promise<ExtractedMa
   return {
     facts: Object.fromEntries(facts.map((f) => [f.key, f.value])),
     warning: page.warning,
+    imageUrls: page.imageUrls,
   };
 }

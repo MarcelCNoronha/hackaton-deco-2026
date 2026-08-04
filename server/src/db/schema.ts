@@ -46,7 +46,15 @@ export const proposalStatusEnum = pgEnum("proposal_status", [
 export const scoreTargetEnum = pgEnum("score_target", ["original", "proposed"]);
 export const userRoleEnum = pgEnum("user_role", ["admin", "user"]);
 export const appSectionEnum = pgEnum("app_section", ["connections", "publish", "users"]);
-export const generatedImageKindEnum = pgEnum("generated_image_kind", ["lifestyle", "feature_callout"]);
+export const generatedImageKindEnum = pgEnum("generated_image_kind", [
+  "lifestyle",
+  "feature_callout",
+  // A real photo downloaded from a product's manufacturer reference page (see
+  // manufacturer-image.agent.ts) — cropped/resized to the store's VTEX upload convention
+  // (1000x1000 JPG), never AI-generated. Distinguished from lifestyle/feature_callout so the UI
+  // can label it correctly and skip charging costUsd (no generation call, just a download+resize).
+  "manufacturer_reference",
+]);
 export const categoryContentProfileSourceEnum = pgEnum("category_content_profile_source", [
   "internal",
   "references",
@@ -115,6 +123,9 @@ export const generatedImages = pgTable("generated_images", {
     .references(() => products.id),
   kind: generatedImageKindEnum("kind").notNull(),
   prompt: text("prompt").notNull(),
+  // Only set for kind="manufacturer_reference" — the page the photo was downloaded from, kept for
+  // transparency/audit (a human reviewing the proposal can go check the original source).
+  sourceUrl: text("source_url"),
   mimeType: text("mime_type").notNull(),
   imageBase64: text("image_base64").notNull(),
   costUsd: numeric("cost_usd"),

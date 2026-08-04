@@ -332,8 +332,10 @@ export interface Product {
 export interface GeneratedImage {
   id: number;
   productId: number;
-  kind: "lifestyle" | "feature_callout";
+  kind: "lifestyle" | "feature_callout" | "manufacturer_reference";
   prompt: string;
+  /** Only set for kind="manufacturer_reference" — the page the photo was downloaded from. */
+  sourceUrl: string | null;
   mimeType: string;
   imageBase64: string;
   costUsd: string | null;

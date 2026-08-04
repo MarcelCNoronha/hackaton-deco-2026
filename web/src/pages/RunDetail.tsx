@@ -484,12 +484,33 @@ export function RunDetail() {
                       <div key={image.id} style={{ width: 160 }}>
                         <img
                           src={`data:${image.mimeType};base64,${image.imageBase64}`}
-                          alt={image.kind === "lifestyle" ? "Foto ambientada gerada por IA" : "Foto de destaque gerada por IA"}
+                          alt={
+                            image.kind === "lifestyle"
+                              ? "Foto ambientada gerada por IA"
+                              : image.kind === "feature_callout"
+                                ? "Foto de destaque gerada por IA"
+                                : "Foto extraída da referência do fabricante"
+                          }
                           style={{ width: "100%", height: 160, objectFit: "cover", borderRadius: "var(--radius-md)" }}
                         />
                         <div className="muted" style={{ fontSize: "0.72rem", marginTop: "0.3rem" }}>
-                          {image.kind === "lifestyle" ? "Ambientada" : "Destaque"} · {formatCost(Number(image.costUsd ?? 0))}
+                          {image.kind === "lifestyle"
+                            ? `Ambientada · ${formatCost(Number(image.costUsd ?? 0))}`
+                            : image.kind === "feature_callout"
+                              ? `Destaque · ${formatCost(Number(image.costUsd ?? 0))}`
+                              : "Foto do fabricante"}
                         </div>
+                        {image.kind === "manufacturer_reference" && image.sourceUrl && (
+                          <a
+                            href={image.sourceUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="muted"
+                            style={{ fontSize: "0.7rem", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                          >
+                            {image.sourceUrl}
+                          </a>
+                        )}
                         {!image.integrityVerified && (
                           <div
                             style={{ fontSize: "0.72rem", marginTop: "0.2rem", color: "var(--status-warning)" }}
