@@ -363,7 +363,11 @@ export class GeminiClient implements LlmClient {
         ? [...(await Promise.all(candidateImageUrls.map(fetchImageDataBlock))), { type: "text", text: JSON.stringify(textPayload) }]
         : textPayload,
       schema: { type: "object", ...buildEnrichmentSchema(requestedFields, richness) },
-      maxOutputTokens: useVision ? 2500 : 1500,
+      // Raised from 1500/2500 after a real production failure: with all 11 fields requested (the
+      // "Excelente" package's default) plus a verbose description and a 6-10 item FAQ, the
+      // response routinely needed more than 2500 tokens and got cut off mid-JSON ("Unterminated
+      // string", "Expected property name or '}'") — not a formatting bug, genuine truncation.
+      maxOutputTokens: useVision ? 6000 : 3000,
     });
   }
 

@@ -228,7 +228,9 @@ export class OpenAiClient implements LlmClient {
       toolName: "submit_enriched_content",
       toolDescription: "Envia a descrição enriquecida, FAQ e dados estruturados do produto.",
       parameters: { type: "object", ...buildEnrichmentSchema(requestedFields, richness) },
-      maxOutputTokens: useVision ? 2500 : 1500,
+      // Raised from 1500/2500 — see gemini.client.ts's identical fix for why (real production
+      // truncation with all 11 fields + a verbose description + FAQ under the old ceiling).
+      maxOutputTokens: useVision ? 6000 : 3000,
     });
   }
 
