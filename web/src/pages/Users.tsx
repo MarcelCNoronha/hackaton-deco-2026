@@ -21,6 +21,9 @@ export function Users() {
   const [permissions, setPermissions] = useState<Set<AppSection>>(new Set());
   const [creating, setCreating] = useState(false);
   const [setupUrl, setSetupUrl] = useState<string | null>(null);
+  const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
+  const [editPermissions, setEditPermissions] = useState<Set<AppSection>>(new Set());
+  const [savingPermissions, setSavingPermissions] = useState(false);
 
   async function refresh() {
     setUsers(await api.listUsers());
@@ -60,12 +63,32 @@ export function Users() {
     }
   }
 
-  async function handleTogglePermission(target: AdminUser, section: AppSection) {
-    const next = target.permissions.includes(section)
-      ? target.permissions.filter((p) => p !== section)
-      : [...target.permissions, section];
-    await api.updateUser(target.id, { permissions: next });
-    await refresh();
+  function openEditPermissions(target: AdminUser) {
+    setEditingUser(target);
+    setEditPermissions(new Set(target.permissions));
+  }
+
+  function toggleEditPermission(section: AppSection) {
+    setEditPermissions((prev) => {
+      const next = new Set(prev);
+      if (next.has(section)) next.delete(section);
+      else next.add(section);
+      return next;
+    });
+  }
+
+  async function handleSavePermissions() {
+    if (!editingUser) return;
+    setSavingPermissions(true);
+    try {
+      await api.updateUser(editingUser.id, { permissions: [...editPermissions] });
+      await refresh();
+      setEditingUser(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSavingPermissions(false);
+    }
   }
 
   async function handleRoleChange(target: AdminUser, nextRole: "admin" | "user") {
@@ -184,18 +207,9 @@ export function Users() {
                     {u.role === "admin" ? (
                       <span className="muted">Acesso total</span>
                     ) : (
-                      <div className="actions" style={{ marginTop: 0 }}>
-                        {SECTIONS.map((section) => (
-                          <button
-                            key={section.key}
-                            type="button"
-                            className={u.permissions.includes(section.key) ? "" : "secondary"}
-                            onClick={() => handleTogglePermission(u, section.key)}
-                          >
-                            {section.label}
-                          </button>
-                        ))}
-                      </div>
+                      <button type="button" className="secondary" onClick={() => openEditPermissions(u)}>
+                        Editar ({u.permissions.length})
+                      </button>
                     )}
                   </td>
                   <td>
@@ -227,6 +241,38 @@ export function Users() {
           </table>
         </section>
       </div>
+
+      {editingUser && (
+        <div className="modal-overlay" role="dialog" aria-modal="true">
+          <div className="modal-box card">
+            <h2>Permissões de {editingUser.name}</h2>
+            <p className="muted" style={{ marginTop: 0 }}>{editingUser.email}</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginTop: "0.75rem" }}>
+              {SECTIONS.map((section) => (
+                <label key={section.key} className="field-selector-row">
+                  <span>
+                    <input
+                      type="checkbox"
+                      checked={editPermissions.has(section.key)}
+                      onChange={() => toggleEditPermission(section.key)}
+                    />
+                    {" "}
+                    {section.label}
+                  </span>
+                </label>
+              ))}
+            </div>
+            <div className="actions" style={{ marginTop: "1rem", justifyContent: "flex-end" }}>
+              <button type="button" className="secondary" onClick={() => setEditingUser(null)}>
+                Cancelar
+              </button>
+              <button type="button" onClick={handleSavePermissions} disabled={savingPermissions}>
+                {savingPermissions ? "Salvando…" : "Salvar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
