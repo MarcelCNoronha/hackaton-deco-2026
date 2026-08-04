@@ -261,6 +261,16 @@ specs, FAQ, dados estruturados) + alt-text de imagem, sem opção de escolher. A
   `model-recommendations.ts`). Dá pra montar em cima do que já existe em `agent_request_logs`
   (tem `provider`/`model`/`costUsd`/`createdAt` por chamada) sem precisar de tabela nova.
 
+- **Analytics agregado combinando Google + otimizações** — pedido em 2026-08-05 ("colocar no
+  radar"), não implementado. Diferente do item acima (que é sobre custo/uso de IA): a ideia é uma
+  visão histórica cruzando os deltas reais de GSC/GA4 (`impact.agent.ts`) com o histórico de runs
+  de otimização — ex. "impressões subiram X% no mês seguinte às otimizações de categoria Y". Hoje
+  o `RealImpactPanel` só existe por produto, sob demanda; um agregado exigiria decidir uma janela
+  comum entre produtos com `publishedAt` diferentes (ver nota de escopo cortado na seção "Qualidade
+  de conteúdo com dados reais + impacto real sem tabela de snapshot" abaixo) — o custo de N
+  chamadas ao Google por produto na carga de uma página só valeria a pena com mais produtos já
+  maturados do que os 2 que temos até agora.
+
 - **Geração de vídeo curto** — adiado para 2026-08-04 ("vamos fazer amanhã"). Ainda não
   pesquisado; a geração de imagem (ver abaixo) já dá o padrão de client/agent/rota a seguir.
 
@@ -644,6 +654,54 @@ e o nível já são configurados, evitando espalhar configuração de otimizaç�
 Removida a entrada "Exemplo de PDP — nível Excelente" (mockup estático) da Documentação — hoje a
 própria "Configuração de PDP" tem preview ao vivo renderizado pela função real de publicação, o
 mockup ficou redundante (`docs/README.md` atualizado no mesmo sentido).
+
+### Concorrência limitada + primeira suíte de testes automatizados (2026-08-05, oitava rodada)
+
+Pedido explícito do usuário, priorizando 2 dos riscos conhecidos listados na aba Arquitetura:
+"Sem limite de concorrência entre produtos num run" e "Zero teste automatizado". Os dois eram os
+únicos riscos da lista que não dependiam de acesso à conta real da VTEX pra resolver — dava pra
+atacar agora, sem esperar o token chegar.
+
+**Limite de concorrência**: `lib/concurrency.ts`'s `mapWithConcurrency` — versão com limite do
+`Promise.allSettled(...map(...))` que o orquestrador usava antes, que disparava as chamadas de IA
+de TODOS os produtos do run ao mesmo tempo (um run de "otimização total" com topN=50 significava
+50+ chamadas simultâneas por tipo de task). Agora cada task (Content Enrichment, Image Alt-Text,
+Geração de Imagem) roda no máximo `ENRICHMENT_CONCURRENCY` produtos por vez (padrão 5, configurável
+via `.env`) — mesma assinatura de retorno do `Promise.allSettled` (array de
+`PromiseSettledResult`), então o resto do orquestrador não precisou mudar.
+
+**Primeira suíte de testes (vitest, 35 testes, 5 arquivos, roda no CI a cada push/PR)**:
+- `lib/concurrency.test.ts` — respeita o limite, preserva ordem dos resultados, um item rejeitado
+  não trava os outros.
+- `agents/evaluator.test.ts` — `structureScore`, `readabilityScore`,
+  `computeAttributeCompleteness` (incluindo o caso com baseline fixo por categoria vs. o fallback
+  de união de chaves), e `computeContentScore` com um `LlmClient` fake (sem chamada de rede real).
+  Achado ao escrever o teste (não é bug, mas merece registro): quando não há texto E nenhum
+  atributo/patch/baseline (`attributesExpected = 0`), `percentOrFull(0,0)` retorna 100 ("nada
+  esperado = 100% completo"), então o fallback de "sem draft pra avaliar" pontua 13, não 0 —
+  comportamento documentado no teste em vez de escondido.
+- `agents/publisher.test.ts` — `renderPdpHtml`/`escapeHtml`: escapa HTML malicioso, respeita
+  ordem dos blocos, renderiza texto corrido no nível Médio vs. HTML semântico real no
+  Bom/Excelente, nunca renderiza um bloco sem dado (mesmo se listado no template).
+- `agents/impact.test.ts` — `getProductRealImpact` com `GscClient`/`Ga4Client` fake e
+  `real-impact.repo.ts` mockado (`vi.mock`): as 4 transições de estado
+  (`no_url`/`not_published`/`maturing`/`ready`), casamento por pathname ignorando produtos
+  errados, e delta de 0% tratado como +100% (não divide por zero).
+- `api/client.test.ts` (web) — `classifyScore`: limite inclusivo na borda exata, prioridade de
+  override por categoria sobre o `'*'` padrão, fallback pra bronze sem nenhum threshold
+  configurado.
+
+**Setup**: `vitest` como devDependency nos dois projetos (`server`/`web`), scripts `test`/
+`test:watch`, `vitest.config.ts` no server injetando valores fake pras env vars obrigatórias
+(`DATABASE_URL`, `ENCRYPTION_KEY` etc. — os testes de lógica pura nunca abrem conexão real, só
+precisam que `config/env.ts` não lance erro ao importar), `*.test.ts` excluído do `tsconfig.json`
+de ambos pra não entrar no build de produção. `ci.yml` ganhou um step "Test server"/"Test web"
+entre type-check e build.
+
+**Ainda não cobre** (registrado como limitação, não escondido): rotas HTTP (Fastify), os 3
+clients de LLM, VtexClient/ShopifyClient (incluindo o fix do PUT não-parcial), e nenhum teste de
+integração contra Postgres/Redis reais — é uma rede de segurança parcial focada na lógica de
+maior risco de regressão silenciosa, não cobertura ampla.
 
 ## Formação de equipes
 

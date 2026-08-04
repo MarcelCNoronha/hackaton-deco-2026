@@ -94,11 +94,11 @@ export const KNOWN_RISKS: KnownRisk[] = [
     body: "O Evaluator julga o que o Content Enrichment gerou — é rotulado como \"estimado\" no produto, mas vale ter pronta a resposta pra \"quem garante que essa nota significa algo real\". Mitigado por dois lados: o painel de Impacto real (GSC/GA4 ao vivo, ver Fluxo #6) é uma medida totalmente independente da IA; e o roteamento padrão agora usa provedores DIFERENTES pra Content Enrichment (Anthropic) e Evaluator (OpenAI) — reduz mas não elimina a circularidade, e uma instância já em produção antes dessa mudança precisa ajustar manualmente em Integrações → Roteamento de Modelos, já que uma linha salva no banco sobrepõe o novo default do código.",
   },
   {
-    title: "Sem limite de concorrência entre produtos num run",
-    body: "Todos os produtos de um run disparam chamadas de IA em paralelo sem limite — risco de custo/rate-limit conhecido, não testado sob carga real.",
+    title: "Concorrência entre produtos num run — agora limitada, não eliminada",
+    body: "Corrigido (2026-08-05): cada task (Content Enrichment, Alt-Text, geração de imagem) roda com no máximo ENRICHMENT_CONCURRENCY (padrão 5) produtos simultâneos em vez de todos de uma vez (lib/concurrency.ts's mapWithConcurrency). Reduz bastante o risco de estourar rate-limit/gastar em rajada, mas o valor default ainda não foi validado contra as cotas reais dos provedores conectados sob carga real.",
   },
   {
-    title: "Zero teste automatizado",
-    body: "Tudo validado por type-check/build manual — sem rede de segurança se algo quebrar no meio de uma demo ao vivo.",
+    title: "Teste automatizado — cobertura inicial, não abrangente",
+    body: "Corrigido em parte (2026-08-05): vitest cobre a lógica pura de maior risco (cálculo do score composto, merge de completude de atributos, renderPdpHtml/escapeHtml, transições de estado do Impacto real, o limitador de concorrência) e roda no CI a cada push/PR. Ainda NÃO cobre: rotas HTTP (Fastify), os 3 clients de LLM, VtexClient/ShopifyClient (incluindo o fix do PUT não-parcial), nem nenhum teste de integração contra um Postgres real — ainda é uma rede de segurança parcial, não uma garantia ampla antes de uma demo ao vivo.",
   },
 ];

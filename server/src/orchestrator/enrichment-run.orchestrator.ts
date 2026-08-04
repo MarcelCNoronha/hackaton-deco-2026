@@ -24,6 +24,8 @@ import { generateProductImage } from "../agents/image-generation.agent.js";
 import { publishApprovedProposals } from "../agents/publisher.agent.js";
 import { buildEmbeddingText, saveEmbedding } from "../repositories/product-similarity.repo.js";
 import { IMAGE_GENERATION_MODEL } from "../clients/model-recommendations.js";
+import { mapWithConcurrency } from "../lib/concurrency.js";
+import { env } from "../config/env.js";
 
 export interface StartEnrichmentRunParams {
   /** Seleção manual de produtos. Exatamente um entre isto e catalogFilter é esperado. */
@@ -261,35 +263,37 @@ export async function executeEnrichmentRun(runId: number, params: StartEnrichmen
     const runAltText = params.includeAltText ?? true;
     const imageKinds = params.imageKinds ?? [];
 
+    // Bounded, not `Promise.all(...map(...))` — every product otherwise fires its LLM calls at the
+    // exact same instant, which is fine for a handful of products but risks provider rate-limit
+    // errors and cost spikes for a larger "otimização total" run. See lib/concurrency.ts.
+    const concurrency = env.ENRICHMENT_CONCURRENCY;
+    const imageGenTasks = targetProducts.flatMap((product) => imageKinds.map((kind) => ({ product, kind })));
+
     const [contentResults, imageResults, imageGenResults] = await Promise.all([
       runContent
-        ? Promise.allSettled(
-            targetProducts.map((product) =>
-              proposeContentEnrichment({
-                contentLlm,
-                evaluatorLlm,
-                runId,
-                product,
-                embedding: embeddingByProductId.get(product.id) ?? null,
-                fields: params.fields,
-                descriptionRichness: params.descriptionRichness,
-                communicationTone: params.communicationTone,
-                knownAttributeFields,
-                topSearchQueries: product.url ? topQueriesByPath.get(pathnameOf(product.url)) : undefined,
-              }),
-            ),
+        ? mapWithConcurrency(targetProducts, concurrency, (product) =>
+            proposeContentEnrichment({
+              contentLlm,
+              evaluatorLlm,
+              runId,
+              product,
+              embedding: embeddingByProductId.get(product.id) ?? null,
+              fields: params.fields,
+              descriptionRichness: params.descriptionRichness,
+              communicationTone: params.communicationTone,
+              knownAttributeFields,
+              topSearchQueries: product.url ? topQueriesByPath.get(pathnameOf(product.url)) : undefined,
+            }),
           )
         : Promise.resolve([]),
       runAltText
-        ? Promise.allSettled(targetProducts.map((product) => proposeImageAltText({ llm: imageLlm, runId, product })))
+        ? mapWithConcurrency(targetProducts, concurrency, (product) => proposeImageAltText({ llm: imageLlm, runId, product }))
         : Promise.resolve([]),
       // One task per (product, kind) pair — a product with no reference images fails just that
       // pair (see generateProductImage's guard), never the whole run.
       imageKinds.length > 0 && imageGemini
-        ? Promise.allSettled(
-            targetProducts.flatMap((product) =>
-              imageKinds.map((kind) => generateProductImage({ gemini: imageGemini, product, kind })),
-            ),
+        ? mapWithConcurrency(imageGenTasks, concurrency, ({ product, kind }) =>
+            generateProductImage({ gemini: imageGemini, product, kind }),
           )
         : Promise.resolve([]),
     ]);

@@ -27,6 +27,10 @@ jobs:
         working-directory: server
         run: npx tsc --noEmit -p tsconfig.json
 
+      - name: Test server
+        working-directory: server
+        run: npm test
+
       - name: Build server
         working-directory: server
         run: npm run build
@@ -38,6 +42,10 @@ jobs:
       - name: Type-check web
         working-directory: web
         run: npx tsc --noEmit -p tsconfig.json
+
+      - name: Test web
+        working-directory: web
+        run: npm test
 
       - name: Build web
         working-directory: web

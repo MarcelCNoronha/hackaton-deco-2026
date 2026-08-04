@@ -94,6 +94,14 @@ export const ARCHITECTURE_NOTES: Array<{ title: string; body: string }> = [
       "disso a página mostra 'maturando' em vez de um número de ruído.",
   },
   {
+    title: "Concorrência limitada dentro do pipeline",
+    body:
+      "Content Enrichment, Image Alt-Text e Geração de Imagem cada um roda no máximo " +
+      "ENRICHMENT_CONCURRENCY (padrão 5) produtos por vez (lib/concurrency.ts's mapWithConcurrency), " +
+      "não mais todos de uma vez — reduz o risco de rajada de custo/rate-limit num run grande sem " +
+      "mudar o resultado final (mesmo Promise.allSettled por fora, resultados na mesma ordem).",
+  },
+  {
     title: "Analyst → buscas reais por página",
     body:
       "Além de priorizar produtos, o Analyst expõe as top buscas reais do Search Console por URL " +
