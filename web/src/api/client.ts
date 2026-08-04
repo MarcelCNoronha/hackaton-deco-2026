@@ -257,6 +257,12 @@ export interface CategoryContentProfile {
   source: ContentProfileSource;
 }
 
+/** Returned only by the bulk listing (one row per category that's actually been configured) —
+ *  powers the "já mapeada" marker + date in PdpConfig.tsx's category selector. */
+export interface CategoryContentProfileSummary extends CategoryContentProfile {
+  updatedAt: string;
+}
+
 export interface StructureSignals {
   wordCount: number;
   bulletCount: number;
@@ -518,6 +524,7 @@ export const api = {
 
   getCategoryContentProfile: (category: string) =>
     request<{ profile: CategoryContentProfile | null }>(`/category-content-profile?category=${encodeURIComponent(category)}`),
+  listCategoryContentProfiles: () => request<{ profiles: CategoryContentProfileSummary[] }>("/category-content-profiles"),
   setCategoryContentProfile: (body: Omit<CategoryContentProfile, "source">) =>
     request<{ profile: CategoryContentProfile | null }>("/category-content-profile", { method: "PUT", body: JSON.stringify(body) }),
   getCategoryReferenceLinks: (category: string) =>

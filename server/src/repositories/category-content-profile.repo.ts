@@ -18,13 +18,17 @@ export interface CategoryContentProfile {
   source: ContentProfileSource;
 }
 
+/** Only meaningful for a persisted row (never the transient "internal" case computed live in
+ *  resolveCategoryContentProfile below, which has no single "last touched" moment) — kept as its
+ *  own type instead of adding an always-required field to CategoryContentProfile, which also
+ *  doubles as the write-input shape for upsertContentProfile/setManualContentProfile. */
+export interface CategoryContentProfileSummary extends CategoryContentProfile {
+  updatedAt: string;
+}
+
 const MIN_SAMPLE_SIZE = 3;
 
-export async function getContentProfile(platform: CatalogPlatform, category: string): Promise<CategoryContentProfile | null> {
-  const row = await db.query.categoryContentProfiles.findFirst({
-    where: and(eq(categoryContentProfiles.platform, platform), eq(categoryContentProfiles.category, category)),
-  });
-  if (!row) return null;
+function toApiShape(row: typeof categoryContentProfiles.$inferSelect): CategoryContentProfileSummary {
   return {
     platform: row.platform,
     category: row.category,
@@ -35,7 +39,25 @@ export async function getContentProfile(platform: CatalogPlatform, category: str
     hasSpecTable: row.hasSpecTable,
     hasWarrantySection: row.hasWarrantySection,
     source: row.source,
+    updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+export async function getContentProfile(platform: CatalogPlatform, category: string): Promise<CategoryContentProfile | null> {
+  const row = await db.query.categoryContentProfiles.findFirst({
+    where: and(eq(categoryContentProfiles.platform, platform), eq(categoryContentProfiles.category, category)),
+  });
+  return row ? toApiShape(row) : null;
+}
+
+/** Every category with a saved profile for this platform — used to mark which subcategories the
+ *  merchant has already "mapeado" (mapped/configured) in the "Grupo de produtos" selector on
+ *  PdpConfig.tsx, with the date it was last touched, instead of them having to click through each
+ *  one to find out. Never includes "internal" (auto-derived, never explicitly configured, never
+ *  written to this table) — exactly the categories a merchant has deliberately touched. */
+export async function listContentProfiles(platform: CatalogPlatform): Promise<CategoryContentProfileSummary[]> {
+  const rows = await db.query.categoryContentProfiles.findMany({ where: eq(categoryContentProfiles.platform, platform) });
+  return rows.map(toApiShape);
 }
 
 export async function upsertContentProfile(profile: Omit<CategoryContentProfile, "source"> & { source: ContentProfileSource }): Promise<void> {

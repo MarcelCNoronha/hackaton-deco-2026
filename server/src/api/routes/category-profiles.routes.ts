@@ -5,6 +5,7 @@ import { listCategoryNodes } from "../../repositories/category-nodes.repo.js";
 import { listCategoryFields } from "../../repositories/category-spec-fields.repo.js";
 import {
   getContentProfile,
+  listContentProfiles,
   setManualContentProfile,
 } from "../../repositories/category-content-profile.repo.js";
 import {
@@ -61,6 +62,13 @@ export async function categoryProfilesRoutes(app: FastifyInstance) {
     const { category } = categoryQuery.parse(req.query);
     const platform = await getCatalogPlatform();
     return { profile: await getContentProfile(platform, category) };
+  });
+
+  /** Every category with a saved profile — powers the "já mapeada" marker + date next to each
+   *  option in PdpConfig.tsx's category selector. */
+  app.get("/api/category-content-profiles", async () => {
+    const platform = await getCatalogPlatform();
+    return { profiles: await listContentProfiles(platform) };
   });
 
   app.put("/api/category-content-profile", async (req) => {

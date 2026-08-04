@@ -6,6 +6,7 @@ import {
   PDP_BLOCKS,
   type CatalogPlatform,
   type CategoryContentProfile,
+  type CategoryContentProfileSummary,
   type CategoryReferenceLink,
   type CategorySpecFields,
   type CategoryTreeNode,
@@ -112,6 +113,10 @@ export function PdpConfig() {
   const [loading, setLoading] = useState(true);
   const [previewHtml, setPreviewHtml] = useState<string>("");
 
+  // One row per category that already has a saved content profile (manual or references-derived) —
+  // powers the "já mapeada" marker + date next to each option below, loaded once and refreshed
+  // whenever this category's own profile changes (add/remove reference link, save manual profile).
+  const [mappedProfiles, setMappedProfiles] = useState<CategoryContentProfileSummary[]>([]);
   const [referenceLinks, setReferenceLinks] = useState<CategoryReferenceLink[]>([]);
   const [contentProfile, setContentProfile] = useState<CategoryContentProfile | null>(null);
   const [newLinkUrls, setNewLinkUrls] = useState<string[]>(Array(MAX_REFERENCE_LINKS).fill(""));
@@ -128,10 +133,15 @@ export function PdpConfig() {
 
   const leafNodes = categoryNodes.filter((n) => n.isLeaf);
   const isSpecificCategory = selectedCategory !== DEFAULT_PDP_CATEGORY;
+  const mappedByCategory = new Map(mappedProfiles.map((p) => [p.category, p]));
 
   function loadCategoryFields() {
     api.getCategoryNodes().then(({ nodes }) => setCategoryNodes(nodes));
     api.getCategorySpecFields().then(({ categories }) => setCategorySpecFields(categories));
+  }
+
+  function loadMappedProfiles() {
+    api.listCategoryContentProfiles().then(({ profiles }) => setMappedProfiles(profiles));
   }
 
   function loadDnaForCategory(category: string) {
@@ -155,6 +165,7 @@ export function PdpConfig() {
 
   useEffect(() => {
     loadCategoryFields();
+    loadMappedProfiles();
   }, []);
 
   useEffect(() => {
@@ -181,6 +192,7 @@ export function PdpConfig() {
       setContentProfile(profile);
       const { links } = await api.getCategoryReferenceLinks(selectedCategory);
       setReferenceLinks(links);
+      loadMappedProfiles();
       if (errors.length > 0) {
         setDnaMessage(errors.map((e) => `${e.url}: ${e.error}`).join(" | "));
       }
@@ -196,6 +208,7 @@ export function PdpConfig() {
     setContentProfile(profile);
     const { links } = await api.getCategoryReferenceLinks(selectedCategory);
     setReferenceLinks(links);
+    loadMappedProfiles();
   }
 
   function startManualEdit() {
@@ -222,6 +235,7 @@ export function PdpConfig() {
     });
     setContentProfile(profile);
     setManualEdit(null);
+    loadMappedProfiles();
   }
 
   async function handleSyncCategories() {
@@ -321,15 +335,19 @@ export function PdpConfig() {
           </div>
           <p className="muted" style={{ marginTop: 0 }}>
             Tudo abaixo (campos aceitos, DNA de conteúdo, estrutura do anúncio) é configurado pra esta seleção.
-            "Todas as categorias (padrão)" vale pra qualquer subcategoria sem configuração própria.
+            "Todas as categorias (padrão)" vale pra qualquer subcategoria sem configuração própria. Categorias
+            marcadas com ✓ já têm um DNA de conteúdo salvo (manual ou por links de referência).
           </p>
           <select value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)}>
             <option value={DEFAULT_PDP_CATEGORY}>Todas as categorias (padrão)</option>
-            {leafNodes.map((n) => (
-              <option key={n.path} value={n.path}>
-                {n.path}
-              </option>
-            ))}
+            {leafNodes.map((n) => {
+              const mapped = mappedByCategory.get(n.path);
+              return (
+                <option key={n.path} value={n.path}>
+                  {mapped ? `✓ ${n.path} — mapeada em ${new Date(mapped.updatedAt).toLocaleDateString("pt-BR")}` : n.path}
+                </option>
+              );
+            })}
           </select>
           {platform === "vtex" && leafNodes.length === 0 && (
             <p className="muted" style={{ marginTop: "0.75rem" }}>
