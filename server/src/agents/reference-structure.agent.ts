@@ -14,7 +14,15 @@ export interface StructureSignals {
   mentionsInstallation: boolean;
 }
 
+// `type: "object"` at the top level is load-bearing, not decorative — every other schema-
+// constrained call in this codebase (enrichProductContent/evaluateContent) includes it; this one
+// didn't, and against the currently-routed Gemini provider (which, unlike ClaudeClient's
+// extractStructuredData, doesn't add it automatically) that meant the model's output wasn't
+// actually locked to these field names at all. Confirmed live: real production rows came back with
+// invented fields like has_price/count_technical_specifications instead of wordCount/bulletCount,
+// which then silently coerced to 0 via sanitizeSignals below instead of surfacing as a real error.
 const STRUCTURE_SCHEMA = {
+  type: "object",
   properties: {
     wordCount: { type: "integer", description: "Contagem aproximada de palavras do corpo descritivo do produto (ignore menu/rodapé/cookies)." },
     bulletCount: { type: "integer", description: "Quantos itens de lista (bullets) de benefícios/características aparecem." },

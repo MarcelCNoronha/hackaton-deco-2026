@@ -1,7 +1,10 @@
 import { fetchPageText } from "../clients/web-fetch.client.js";
 import { resolveLlmClient } from "../lib/llm-client-resolver.js";
 
+// `type: "object"` at the top level is load-bearing — see reference-structure.agent.ts's
+// STRUCTURE_SCHEMA for the real production failure this same omission caused there.
 const FACTS_SCHEMA = {
+  type: "object",
   properties: {
     facts: {
       type: "array",
