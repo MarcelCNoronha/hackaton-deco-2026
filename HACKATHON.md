@@ -709,6 +709,61 @@ clients de LLM, VtexClient/ShopifyClient (incluindo o fix do PUT não-parcial), 
 integração contra Postgres/Redis reais — é uma rede de segurança parcial focada na lógica de
 maior risco de regressão silenciosa, não cobertura ampla.
 
+### Padrão de conteúdo por categoria + referências + fix de retry do Gemini (2026-08-04, nona rodada)
+
+Motivação (discussão com o usuário): a IA de enriquecimento só usava dados do próprio produto —
+sem saber quais campos a VTEX de fato aceita por categoria, e sem uma régua de "quão completo" um
+bom anúncio daquela categoria deveria ser quando o produto tem pouca informação própria. A
+conversa concluiu em três peças independentes, todas opcionais e aditivas (sem nenhuma, a geração
+funciona exatamente como antes):
+
+1. **Campos aceitos pela VTEX por categoria** — ao conectar (e sob demanda, botão "Sincronizar
+   categorias agora"), um job de fila (`category-sync.worker.ts`, concorrência 1) percorre a árvore
+   de categorias (`listCategoryTree`, 3 níveis — Departamento/Categoria/Subcategoria) e, por nó
+   folha, busca os campos de especificação (`getCategoryFieldDefinitions`). **Achado testando
+   contra a conta real da Mundial Acabamentos**: o endpoint documentado
+   `specification/field/listByCategoryId/{id}` voltava `[]` pra toda categoria testada, mesmo uma
+   com campos visivelmente configurados no admin (`DadosTécnicos`, `Cuidados`, `Selo Azul`...) — o
+   endpoint certo é `listByCategoryId`'s "gêmeo" `listTreeByCategoryId`, confirmado por captura de
+   tela do admin da VTEX. Filtra `IsStockKeepingUnit === false` (campo do produto, não da SKU, a
+   pedido do usuário). Nunca cobre preço/estoque/categoria — APIs inteiramente separadas.
+2. **DNA de conteúdo por categoria** — alvo estrutural (faixa de palavras, bullets, presença de
+   FAQ/tabela de specs/garantia), nunca texto copiado. Prioridade: valor manual > consenso entre
+   1-5 links de referência de mercado colados pelo usuário (extração por IA restrita a sinais
+   estruturais, nunca reproduzindo a cópia original) > calculado a partir dos produtos Ouro/Prata
+   já publicados da própria loja (nunca de produtos ruins — do contrário replicaria o problema que
+   a feature tenta resolver). Resolvido em `category-content-profile.repo.ts`.
+3. **Referência de fabricante por produto** — o oposto do item 2: ao otimizar um produto
+   específico, uma URL opcional (tipicamente a página do fabricante) tem FATOS objetivos extraídos
+   (specs, dimensões, garantia) e cacheados no produto, como fonte primária contra alucinação.
+   Fica salva até ser trocada/removida — não precisa ser reinformada em runs futuras.
+
+**Wiring no prompt**: `enrichment-schema.ts` ganhou `buildCategoryFieldsSuffix`/
+`buildContentProfileSuffix`; os 3 clients de LLM (Claude/OpenAI/Gemini) ganharam um método genérico
+`extractStructuredData` (usado pelos dois agentes novos de extração) e os 3 parâmetros novos em
+`enrichProductContent`. `content-enrichment.agent.ts` resolve os três sinais direto de
+`ProductRow`/`product.category` — não precisou tocar no orquestrador, já que plataforma/categoria/
+fatos do fabricante já eram colunas do produto sincronizado.
+
+**Bug real encontrado e corrigido durante a investigação**: o usuário reportou que uma otimização
+recém-tentada não gerou nenhuma proposta. Causa raiz achada direto no banco de produção (via SSH
+autorizado pelo usuário): a resposta do Gemini veio com caracteres acentuados corrompidos
+(mojibake), invalidando o JSON — e `isRetryableGeminiError` só considerava re-tentável erro HTTP
+429/5xx, não uma falha de parse local, então a tarefa falhava de vez na primeira tentativa em vez
+de tentar de novo. Corrigido: falha de "invalid JSON"/"sem output_text" agora também entra no loop
+de retry (`gemini.client.ts`).
+
+**Arquivos novos**: `web-fetch.client.ts`, `reference-structure.agent.ts`, `reference-facts.agent.ts`,
+`llm-client-resolver.ts`, `category-sync.orchestrator.ts` + worker, repos
+`category-nodes`/`category-spec-fields`/`category-content-profile`/`category-reference-links`,
+rotas `category-profiles.routes.ts` + extensão de `products.routes.ts`/`connections.routes.ts`.
+UI: novas seções em `PdpConfig.tsx` (campos aceitos, DNA de conteúdo) e campo de referência do
+fabricante por produto em `Runs.tsx`.
+
+**Verificado**: type-check e build limpos nos dois projetos, suíte de testes (30/30) sem
+regressão, e as 4 migrations novas aplicadas com sucesso contra um Postgres+pgvector isolado
+(container descartável, não a base de produção).
+
 ## Formação de equipes
 
 - 1 a 5 pessoas por equipe (pode ser solo)

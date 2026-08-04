@@ -24,6 +24,7 @@ import { buildGoogleAuthUrl, exchangeGoogleAuthCode } from "../../clients/google
 import { RECOMMENDATIONS, resolveModel } from "../../clients/model-recommendations.js";
 import { requireSection } from "../../auth/guards.js";
 import { makeRequestLogger } from "../../repositories/logs.repo.js";
+import { enqueueCategorySync } from "../../queue/queues.js";
 
 // Both fields end up interpolated straight into a request URL (see vtex.client.ts's constructor)
 // alongside the account's AppKey/AppToken — an unvalidated value like "evil.com/" would send those
@@ -81,7 +82,20 @@ export async function connectionsRoutes(app: FastifyInstance) {
 
     const { ok, error } = await new VtexClient(credentials, makeRequestLogger()).testConnection();
     await setConnectionStatus("vtex", ok ? "connected" : "error");
+    // Fire-and-forget: discover the category tree + accepted spec fields before any content ever
+    // gets generated (see category-sync.orchestrator.ts). Doesn't block the connect response —
+    // a store's tree can be large enough that walking it synchronously here would time out the
+    // request for no benefit to the user watching the "Conectado" toast.
+    if (ok) await enqueueCategorySync();
     return reply.send({ ok, error });
+  });
+
+  // Manual re-sync, mirroring the /:provider/test re-test pattern below — lets a merchant refresh
+  // category_nodes/category_spec_fields after editing categories/specs in the VTEX admin, without
+  // waiting for another full reconnect.
+  app.post("/api/connections/vtex/sync-categories", async (_req, reply) => {
+    await enqueueCategorySync();
+    return reply.send({ ok: true });
   });
 
   app.post("/api/connections/shopify", async (req, reply) => {

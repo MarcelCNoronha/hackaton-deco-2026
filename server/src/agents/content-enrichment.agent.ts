@@ -12,6 +12,8 @@ import type { ProductRow } from "./catalog-reader.agent.js";
 import { computeContentScore, persistContentScore, scoreContent, type ComputedContentScore } from "./evaluator.agent.js";
 import { findReuseDonor } from "../repositories/product-similarity.repo.js";
 import { getExpectedAttributeKeys } from "../repositories/catalog-attributes.repo.js";
+import { getCategoryFields } from "../repositories/category-spec-fields.repo.js";
+import { resolveCategoryContentProfile } from "../repositories/category-content-profile.repo.js";
 
 interface VtexImage {
   ImageUrl: string;
@@ -255,6 +257,15 @@ export async function proposeContentEnrichment(params: {
   // same run's AI proposes for this one product).
   const expectedAttributeKeys = await getExpectedAttributeKeys(product.category);
 
+  // Category-level signals, fetched once per product (same reasoning as expectedAttributeKeys —
+  // fixed facts about the category, not something that should shift across quality-gate retries).
+  // Both are independent of `donor`/manufacturerFacts below: they apply to a category regardless
+  // of whether this specific product has a manufacturer reference set (see llm-types.ts's doc
+  // comments on categoryFields/contentProfile/manufacturerFacts).
+  const categoryFields = product.category ? await getCategoryFields(product.platform, product.category) : null;
+  const contentProfile = await resolveCategoryContentProfile(product.platform, product.category);
+  const manufacturerFacts = product.manufacturerReferenceFacts as Record<string, string> | null;
+
   const originalScore = await scoreContent({
     llm: evaluatorLlm,
     runId,
@@ -293,6 +304,9 @@ export async function proposeContentEnrichment(params: {
       imageUrls,
       knownAttributeFields: params.knownAttributeFields,
       topSearchQueries: params.topSearchQueries,
+      categoryFields: categoryFields ?? undefined,
+      contentProfile,
+      manufacturerFacts,
     });
 
     const score = await computeContentScore({
@@ -344,6 +358,9 @@ export async function proposeContentEnrichment(params: {
       imageUrls,
       knownAttributeFields: params.knownAttributeFields,
       topSearchQueries: params.topSearchQueries,
+      categoryFields: categoryFields ?? undefined,
+      contentProfile,
+      manufacturerFacts,
     });
 
     const score = await computeContentScore({

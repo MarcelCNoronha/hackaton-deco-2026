@@ -34,6 +34,30 @@ export interface CatalogFilterOptions {
   brands: Array<{ id: string; name: string }>;
 }
 
+/** One node of the catalog platform's category tree, with the same "A > B > C" breadcrumb
+ *  `products.category` uses (see vtex.client.ts's formatVtexCategoryPath) so per-category tables
+ *  (category_spec_fields, category_content_profiles...) can key off it directly. `isLeaf` marks
+ *  nodes with no children — where products actually get classified; a branch with no third level
+ *  has its second-level node marked leaf instead, so "reference at the Subcategoria, or the
+ *  Categoria if there's no Subcategoria" needs no special-casing anywhere else. */
+export interface CategoryTreeNode {
+  id: string;
+  name: string;
+  path: string;
+  parentPath: string | null;
+  level: number;
+  isLeaf: boolean;
+}
+
+/** A content/specification field the catalog platform accepts for a given category — scoped to
+ *  product-level fields only (never price/stock/the category assignment itself, which are separate
+ *  APIs entirely; see vtex.client.ts's getCategoryFieldDefinitions doc comment). */
+export interface CategoryFieldDefinition {
+  id: string;
+  name: string;
+  isActive: boolean;
+}
+
 export interface CatalogListParams {
   search?: string;
   /** VTEX: category id (tree node). Shopify: Collection id — filters by the same Collections
@@ -56,6 +80,17 @@ export interface CatalogClient {
   readonly platform: CatalogPlatform;
   testConnection(): Promise<{ ok: boolean; error?: string }>;
   listFilterOptions(): Promise<CatalogFilterOptions>;
+  /** Full category tree with breadcrumb paths, for browsing/pre-populating per-category reference
+   *  links and profiles ahead of any product actually being synced into that category. Shopify has
+   *  no comparable category tree (collections are flat, not hierarchical) — its implementation
+   *  always returns `[]`. */
+  listCategoryTree(): Promise<CategoryTreeNode[]>;
+  /** Which content/specification fields the platform accepts for one category — consulted before
+   *  generation so the enrichment prompt never invents an attribute outside this list. VTEX only
+   *  (`specification/field/listTreeByCategoryId`); Shopify has no per-category field registry
+   *  (its metafields are shop-wide, see getKnownAttributeFields), so its implementation returns
+   *  `[]`. */
+  getCategoryFieldDefinitions(categoryId: string): Promise<CategoryFieldDefinition[]>;
   listProducts(params: CatalogListParams): Promise<CatalogListResult>;
   getProduct(externalId: string): Promise<CatalogProductDetail>;
   updateProductDescription(externalId: string, description: string): Promise<void>;

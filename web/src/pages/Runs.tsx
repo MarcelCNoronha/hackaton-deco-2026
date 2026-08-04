@@ -84,6 +84,38 @@ export function Runs() {
   const [pendingSingle, setPendingSingle] = useState<string | null>(null);
   const [pendingBulk, setPendingBulk] = useState(false);
 
+  // Which product-row's "referência do fabricante" editor is open, and its draft value — only one
+  // open at a time keeps the list from getting cluttered with an input per row.
+  const [editingReferenceId, setEditingReferenceId] = useState<string | null>(null);
+  const [referenceUrlDraft, setReferenceUrlDraft] = useState("");
+  const [savingReferenceId, setSavingReferenceId] = useState<string | null>(null);
+  const [referenceError, setReferenceError] = useState<string | null>(null);
+
+  function openReferenceEditor(externalId: string, currentUrl: string | null) {
+    setEditingReferenceId(externalId);
+    setReferenceUrlDraft(currentUrl ?? "");
+    setReferenceError(null);
+  }
+
+  async function handleSaveReference(externalId: string) {
+    setSavingReferenceId(externalId);
+    setReferenceError(null);
+    try {
+      const result = await api.setManufacturerReference(externalId, referenceUrlDraft.trim() || null);
+      setListResult((prev) =>
+        prev
+          ? { ...prev, items: prev.items.map((it) => (it.externalId === externalId ? { ...it, manufacturerReferenceUrl: result.manufacturerReferenceUrl } : it)) }
+          : prev,
+      );
+      if (result.warning) setReferenceError(result.warning);
+      else setEditingReferenceId(null);
+    } catch (err) {
+      setReferenceError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSavingReferenceId(null);
+    }
+  }
+
   async function refreshQuotaAlerts() {
     const quotas = await api.getFreeQuotas();
     setExhaustedQuotas(quotas.filter((q) => q.enabled && q.exhausted));
@@ -379,6 +411,50 @@ export function Runs() {
                         <a href={item.url} target="_blank" rel="noreferrer" className="link-button" style={{ fontSize: "0.75rem" }}>
                           Ver na loja ↗
                         </a>
+                      )}
+
+                      {editingReferenceId === item.externalId ? (
+                        <div style={{ marginTop: "0.35rem", display: "flex", flexDirection: "column", gap: "0.25rem", maxWidth: 260 }}>
+                          <input
+                            type="url"
+                            placeholder="URL do fabricante (opcional)"
+                            value={referenceUrlDraft}
+                            onChange={(e) => setReferenceUrlDraft(e.target.value)}
+                            style={{ fontSize: "0.75rem", padding: "0.3rem 0.5rem" }}
+                          />
+                          {referenceError && (
+                            <div className="muted" style={{ fontSize: "0.7rem", color: "var(--status-warning)" }}>
+                              {referenceError}
+                            </div>
+                          )}
+                          <div style={{ display: "flex", gap: "0.4rem" }}>
+                            <button
+                              type="button"
+                              style={{ fontSize: "0.72rem", padding: "0.25rem 0.6rem" }}
+                              onClick={() => handleSaveReference(item.externalId)}
+                              disabled={savingReferenceId === item.externalId}
+                            >
+                              {savingReferenceId === item.externalId ? "Analisando…" : "Salvar"}
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary"
+                              style={{ fontSize: "0.72rem", padding: "0.25rem 0.6rem" }}
+                              onClick={() => setEditingReferenceId(null)}
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          className="link-button"
+                          style={{ fontSize: "0.72rem", background: "transparent", border: "none", padding: 0, display: "block", marginTop: "0.2rem" }}
+                          onClick={() => openReferenceEditor(item.externalId, item.manufacturerReferenceUrl)}
+                        >
+                          {item.manufacturerReferenceUrl ? "🏭 Referência definida" : "🏭 Definir referência do fabricante"}
+                        </button>
                       )}
                     </div>
                     <div className="product-row-category">

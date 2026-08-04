@@ -17,6 +17,14 @@ export const PIPELINE_FLOW: FlowStage[] = [
       "Padrões de Otimização: limites de score que classificam um produto como Ouro/Prata/Bronze, por categoria " +
         "(vocabulário deliberadamente diferente do nível Médio/Bom/Excelente escolhido antes de gerar — os dois podem discordar).",
       "Configuração de PDP: quais blocos (bullets, specs, FAQ, CTA, foto de destaque) entram na descrição e em que ordem, por nível.",
+      "Ao conectar a VTEX, um job de fundo sincroniza a árvore de categorias (Departamento > Categoria > Subcategoria) " +
+        "e, por Subcategoria (ou Categoria quando não há Subcategoria), quais campos de especificação a VTEX aceita — " +
+        "consultado antes de gerar, pra nunca propor um atributo que a plataforma não tem onde salvar; re-sincronizável " +
+        "a qualquer momento pelo botão 'Sincronizar categorias agora'.",
+      "DNA de conteúdo por categoria (Configuração de PDP): alvo estrutural (faixa de palavras, nº de bullets, presença " +
+        "de FAQ/tabela de specs/garantia) — vem de um valor definido manualmente, ou do consenso entre 1-5 links de " +
+        "anúncios de referência colados pelo usuário (extrai só estrutura, nunca copia texto), ou, na ausência dos " +
+        "dois, calculado a partir dos próprios produtos já bem avaliados (Ouro/Prata) da categoria.",
     ],
   },
   {
@@ -26,6 +34,10 @@ export const PIPELINE_FLOW: FlowStage[] = [
       "Nível (Médio/Bom/Excelente) — define descriptionRichness e mostra o custo previsto do pacote.",
       "Tom de comunicação (opcional).",
       "Quais dos 11 campos gerar + alt-text + geração de imagem por IA (sempre opt-in em qualquer nível).",
+      "Opcional, por produto: 'Referência do fabricante' — cola a URL da página oficial do fabricante daquele produto " +
+        "específico; extrai fatos objetivos (specs, dimensões, material, garantia) como fonte primária contra " +
+        "alucinação, ficando salva no produto até ser trocada/removida. Sem URL, a geração usa só os dados do próprio " +
+        "produto (mais o DNA da categoria, que se aplica sempre).",
     ],
   },
   {
@@ -34,6 +46,7 @@ export const PIPELINE_FLOW: FlowStage[] = [
       "Catalog Reader sincroniza os produtos escolhidos da plataforma ativa.",
       "Analyst prioriza por sinais de GSC/GA4 (casamento por URL) se o Top N cortar a lista, e expõe as top buscas reais de cada página (queryTopQueriesByPage).",
       "Content Enrichment chama o LLM roteado — consulta metafields conhecidos antes (Shopify), prioriza as buscas reais do Search Console pra essa página (quando existir) em vez de inventar palavras-chave, e usa visão real quando o nível pede imagem.",
+      "Antes de gerar, resolve por categoria: os campos aceitos pela VTEX e o DNA de conteúdo (sempre aplicados); e, se o produto tiver uma referência de fabricante salva, os fatos extraídos dela (opcional) — os três entram no mesmo prompt como restrições/contexto, nunca substituindo os dados do próprio produto.",
       "Evaluator julga o rascunho na régua de 8 sub-scores (SEO, GEO, conversão, legibilidade, estrutura, confiança do comprador, completude, consistência); se não bate a nota mínima, volta com feedback pro LLM, até 3 tentativas, sempre guardando a melhor.",
       "Produto muito parecido com outro já aprovado reaproveita o conteúdo (RAG) em vez de gastar as 3 tentativas.",
       "Image Alt-Text roda separado, por imagem.",
@@ -78,8 +91,8 @@ export interface KnownRisk {
  *  precisa ser validado/endurecido antes da submissão, priorizado sobre escopo novo. */
 export const KNOWN_RISKS: KnownRisk[] = [
   {
-    title: "VTEX nunca foi testada contra uma conta real",
-    body: "Todo o código VTEX (client, PUT corrigido, addProductImage, Search API) roda contra a loja real pela primeira vez só depois do token chegar — é o maior risco pro demo, porque é justamente a loja de verdade que será mostrada.",
+    title: "VTEX — parcialmente validada contra uma conta real (2026-08-04)",
+    body: "getCategoryFieldDefinitions/listCategoryTree foram validados ao vivo contra a conta real da Mundial Acabamentos (category/tree/3, specification/field/listTreeByCategoryId — não listByCategoryId, que voltava vazio mesmo com campos configurados; achado só testando contra dados reais). O restante do client (PUT corrigido, addProductImage) ainda não foi validado ao vivo.",
   },
   {
     title: "Escrita de atributos/metafields só funciona no Shopify",
@@ -100,5 +113,9 @@ export const KNOWN_RISKS: KnownRisk[] = [
   {
     title: "Teste automatizado — cobertura inicial, não abrangente",
     body: "Corrigido em parte (2026-08-05): vitest cobre a lógica pura de maior risco (cálculo do score composto, merge de completude de atributos, renderPdpHtml/escapeHtml, transições de estado do Impacto real, o limitador de concorrência) e roda no CI a cada push/PR. Ainda NÃO cobre: rotas HTTP (Fastify), os 3 clients de LLM, VtexClient/ShopifyClient (incluindo o fix do PUT não-parcial), nem nenhum teste de integração contra um Postgres real — ainda é uma rede de segurança parcial, não uma garantia ampla antes de uma demo ao vivo.",
+  },
+  {
+    title: "Extração de referência (URL de mercado/fabricante) depende de HTML puro",
+    body: "web-fetch.client.ts não usa navegador headless — só busca o HTML e retira tags/scripts. Páginas que carregam o conteúdo principal via JavaScript (SPA pesado) voltam com pouco texto; o usuário recebe um aviso explícito na UI em vez de uma falha silenciosa, mas a extração fica pior nesse caso. Sem cobertura automatizada ainda.",
   },
 ];

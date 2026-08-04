@@ -59,6 +59,10 @@ export interface CatalogProductSummary {
   /** "ready" with >=2 GSC/GA4 snapshots (a before/after trend exists), "partial" with just 1,
    *  "none" with 0 — drives the Impacto button's color. */
   impactReadiness: "none" | "partial" | "ready";
+  /** Merchant-provided reference for THIS exact product (e.g. the manufacturer's own page) — used
+   *  as a factual grounding source at generation time. Null until set via
+   *  api.setManufacturerReference. */
+  manufacturerReferenceUrl: string | null;
 }
 
 export interface CatalogFilterOptions {
@@ -193,6 +197,66 @@ export interface PdpTemplate {
   category: string;
   level: DescriptionRichness;
   blocks: PdpBlock[];
+}
+
+/** One node of the catalog platform's category tree — `isLeaf` is where products actually get
+ *  classified (Subcategoria, or Categoria when a branch has no Subcategoria level) and is where
+ *  the "Campos aceitos" / referência de mercado UI lets a merchant act. Mirrors the backend's
+ *  CategoryTreeNode (server/src/clients/catalog-types.ts). */
+export interface CategoryTreeNode {
+  id: string;
+  name: string;
+  path: string;
+  parentPath: string | null;
+  level: number;
+  isLeaf: boolean;
+}
+
+export interface CategoryFieldDefinition {
+  id: string;
+  name: string;
+  isActive: boolean;
+}
+
+export interface CategorySpecFields {
+  categoryPath: string;
+  categoryId: string;
+  fields: CategoryFieldDefinition[];
+}
+
+export type ContentProfileSource = "internal" | "references" | "manual";
+
+/** Structural target for a category's description — never copied text, see
+ *  category-content-profile.repo.ts. `source` explains where the numbers came from: "manual" (hand-
+ *  typed) beats "references" (consensus across pasted market URLs) beats "internal" (derived from
+ *  the store's own best-scoring products). */
+export interface CategoryContentProfile {
+  category: string;
+  wordCountMin: number | null;
+  wordCountMax: number | null;
+  bulletCount: number | null;
+  hasFaq: boolean | null;
+  hasSpecTable: boolean | null;
+  hasWarrantySection: boolean | null;
+  source: ContentProfileSource;
+}
+
+export interface StructureSignals {
+  wordCount: number;
+  bulletCount: number;
+  headingCount: number;
+  hasFaq: boolean;
+  hasSpecTable: boolean;
+  hasWarrantySection: boolean;
+  mentionsInstallation: boolean;
+}
+
+export interface CategoryReferenceLink {
+  id: number;
+  category: string;
+  url: string;
+  extractedSignals: StructureSignals | null;
+  warning: string | null;
 }
 
 export interface EnrichmentProposal {
@@ -424,6 +488,34 @@ export const api = {
     request<{ platform: CatalogPlatform; templates: PdpTemplate[] }>("/pdp-templates", { method: "PUT", body: JSON.stringify(body) }),
   previewPdpTemplate: (body: { level: DescriptionRichness; blocks: PdpBlock[] }) =>
     request<{ html: string }>("/pdp-templates/preview", { method: "POST", body: JSON.stringify(body) }),
+
+  getCategoryNodes: () => request<{ platform: CatalogPlatform; nodes: CategoryTreeNode[] }>("/category-nodes"),
+  getCategorySpecFields: () =>
+    request<{ platform: CatalogPlatform; categories: CategorySpecFields[] }>("/category-spec-fields"),
+  syncVtexCategories: () => request<{ ok: boolean }>("/connections/vtex/sync-categories", { method: "POST" }),
+
+  getCategoryContentProfile: (category: string) =>
+    request<{ profile: CategoryContentProfile | null }>(`/category-content-profile?category=${encodeURIComponent(category)}`),
+  setCategoryContentProfile: (body: Omit<CategoryContentProfile, "source">) =>
+    request<{ profile: CategoryContentProfile | null }>("/category-content-profile", { method: "PUT", body: JSON.stringify(body) }),
+  getCategoryReferenceLinks: (category: string) =>
+    request<{ links: CategoryReferenceLink[] }>(`/category-reference-links?category=${encodeURIComponent(category)}`),
+  addCategoryReferenceLink: (body: { category: string; url: string }) =>
+    request<{ link: CategoryReferenceLink; profile: CategoryContentProfile | null }>("/category-reference-links", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  removeCategoryReferenceLink: (id: number, category: string) =>
+    request<{ profile: CategoryContentProfile | null }>(
+      `/category-reference-links/${id}?category=${encodeURIComponent(category)}`,
+      { method: "DELETE" },
+    ),
+
+  setManufacturerReference: (externalId: string, manufacturerReferenceUrl: string | null) =>
+    request<{ manufacturerReferenceUrl: string | null; warning?: string }>(
+      `/products/by-external-id/${encodeURIComponent(externalId)}/manufacturer-reference`,
+      { method: "PATCH", body: JSON.stringify({ manufacturerReferenceUrl }) },
+    ),
 
   getCatalogPlatform: () => request<{ platform: CatalogPlatform }>("/catalog/platform"),
   setCatalogPlatform: (platform: CatalogPlatform) =>

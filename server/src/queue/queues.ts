@@ -8,6 +8,9 @@ export interface EnrichmentJobData extends StartEnrichmentRunParams {
 export interface PublishJobData {
   runId: number;
 }
+// No payload — always re-syncs the currently active platform's whole category tree, see
+// category-sync.orchestrator.ts.
+export interface CategorySyncJobData {}
 
 // Concurrency lives on the Worker side (see workers/*.ts); these are just the queue defs.
 // attempts+exponential backoff here replace the manual retry loop from the Mundial reference —
@@ -34,6 +37,30 @@ export const publishQueue = new Queue<PublishJobData>("publish", {
     removeOnFail: { count: 100 },
   },
 });
+
+// Only one platform is active at a time (see catalog-settings.repo.ts's singleton row), so a
+// single stable jobId is enough — no per-run id needed like enrichment/publish.
+export const categorySyncQueue = new Queue<CategorySyncJobData>("category-sync", {
+  connection: queueConnection,
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: "exponential", delay: 5000 },
+    removeOnComplete: { count: 20 },
+    removeOnFail: { count: 20 },
+  },
+});
+
+export async function enqueueCategorySync() {
+  const jobId = "category-sync";
+  // Same "clear a terminal leftover before re-adding" need as enqueuePublishRun — otherwise the
+  // manual "Sincronizar categorias agora" button would silently no-op once the very first sync
+  // (triggered at connect time) reaches a terminal state.
+  const existing = await categorySyncQueue.getJob(jobId);
+  if (existing && ["completed", "failed"].includes(await existing.getState())) {
+    await existing.remove();
+  }
+  return categorySyncQueue.add("sync", {}, { jobId });
+}
 
 export async function enqueueEnrichmentRun(data: EnrichmentJobData) {
   // BullMQ custom job IDs can't contain ":" (used internally as the Redis key delimiter).

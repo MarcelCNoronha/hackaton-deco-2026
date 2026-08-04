@@ -1,5 +1,7 @@
 import { requestWithRetry, type RequestLogEntry } from "./http.js";
 import type {
+  CategoryFieldDefinition,
+  CategoryTreeNode,
   CatalogClient,
   CatalogFilterOptions,
   CatalogListParams,
@@ -309,6 +311,18 @@ export class ShopifyClient implements CatalogClient {
   async getKnownAttributeFields(): Promise<Array<{ key: string; name: string }>> {
     const defs = await this.fetchSafeMetafieldDefinitions();
     return defs.map((d) => ({ key: d.key, name: d.name }));
+  }
+
+  /** Shopify collections are flat, not a hierarchical category tree like VTEX's — no comparable
+   *  concept to walk here. */
+  async listCategoryTree(): Promise<CategoryTreeNode[]> {
+    return [];
+  }
+
+  /** Shopify has no per-category field registry — metafields are shop-wide (see
+   *  getKnownAttributeFields), not scoped to a category the way VTEX's specification module is. */
+  async getCategoryFieldDefinitions(): Promise<CategoryFieldDefinition[]> {
+    return [];
   }
 
   /** ASCII-safe, underscore-separated key derived from a free-form label (e.g. "Cor do rejunte" ->

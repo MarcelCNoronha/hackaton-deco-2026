@@ -13,15 +13,19 @@ código morto tentou evitar). No app, tudo isso fica atrás da permissão de Int
 
 1. **Setup** (Integrações) — conecta VTEX ou Shopify, Google (GSC+GA4), provedores de IA;
    roteamento de modelos; Padrões de Otimização (limites de score por categoria); Configuração de
-   PDP (blocos/ordem por nível).
+   PDP (blocos/ordem por nível; campos aceitos pela VTEX por categoria, sincronizados
+   automaticamente ao conectar; DNA de conteúdo por categoria — manual, consenso de links de
+   referência de mercado, ou derivado dos próprios produtos Ouro/Prata).
 2. **Criar uma otimização** (Produtos) — escolhe produtos, nível (Médio/Bom/Excelente), tom, quais
-   campos gerar, alt-text, geração de imagem por IA (sempre opt-in).
+   campos gerar, alt-text, geração de imagem por IA (sempre opt-in); por produto, opcionalmente
+   uma "Referência do fabricante" (URL da página oficial) pra fundamentar a geração em fatos reais.
 3. **O run** — Catalog Reader sincroniza; Analyst prioriza por GSC/GA4 se houver corte por Top N;
    por produto: Content Enrichment chama o LLM roteado (consulta metafields conhecidos antes,
-   visão real pra escolher foto no nível Excelente) → Evaluator julga na régua de 8 sub-scores e
-   pede correção até 3 tentativas, guardando a melhor; produto muito parecido reaproveita conteúdo
-   já aprovado (RAG); Image Alt-Text roda separado; geração de imagem por IA (se marcada) passa
-   por um gate de integridade (até 2 tentativas, nunca aprova produto "parecido").
+   visão real pra escolher foto no nível Excelente, campos aceitos + DNA da categoria + fatos do
+   fabricante quando existirem) → Evaluator julga na régua de 8 sub-scores e pede correção até 3
+   tentativas, guardando a melhor; produto muito parecido reaproveita conteúdo já aprovado (RAG);
+   Image Alt-Text roda separado; geração de imagem por IA (se marcada) passa por um gate de
+   integridade (até 2 tentativas, nunca aprova produto "parecido").
 4. **Revisão humana** (RunDetail) — aprovar/editar/rejeitar cada proposta; score antes→depois,
    badge de classificação (Ouro/Prata/Bronze — vocabulário deliberadamente diferente do nível
    Médio/Bom/Excelente escolhido antes de gerar), banner de Impacto Estimado, aviso de
@@ -36,8 +40,9 @@ código morto tentou evitar). No app, tudo isso fica atrás da permissão de Int
 
 ### Riscos conhecidos (validar antes de escopo novo)
 
-1. **VTEX nunca foi testada contra uma conta real** — todo o código VTEX roda contra a loja real
-   pela primeira vez só depois do token chegar.
+1. **VTEX — parcialmente validada contra uma conta real (2026-08-04)** — category/tree/3 e
+   specification/field/listTreeByCategoryId foram testados ao vivo contra a Mundial Acabamentos; o
+   restante do client (PUT de produto, addProductImage) ainda não.
 2. **Escrita de atributos/metafields só funciona no Shopify** — o diferencial mais novo não
    aparece com dado real na loja de verdade (VTEX) ainda.
 3. **Casamento de GSC/GA4 é só por URL** — sem SKU, falha silenciosa se a URL não bater.

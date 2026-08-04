@@ -52,6 +52,7 @@ async function withOptimizationStatus(result: CatalogListResult, platform: Catal
   });
   const localIdByExternalId = new Map(localRows.map((row) => [row.vtexProductId, row.id]));
   const skuByProductId = new Map(localRows.map((row) => [row.id, row.sku]));
+  const manufacturerReferenceUrlByProductId = new Map(localRows.map((row) => [row.id, row.manufacturerReferenceUrl]));
   const localIds = localRows.map((row) => row.id);
 
   const lastRunByProductId = new Map<number, { runId: number; optimizedAt: string }>();
@@ -123,6 +124,7 @@ async function withOptimizationStatus(result: CatalogListResult, platform: Catal
         optimizationStatus: productId !== undefined ? statusByProductId.get(productId) ?? null : null,
         optimizationCostUsd: costUsd,
         impactReadiness,
+        manufacturerReferenceUrl: (productId !== undefined ? manufacturerReferenceUrlByProductId.get(productId) : undefined) ?? null,
       };
     }),
   };

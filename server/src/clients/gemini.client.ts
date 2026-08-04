@@ -2,6 +2,8 @@ import { GoogleGenAI } from "@google/genai";
 import type { RequestLogEntry } from "./http.js";
 import { computeCostUsd } from "./model-recommendations.js";
 import {
+  buildCategoryFieldsSuffix,
+  buildContentProfileSuffix,
   buildDescriptionRichnessSuffix,
   buildEnrichmentInstructionSuffix,
   buildEnrichmentSchema,
@@ -86,6 +88,15 @@ function isRetryableGeminiError(err: unknown): boolean {
   return status === 429 || (status !== null && status >= 500);
 }
 
+/** Malformed-output failures thrown by `callWithSchema`'s own `extract` step (invalid JSON, empty
+ *  output_text) never carry an HTTP status — `isRetryableGeminiError` alone always treats them as
+ *  permanent, so a single bad generation (e.g. one response with corrupted accented characters
+ *  breaking `JSON.parse`) killed the whole task with retry attempts still available. These are
+ *  one-off generation quirks, not systemic failures, so they're worth retrying same as 429/5xx. */
+function isTransientContentError(message: string): boolean {
+  return message.includes("returned invalid JSON") || message.includes("did not return output_text");
+}
+
 interface GeminiInteraction {
   output_text?: string;
   output_image?: { data?: string; mime_type?: string; uri?: string };
@@ -155,7 +166,7 @@ export class GeminiClient implements LlmClient {
           productId: params.productId,
         });
 
-        const retryable = isRetryableGeminiError(err) && !isPermanentlyExhausted(message);
+        const retryable = (isRetryableGeminiError(err) || isTransientContentError(message)) && !isPermanentlyExhausted(message);
         if (!retryable || attempt === GEMINI_MAX_ATTEMPTS) throw err;
 
         const backoffMs = GEMINI_BASE_DELAY_MS * 2 ** (attempt - 1);
@@ -230,6 +241,16 @@ export class GeminiClient implements LlmClient {
     imageUrls?: string[];
     knownAttributeFields?: Array<{ key: string; name: string }>;
     topSearchQueries?: string[];
+    categoryFields?: Array<{ name: string }>;
+    contentProfile?: {
+      wordCountMin: number | null;
+      wordCountMax: number | null;
+      bulletCount: number | null;
+      hasFaq: boolean | null;
+      hasSpecTable: boolean | null;
+      hasWarrantySection: boolean | null;
+    } | null;
+    manufacturerFacts?: Record<string, string> | null;
   }): Promise<EnrichedContent> {
     const requestedFields = resolveRequestedFields(product.fields);
     const richness = product.descriptionRichness ?? "plain";
@@ -251,6 +272,7 @@ export class GeminiClient implements LlmClient {
         : {}),
       ...(product.reuseReference ? { referencia: product.reuseReference } : {}),
       ...(useVision ? { fotosDisponiveis: candidateImageUrls } : {}),
+      ...(product.manufacturerFacts ? { especificacoesFabricante: product.manufacturerFacts } : {}),
     };
 
     return this.callWithSchema<EnrichedContent>({
@@ -275,7 +297,13 @@ export class GeminiClient implements LlmClient {
         buildDescriptionRichnessSuffix(richness) +
         buildKnownAttributeFieldsSuffix(product.knownAttributeFields) +
         buildTopSearchQueriesSuffix(product.topSearchQueries) +
+        buildCategoryFieldsSuffix(product.categoryFields) +
+        buildContentProfileSuffix(product.contentProfile) +
         toneInstruction(product.communicationTone) +
+        (product.manufacturerFacts
+          ? " O campo 'especificacoesFabricante' vem da página oficial do fabricante deste produto específico — é " +
+            "fonte primária de fatos: nunca contradiga, nunca invente valor que não esteja lá nem em 'attributes'."
+          : "") +
         (useVision
           ? " As imagens anexadas a esta mensagem, na mesma ordem de 'fotosDisponiveis', são as fotos reais " +
             "já existentes do produto — use-as para escolher 'featuredImageUrl'."
@@ -513,6 +541,24 @@ export class GeminiClient implements LlmClient {
         required: ["sameProduct", "notes"],
       },
       maxOutputTokens: 200,
+    });
+  }
+
+  async extractStructuredData<T>(params: {
+    operation: string;
+    systemInstruction: string;
+    text: string;
+    schema: Record<string, unknown>;
+    maxTokens?: number;
+    productId?: number;
+  }): Promise<T> {
+    return this.callWithSchema<T>({
+      operation: params.operation,
+      productId: params.productId,
+      systemInstruction: params.systemInstruction,
+      input: params.text,
+      schema: params.schema,
+      maxOutputTokens: params.maxTokens ?? 800,
     });
   }
 

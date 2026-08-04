@@ -4,10 +4,20 @@ import {
   DEFAULT_THRESHOLD_CATEGORY,
   PDP_BLOCKS,
   type CatalogPlatform,
+  type CategoryContentProfile,
+  type CategoryReferenceLink,
   type CategoryScoreThreshold,
+  type CategorySpecFields,
+  type CategoryTreeNode,
   type DescriptionRichness,
   type PdpBlock,
 } from "../api/client";
+
+const PROFILE_SOURCE_LABELS: Record<CategoryContentProfile["source"], string> = {
+  manual: "Definido manualmente",
+  references: "Calculado a partir dos links de referência",
+  internal: "Calculado a partir dos seus produtos já bem avaliados",
+};
 
 const BLOCK_LABELS: Record<PdpBlock, string> = {
   description: "Descrição (texto corrido)",
@@ -91,6 +101,113 @@ export function PdpConfig() {
   const [thresholdInputs, setThresholdInputs] = useState<Record<string, { excellentMin: string; goodMin: string }>>({});
   const [savingThreshold, setSavingThreshold] = useState<string | null>(null);
 
+  const [categoryNodes, setCategoryNodes] = useState<CategoryTreeNode[]>([]);
+  const [categorySpecFields, setCategorySpecFields] = useState<CategorySpecFields[]>([]);
+  const [syncingCategories, setSyncingCategories] = useState(false);
+
+  const [dnaCategory, setDnaCategory] = useState<string>("");
+  const [referenceLinks, setReferenceLinks] = useState<CategoryReferenceLink[]>([]);
+  const [contentProfile, setContentProfile] = useState<CategoryContentProfile | null>(null);
+  const [newLinkUrl, setNewLinkUrl] = useState("");
+  const [addingLink, setAddingLink] = useState(false);
+  const [dnaMessage, setDnaMessage] = useState<string | null>(null);
+  const [manualEdit, setManualEdit] = useState<{
+    wordCountMin: string;
+    wordCountMax: string;
+    bulletCount: string;
+    hasFaq: boolean;
+    hasSpecTable: boolean;
+    hasWarrantySection: boolean;
+  } | null>(null);
+
+  function loadDnaForCategory(category: string) {
+    if (!category) {
+      setReferenceLinks([]);
+      setContentProfile(null);
+      return;
+    }
+    api.getCategoryReferenceLinks(category).then(({ links }) => setReferenceLinks(links));
+    api.getCategoryContentProfile(category).then(({ profile }) => setContentProfile(profile));
+  }
+
+  useEffect(() => {
+    setManualEdit(null);
+    setDnaMessage(null);
+    loadDnaForCategory(dnaCategory);
+  }, [dnaCategory]);
+
+  async function handleAddReferenceLink() {
+    if (!newLinkUrl.trim() || !dnaCategory) return;
+    setAddingLink(true);
+    setDnaMessage(null);
+    try {
+      const { profile } = await api.addCategoryReferenceLink({ category: dnaCategory, url: newLinkUrl.trim() });
+      setNewLinkUrl("");
+      setContentProfile(profile);
+      const { links } = await api.getCategoryReferenceLinks(dnaCategory);
+      setReferenceLinks(links);
+    } catch (err) {
+      setDnaMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAddingLink(false);
+    }
+  }
+
+  async function handleRemoveReferenceLink(id: number) {
+    const { profile } = await api.removeCategoryReferenceLink(id, dnaCategory);
+    setContentProfile(profile);
+    const { links } = await api.getCategoryReferenceLinks(dnaCategory);
+    setReferenceLinks(links);
+  }
+
+  function startManualEdit() {
+    setManualEdit({
+      wordCountMin: contentProfile?.wordCountMin != null ? String(contentProfile.wordCountMin) : "",
+      wordCountMax: contentProfile?.wordCountMax != null ? String(contentProfile.wordCountMax) : "",
+      bulletCount: contentProfile?.bulletCount != null ? String(contentProfile.bulletCount) : "",
+      hasFaq: contentProfile?.hasFaq ?? false,
+      hasSpecTable: contentProfile?.hasSpecTable ?? false,
+      hasWarrantySection: contentProfile?.hasWarrantySection ?? false,
+    });
+  }
+
+  async function handleSaveManualProfile() {
+    if (!manualEdit || !dnaCategory) return;
+    const { profile } = await api.setCategoryContentProfile({
+      category: dnaCategory,
+      wordCountMin: manualEdit.wordCountMin ? Number(manualEdit.wordCountMin) : null,
+      wordCountMax: manualEdit.wordCountMax ? Number(manualEdit.wordCountMax) : null,
+      bulletCount: manualEdit.bulletCount ? Number(manualEdit.bulletCount) : null,
+      hasFaq: manualEdit.hasFaq,
+      hasSpecTable: manualEdit.hasSpecTable,
+      hasWarrantySection: manualEdit.hasWarrantySection,
+    });
+    setContentProfile(profile);
+    setManualEdit(null);
+  }
+
+  function loadCategoryFields() {
+    api.getCategoryNodes().then(({ nodes }) => {
+      setCategoryNodes(nodes);
+      const leaves = nodes.filter((n) => n.isLeaf);
+      if (leaves.length > 0) setDnaCategory((prev) => prev || leaves[0].path);
+    });
+    api.getCategorySpecFields().then(({ categories }) => setCategorySpecFields(categories));
+  }
+
+  async function handleSyncCategories() {
+    setSyncingCategories(true);
+    setMessage(null);
+    try {
+      await api.syncVtexCategories();
+      setMessage(
+        "Sincronização de categorias iniciada em segundo plano — os campos abaixo atualizam em alguns instantes, recarregue a página se não vir a mudança.",
+      );
+    } finally {
+      setSyncingCategories(false);
+    }
+  }
+
   useEffect(() => {
     api.getPdpTemplates().then(({ platform, templates }) => {
       setPlatform(platform);
@@ -101,6 +218,7 @@ export function PdpConfig() {
       setThresholdCategories(categories);
       applyThresholdInputs(thresholds, categories);
     });
+    loadCategoryFields();
   }, []);
 
   function applyThresholdInputs(thresholds: CategoryScoreThreshold[], categories: string[]) {
@@ -340,6 +458,221 @@ export function PdpConfig() {
                 );
               })}
             </section>
+
+            {platform === "vtex" && (
+              <section className="card" style={{ marginTop: "1.5rem" }}>
+                <div className="proposal-header">
+                  <h2 style={{ margin: 0 }}>Campos aceitos pela VTEX por categoria</h2>
+                  <button type="button" className="secondary" onClick={handleSyncCategories} disabled={syncingCategories}>
+                    {syncingCategories ? "Sincronizando…" : "Sincronizar categorias agora"}
+                  </button>
+                </div>
+                <p className="muted">
+                  Especificações de produto que a VTEX aceita em cada subcategoria (ou categoria, quando não há
+                  subcategoria) — a IA usa essa lista como referência do que pode ser preenchido, nunca inventando um
+                  campo fora dela. Sincronizado automaticamente ao conectar a loja; some categorias podem
+                  legitimamente não ter nenhum campo configurado no admin da VTEX.
+                </p>
+
+                {categoryNodes.length === 0 && (
+                  <p className="muted">
+                    Nenhuma categoria sincronizada ainda — clique em "Sincronizar categorias agora" ou reconecte a
+                    loja VTEX.
+                  </p>
+                )}
+
+                <div style={{ maxHeight: 420, overflowY: "auto", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                  {categoryNodes
+                    .filter((node) => node.isLeaf)
+                    .map((node) => {
+                      const spec = categorySpecFields.find((c) => c.categoryPath === node.path);
+                      return (
+                        <div
+                          key={node.path}
+                          style={{ padding: "0.5rem 0.75rem", background: "var(--surface-2)", borderRadius: "var(--radius-sm)" }}
+                        >
+                          <div style={{ fontSize: "0.82rem" }}>{node.path}</div>
+                          <div className="muted" style={{ fontSize: "0.8rem", marginTop: "0.2rem" }}>
+                            {spec && spec.fields.length > 0
+                              ? spec.fields.map((f) => f.name).join(", ")
+                              : "Nenhum campo de especificação configurado nesta categoria."}
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              </section>
+            )}
+
+            {platform === "vtex" && categoryNodes.some((n) => n.isLeaf) && (
+              <section className="card" style={{ marginTop: "1.5rem" }}>
+                <h2>DNA de conteúdo por categoria</h2>
+                <p className="muted">
+                  Alvo estrutural (tamanho de descrição, bullets, FAQ, tabela de specs, garantia) usado como referência
+                  de qualidade na geração — nunca copia texto de terceiros, só a estrutura. Prioridade: valor definido
+                  manualmente &gt; consenso dos links de referência &gt; calculado a partir dos seus próprios produtos
+                  bem avaliados.
+                </p>
+
+                <div style={{ marginBottom: "1rem" }}>
+                  <label className="muted" style={{ display: "block", marginBottom: "0.3rem" }}>
+                    Categoria
+                  </label>
+                  <select value={dnaCategory} onChange={(e) => setDnaCategory(e.target.value)}>
+                    {categoryNodes
+                      .filter((n) => n.isLeaf)
+                      .map((n) => (
+                        <option key={n.path} value={n.path}>
+                          {n.path}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                {dnaMessage && <div className="banner">{dnaMessage}</div>}
+
+                <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: "1rem" }}>
+                  <div className="card" style={{ background: "var(--surface-2)" }}>
+                    <h3 style={{ marginTop: 0 }}>Links de referência</h3>
+                    <p className="muted" style={{ fontSize: "0.82rem" }}>
+                      Cole 1 a 5 anúncios de referência dessa categoria (seus ou de mercado) — extraímos só a
+                      estrutura, nunca o texto.
+                    </p>
+                    <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.75rem" }}>
+                      <input
+                        type="url"
+                        placeholder="https://..."
+                        value={newLinkUrl}
+                        onChange={(e) => setNewLinkUrl(e.target.value)}
+                        style={{ flex: 1 }}
+                      />
+                      <button type="button" onClick={handleAddReferenceLink} disabled={addingLink || !newLinkUrl.trim()}>
+                        {addingLink ? "Analisando…" : "Adicionar"}
+                      </button>
+                    </div>
+                    {referenceLinks.length === 0 && <p className="muted">Nenhum link de referência ainda.</p>}
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                      {referenceLinks.map((link) => (
+                        <div
+                          key={link.id}
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "flex-start",
+                            gap: "0.5rem",
+                            padding: "0.4rem 0.6rem",
+                            background: "var(--surface)",
+                            borderRadius: "var(--radius-sm)",
+                          }}
+                        >
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: "0.8rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {link.url}
+                            </div>
+                            {link.warning && (
+                              <div className="muted" style={{ fontSize: "0.72rem" }}>
+                                ⚠ {link.warning}
+                              </div>
+                            )}
+                          </div>
+                          <button type="button" className="secondary" onClick={() => handleRemoveReferenceLink(link.id)}>
+                            Remover
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="card" style={{ background: "var(--surface-2)" }}>
+                    <div className="proposal-header">
+                      <h3 style={{ margin: 0 }}>Perfil calculado</h3>
+                      {!manualEdit && (
+                        <button type="button" className="secondary" onClick={startManualEdit}>
+                          Editar manualmente
+                        </button>
+                      )}
+                    </div>
+
+                    {!manualEdit && (
+                      <>
+                        {!contentProfile && <p className="muted">Nenhum perfil calculado ainda para esta categoria.</p>}
+                        {contentProfile && (
+                          <>
+                            <p className="muted" style={{ fontSize: "0.78rem" }}>{PROFILE_SOURCE_LABELS[contentProfile.source]}</p>
+                            <ul style={{ margin: 0, paddingLeft: "1.2rem", fontSize: "0.85rem" }}>
+                              <li>
+                                Palavras: {contentProfile.wordCountMin ?? "?"}–{contentProfile.wordCountMax ?? "?"}
+                              </li>
+                              <li>Bullets: {contentProfile.bulletCount ?? "?"}</li>
+                              <li>FAQ: {contentProfile.hasFaq ? "Sim" : "Não"}</li>
+                              <li>Tabela de especificações: {contentProfile.hasSpecTable ? "Sim" : "Não"}</li>
+                              <li>Seção de garantia: {contentProfile.hasWarrantySection ? "Sim" : "Não"}</li>
+                            </ul>
+                          </>
+                        )}
+                      </>
+                    )}
+
+                    {manualEdit && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                        <div style={{ display: "flex", gap: "0.5rem" }}>
+                          <input
+                            type="number"
+                            placeholder="Mín. palavras"
+                            value={manualEdit.wordCountMin}
+                            onChange={(e) => setManualEdit({ ...manualEdit, wordCountMin: e.target.value })}
+                          />
+                          <input
+                            type="number"
+                            placeholder="Máx. palavras"
+                            value={manualEdit.wordCountMax}
+                            onChange={(e) => setManualEdit({ ...manualEdit, wordCountMax: e.target.value })}
+                          />
+                        </div>
+                        <input
+                          type="number"
+                          placeholder="Nº de bullets"
+                          value={manualEdit.bulletCount}
+                          onChange={(e) => setManualEdit({ ...manualEdit, bulletCount: e.target.value })}
+                        />
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={manualEdit.hasFaq}
+                            onChange={(e) => setManualEdit({ ...manualEdit, hasFaq: e.target.checked })}
+                          />{" "}
+                          Incluir FAQ
+                        </label>
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={manualEdit.hasSpecTable}
+                            onChange={(e) => setManualEdit({ ...manualEdit, hasSpecTable: e.target.checked })}
+                          />{" "}
+                          Incluir tabela de especificações
+                        </label>
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={manualEdit.hasWarrantySection}
+                            onChange={(e) => setManualEdit({ ...manualEdit, hasWarrantySection: e.target.checked })}
+                          />{" "}
+                          Incluir seção de garantia
+                        </label>
+                        <div className="actions" style={{ justifyContent: "flex-start" }}>
+                          <button type="button" onClick={handleSaveManualProfile}>
+                            Salvar
+                          </button>
+                          <button type="button" className="secondary" onClick={() => setManualEdit(null)}>
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </section>
+            )}
           </>
         )}
       </div>

@@ -47,6 +47,11 @@ export const scoreTargetEnum = pgEnum("score_target", ["original", "proposed"]);
 export const userRoleEnum = pgEnum("user_role", ["admin", "user"]);
 export const appSectionEnum = pgEnum("app_section", ["connections", "publish", "users"]);
 export const generatedImageKindEnum = pgEnum("generated_image_kind", ["lifestyle", "feature_callout"]);
+export const categoryContentProfileSourceEnum = pgEnum("category_content_profile_source", [
+  "internal",
+  "references",
+  "manual",
+]);
 
 /** Every external credential (VTEX keys, Anthropic key, Google OAuth refresh token) lives here, encrypted. */
 export const connections = pgTable("connections", {
@@ -85,6 +90,14 @@ export const products = pgTable("products", {
   // 1536 dims matches text-embedding-3-small-equivalent output; used only for the pgvector
   // stretch goal (near-duplicate/generic-description detection to help the Analyst prioritize).
   embedding: vector("embedding", { dimensions: 1536 }),
+  // User-provided reference for THIS exact product (e.g. the manufacturer's own product page) —
+  // used as a factual grounding source at generation time to reduce hallucinated specs. Distinct
+  // from category_reference_links (structure-only, market-wide, never per-product facts). Cached
+  // here (re-extracted only when the URL changes) so re-running enrichment doesn't re-fetch/re-LLM
+  // every time — see reference-facts.agent.ts.
+  manufacturerReferenceUrl: text("manufacturer_reference_url"),
+  manufacturerReferenceFacts: jsonb("manufacturer_reference_facts"),
+  manufacturerReferenceSyncedAt: timestamp("manufacturer_reference_synced_at", { withTimezone: true }),
   lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
@@ -234,6 +247,83 @@ export const pdpTemplates = pgTable("pdp_templates", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
   pk: primaryKey({ columns: [table.platform, table.category, table.level] }),
+}));
+
+/** One row per node of the catalog platform's category tree (VTEX: Departamento > Categoria >
+ *  Subcategoria, depth 3). `path` is the same "A > B > C" breadcrumb string vtex.client.ts's
+ *  formatVtexCategoryPath writes into `products.category` — kept identical on purpose so every
+ *  other per-category table (pdpTemplates, categoryScoreThresholds, category_spec_fields,
+ *  category_content_profiles) can key off `products.category` directly with no extra join/lookup.
+ *  `isLeaf` marks nodes with no children in the synced tree — i.e. where products actually get
+ *  classified. A branch with no Subcategoria level has its Categoria node marked `isLeaf` instead,
+ *  which is how "let the user add a reference at the Subcategoria, or the Categoria if there is no
+ *  Subcategoria" resolves without any special-casing elsewhere: products.category for those
+ *  products is naturally just the 2-segment path already. */
+export const categoryNodes = pgTable("category_nodes", {
+  platform: catalogPlatformEnum("platform").notNull(),
+  path: text("path").notNull(),
+  vtexCategoryId: text("vtex_category_id").notNull(),
+  parentPath: text("parent_path"),
+  level: integer("level").notNull(),
+  isLeaf: boolean("is_leaf").notNull().default(false),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.platform, table.path] }),
+}));
+
+/** Specification fields the catalog platform accepts/requires for one category path — VTEX's
+ *  `specification/field/listByCategoryId`, scoped to content/spec attributes only (Material,
+ *  Voltagem, Cor...). NEVER covers price, stock, or the category assignment itself — those are
+ *  separate VTEX APIs/tables entirely and this feature must never expose them as "editable ad
+ *  fields", per explicit product requirement. Synced by category-sync.worker.ts, keyed by the same
+ *  `path` as categoryNodes/products.category (see categoryNodes doc comment). */
+export const categorySpecFields = pgTable("category_spec_fields", {
+  platform: catalogPlatformEnum("platform").notNull(),
+  categoryPath: text("category_path").notNull(),
+  categoryId: text("category_id").notNull(),
+  fields: jsonb("fields").notNull().default(sql`'[]'::jsonb`),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.platform, table.categoryPath] }),
+}));
+
+/** The structural "DNA" target for a category's description (word count range, bullet count, FAQ/
+ *  spec-table/warranty presence) — fed into the enrichment prompt as a structural target, never as
+ *  copied text. `source` records where the numbers came from (see resolveCategoryContentProfile):
+ *  "manual" (merchant typed values directly) beats "references" (consensus across pasted market
+ *  reference links) beats "internal" (derived from the store's own best-scoring products in that
+ *  category). Recomputed only when references are added/removed or the merchant edits it by hand —
+ *  not on every enrichment run. */
+export const categoryContentProfiles = pgTable("category_content_profiles", {
+  platform: catalogPlatformEnum("platform").notNull(),
+  category: text("category").notNull(),
+  wordCountMin: integer("word_count_min"),
+  wordCountMax: integer("word_count_max"),
+  bulletCount: integer("bullet_count"),
+  hasFaq: boolean("has_faq"),
+  hasSpecTable: boolean("has_spec_table"),
+  hasWarrantySection: boolean("has_warranty_section"),
+  source: categoryContentProfileSourceEnum("source").notNull().default("manual"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.platform, table.category] }),
+}));
+
+/** A market-reference ad URL a merchant pasted for a category, plus what got extracted from it.
+ *  `extractedSignals` holds ONLY structural counts/flags (word count, bullet count, has FAQ...) —
+ *  the extraction prompt (reference-structure.agent.ts) is explicitly instructed to never
+ *  reproduce the source's marketing copy. `warning` is set when the fetched page yielded too
+ *  little text to trust (likely JS-rendered), surfaced to the user instead of failing silently. */
+export const categoryReferenceLinks = pgTable("category_reference_links", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  platform: catalogPlatformEnum("platform").notNull(),
+  category: text("category").notNull(),
+  url: text("url").notNull(),
+  extractedSignals: jsonb("extracted_signals"),
+  warning: text("warning"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  categoryIdx: index("category_reference_links_category_idx").on(table.platform, table.category),
 }));
 
 /** Fine-grained log of every external API call — proves retry/error handling actually works. */

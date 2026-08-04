@@ -159,11 +159,48 @@ export interface LlmClient {
      *  in what buyers really type instead of the model inventing plausible-sounding terms. Empty/
      *  omitted when GSC isn't connected or the product has no matching page yet. */
     topSearchQueries?: string[];
+    /** Specification fields the catalog platform accepts for this product's category (VTEX's
+     *  specification module — see vtex.client.ts's getCategoryFieldDefinitions), consulted BEFORE
+     *  generation so attributesPatch/technicalSpecs never proposes a field the platform can't
+     *  actually save. Empty/omitted when the category has no synced fields (Shopify always; VTEX
+     *  categories that legitimately have none configured). */
+    categoryFields?: Array<{ name: string }>;
+    /** Structural target (word-count range, bullet count, FAQ/spec-table/warranty presence) for
+     *  this product's category — resolved from a merchant override, market-reference consensus, or
+     *  the store's own best-scoring products (see category-content-profile.repo.ts). A structural
+     *  guide only, never content — omitted when no profile could be resolved. */
+    contentProfile?: {
+      wordCountMin: number | null;
+      wordCountMax: number | null;
+      bulletCount: number | null;
+      hasFaq: boolean | null;
+      hasSpecTable: boolean | null;
+      hasWarrantySection: boolean | null;
+    } | null;
+    /** Objective facts extracted from a merchant-provided reference for THIS exact product
+     *  (typically the manufacturer's own page) — a primary source of truth against hallucinated
+     *  specs, distinct from `attributes` (from the catalog platform itself). Omitted when the
+     *  product has no reference set (see products.manufacturerReferenceFacts). */
+    manufacturerFacts?: Record<string, string> | null;
   }): Promise<EnrichedContent>;
 
   evaluateContent(params: { text: string; knownFacts?: string | null; productId?: number }): Promise<ContentEvaluation>;
 
   generateAltText(params: { imageUrl: string; productTitle: string; productId?: number }): Promise<string>;
+
+  /** Generic schema-constrained extraction over arbitrary text — used by reference-structure.agent.ts
+   *  (category-level market reference ads: structural signals ONLY, never the copy itself) and
+   *  reference-facts.agent.ts (product-level manufacturer page: objective specs ONLY, never
+   *  marketing copy). Deliberately generic (unlike enrichProductContent's fixed EnrichedContent
+   *  shape) since the two callers want very different, small, purpose-built schemas. */
+  extractStructuredData<T>(params: {
+    operation: string;
+    systemInstruction: string;
+    text: string;
+    schema: Record<string, unknown>;
+    maxTokens?: number;
+    productId?: number;
+  }): Promise<T>;
 
   /** Returns the real failure reason (not just true/false) so a bad key/model/quota issue is
    *  visible in the Connections panel instead of a generic "falha ao validar". */

@@ -6,6 +6,14 @@ export const ARCHITECTURE_DIAGRAM = `flowchart TB
     vtex["VTEX / Shopify — catálogo"]
     gsc["Google Search Console"]
     ga4["Google Analytics 4"]
+    reflinks["Links de referência (usuário cola: mercado por categoria, fabricante por produto)"]
+  end
+
+  subgraph catdna["Padrão por categoria (Configuração de PDP)"]
+    catsync["Category Sync — árvore + campos aceitos (VTEX specification module)"]
+    struct["reference-structure.agent — extrai só estrutura do link de mercado"]
+    dna["DNA de conteúdo — manual > consenso de referências > produtos Ouro/Prata próprios"]
+    facts["reference-facts.agent — extrai só fatos objetivos do link de fabricante"]
   end
 
   subgraph pipeline["Pipeline multi-agente"]
@@ -35,6 +43,15 @@ export const ARCHITECTURE_DIAGRAM = `flowchart TB
   ga4 --> an
   cr --> an
   an -- "produtos priorizados, buscas reais por página" --> ce
+
+  vtex -- "árvore de categorias" --> catsync
+  reflinks -- "link de mercado por categoria" --> struct
+  struct --> dna
+  cr -- "produtos já Ouro/Prata da categoria" --> dna
+  reflinks -- "link de fabricante por produto" --> facts
+  catsync -- "campos aceitos" --> ce
+  dna -- "alvo estrutural" --> ce
+  facts -- "fatos objetivos (opcional)" --> ce
   ce -- "draft" --> ev
   ev -- "feedback: perguntas sem resposta, alegações não sustentadas" --> ce
   ev -- "score final atinge a nota mínima" --> rev
@@ -107,6 +124,20 @@ export const ARCHITECTURE_NOTES: Array<{ title: string; body: string }> = [
       "Além de priorizar produtos, o Analyst expõe as top buscas reais do Search Console por URL " +
       "(queryTopQueriesByPage) pro Content Enrichment — o prompt de SEO passa a priorizar cobrir termos que " +
       "compradores de fato digitam, em vez de a IA inventar palavras-chave plausíveis.",
+  },
+  {
+    title: "Padrão por categoria — compatibilidade + qualidade + fatos, sem copiar concorrente",
+    body:
+      "Três sinais independentes chegam ao prompt de Content Enrichment, cada um resolvendo um problema " +
+      "diferente: (1) Category Sync consulta a própria VTEX pra saber que campos ela aceita por categoria " +
+      "(specification/field/listTreeByCategoryId — não listByCategoryId, que voltava vazio mesmo com campos " +
+      "configurados, achado só testando contra a conta real), garantindo que a IA nunca proponha um atributo " +
+      "sem onde salvar; (2) o DNA de conteúdo é um alvo ESTRUTURAL (tamanho, bullets, FAQ/tabela/garantia), " +
+      "nunca texto copiado — vem de um valor manual, do consenso entre vários links de mercado (nunca um só, " +
+      "pra não herdar o estilo de um concorrente específico), ou dos próprios produtos Ouro/Prata da loja; " +
+      "(3) a referência de fabricante é o oposto — fatos objetivos de UM produto específico, pra reduzir " +
+      "alucinação de especificação, nunca estrutura. Nenhum dos três é obrigatório: sem eles, a geração " +
+      "funciona exatamente como antes desta feature existir.",
   },
   {
     title: "Configuração de PDP → Publisher",

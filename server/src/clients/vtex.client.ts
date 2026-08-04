@@ -1,5 +1,9 @@
+// VTEX API reference (consultar se precisar validar/estender qualquer endpoint deste arquivo):
+// https://developers.vtex.com/docs/api-reference
 import { requestWithRetry, NonRetryableHttpError, type RequestLogEntry } from "./http.js";
 import type {
+  CategoryFieldDefinition,
+  CategoryTreeNode,
   CatalogClient,
   CatalogFilterOptions,
   CatalogListParams,
@@ -92,6 +96,18 @@ interface VtexBrand {
   id: number;
   name: string;
   isActive?: boolean;
+}
+
+/** Response shape of `specification/field/listTreeByCategoryId/{categoryId}` — `CategoryId` is
+ *  usually null (the field is inherited from a group, not tied directly to this category), and
+ *  `IsStockKeepingUnit` distinguishes SKU-level fields (VTEX allows registering specs at either
+ *  level) from product-level ones, see getCategoryFieldDefinitions. */
+interface VtexSpecificationField {
+  Name: string;
+  CategoryId: number | null;
+  FieldId: number;
+  IsActive: boolean;
+  IsStockKeepingUnit: boolean;
 }
 
 /** The legacy Search API represents a SKU's reference code either as a plain string or as a
@@ -263,15 +279,23 @@ export class VtexClient implements CatalogClient {
     };
   }
 
+  /** VTEX's category tree is 3 levels deep (Departamento > Categoria > Subcategoria) — shared by
+   *  listFilterOptions (flat {id,name} for filter dropdowns) and listCategoryTree (breadcrumb path
+   *  + leaf detection for per-category reference/profile UIs). One fetch, two shapes. */
+  private async fetchCategoryTree(): Promise<VtexCategoryTreeNode[]> {
+    const res = await requestWithRetry({
+      provider: "vtex",
+      operation: "listCategoryTree",
+      url: `${this.searchBaseUrl}/category/tree/3`,
+      init: { method: "GET", headers: this.headers() },
+      onAttempt: this.onAttempt,
+    });
+    return ((await res.json()) as VtexCategoryTreeNode[]) ?? [];
+  }
+
   async listFilterOptions(): Promise<CatalogFilterOptions> {
-    const [categoryRes, brandRes] = await Promise.all([
-      requestWithRetry({
-        provider: "vtex",
-        operation: "listCategoryTree",
-        url: `${this.searchBaseUrl}/category/tree/3`,
-        init: { method: "GET", headers: this.headers() },
-        onAttempt: this.onAttempt,
-      }),
+    const [tree, brandRes] = await Promise.all([
+      this.fetchCategoryTree(),
       requestWithRetry({
         provider: "vtex",
         operation: "listBrands",
@@ -281,7 +305,6 @@ export class VtexClient implements CatalogClient {
       }),
     ]);
 
-    const tree = ((await categoryRes.json()) as VtexCategoryTreeNode[]) ?? [];
     const brands = ((await brandRes.json()) as VtexBrand[]) ?? [];
 
     const categories: Array<{ id: string; name: string }> = [];
@@ -297,6 +320,48 @@ export class VtexClient implements CatalogClient {
       categories,
       brands: brands.filter((b) => b.isActive !== false).map((b) => ({ id: String(b.id), name: b.name })),
     };
+  }
+
+  /** Walks the same 3-level tree as listFilterOptions, but keeps the breadcrumb ("Casa > Banheiro
+   *  > Torneiras") and leaf-ness of each node instead of flattening to {id,name} — see
+   *  CategoryTreeNode's doc comment for why this exact shape matters (matches products.category,
+   *  resolves the "reference at Subcategoria, or Categoria if no Subcategoria" fallback for free). */
+  async listCategoryTree(): Promise<CategoryTreeNode[]> {
+    const tree = await this.fetchCategoryTree();
+    const nodes: CategoryTreeNode[] = [];
+    const walk = (children: VtexCategoryTreeNode[], parentPath: string | null, level: number) => {
+      for (const node of children) {
+        const path = parentPath ? `${parentPath} > ${node.name}` : node.name;
+        const isLeaf = !node.children?.length;
+        nodes.push({ id: String(node.id), name: node.name, path, parentPath, level, isLeaf });
+        if (node.children?.length) walk(node.children, path, level + 1);
+      }
+    };
+    walk(tree, null, 1);
+    return nodes;
+  }
+
+  /** `specification/field/listTreeByCategoryId` (NOT `listByCategoryId`, which was found empty
+   *  against a real account even for categories with fields configured in the admin UI —
+   *  `listTreeByCategoryId` is the one that actually returns them) — the content/spec fields VTEX
+   *  accepts for a category, e.g. "Material"/"Garantia"/"Acabamento". Filtered to
+   *  `IsStockKeepingUnit === false` only: these fields live on the PRODUCT, not the SKU (SKUs are
+   *  just the product's variations) — SKU-level fields aren't relevant to product-description
+   *  generation. Never includes price, stock, or the category assignment itself — those are
+   *  entirely separate VTEX APIs, not part of this "specification" module at all, so this feature
+   *  can't accidentally expose them as editable. */
+  async getCategoryFieldDefinitions(categoryId: string): Promise<CategoryFieldDefinition[]> {
+    const res = await requestWithRetry({
+      provider: "vtex",
+      operation: "listCategorySpecificationFields",
+      url: `${this.searchBaseUrl}/specification/field/listTreeByCategoryId/${categoryId}`,
+      init: { method: "GET", headers: this.headers() },
+      onAttempt: this.onAttempt,
+    });
+    const fields = ((await res.json()) as VtexSpecificationField[]) ?? [];
+    return fields
+      .filter((f) => f.IsActive && !f.IsStockKeepingUnit)
+      .map((f) => ({ id: String(f.FieldId), name: f.Name, isActive: f.IsActive }));
   }
 
   async updateImageAltText(params: {

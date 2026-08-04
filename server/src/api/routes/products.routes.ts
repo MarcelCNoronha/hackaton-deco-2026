@@ -5,6 +5,7 @@ import { db } from "../../db/client.js";
 import { enrichmentProposals, generatedImages, products } from "../../db/schema.js";
 import { requireAuth } from "../../auth/guards.js";
 import { syncProduct } from "../../agents/catalog-reader.agent.js";
+import { extractManufacturerFacts } from "../../agents/reference-facts.agent.js";
 import { generateProductImage } from "../../agents/image-generation.agent.js";
 import { getProductRealImpact } from "../../agents/impact.agent.js";
 import { requireActiveCatalogClient } from "./catalog.routes.js";
@@ -20,6 +21,8 @@ const generateImageBody = z.object({
   kind: z.enum(["lifestyle", "feature_callout"]),
   note: z.string().max(500).optional(),
 });
+
+const manufacturerReferenceBody = z.object({ manufacturerReferenceUrl: z.string().url().nullable() });
 
 export async function productsRoutes(app: FastifyInstance) {
   app.addHook("preHandler", requireAuth);
@@ -73,6 +76,50 @@ export async function productsRoutes(app: FastifyInstance) {
     try {
       const catalog = await requireActiveCatalogClient();
       return await syncProduct(catalog, existing.vtexProductId);
+    } catch (err) {
+      return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  /** Sets (or clears, when null) the merchant's per-product reference URL — typically the
+   *  manufacturer's own page for this exact product — used as a factual grounding source at
+   *  generation time (see reference-facts.agent.ts and enrichment-schema.ts's
+   *  especificacoesFabricante payload field). Extraction runs synchronously here (one URL, one LLM
+   *  call) and the result is cached on the product row so future optimizations of this same
+   *  product don't re-fetch/re-extract unless the URL changes. Independent of the category-level
+   *  DNA (category-reference-links.repo.ts) — this is per-product facts, that's category-wide
+   *  structure.
+   *
+   *  Keyed by `externalId` (not the local `products.id`) and syncs-on-demand via syncProduct: the
+   *  Runs.tsx catalog list is browsing the live platform catalog, where a product may not have a
+   *  local row yet (only created once a run has touched it — see CatalogProductSummary.productId).
+   *  This lets a merchant set the reference before ever running an optimization. */
+  app.patch<{ Params: { externalId: string } }>("/api/products/by-external-id/:externalId/manufacturer-reference", async (req, reply) => {
+    const body = manufacturerReferenceBody.parse(req.body);
+    try {
+      const catalog = await requireActiveCatalogClient();
+      const product = await syncProduct(catalog, req.params.externalId);
+
+      if (!body.manufacturerReferenceUrl) {
+        const [updated] = await db
+          .update(products)
+          .set({ manufacturerReferenceUrl: null, manufacturerReferenceFacts: null, manufacturerReferenceSyncedAt: null })
+          .where(eq(products.id, product.id))
+          .returning();
+        return updated;
+      }
+
+      const { facts, warning } = await extractManufacturerFacts(body.manufacturerReferenceUrl);
+      const [updated] = await db
+        .update(products)
+        .set({
+          manufacturerReferenceUrl: body.manufacturerReferenceUrl,
+          manufacturerReferenceFacts: facts,
+          manufacturerReferenceSyncedAt: new Date(),
+        })
+        .where(eq(products.id, product.id))
+        .returning();
+      return { ...updated, warning };
     } catch (err) {
       return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
     }

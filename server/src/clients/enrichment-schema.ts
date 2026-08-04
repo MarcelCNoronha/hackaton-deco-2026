@@ -220,6 +220,54 @@ export function buildTopSearchQueriesSuffix(queries?: string[]): string {
   );
 }
 
+/** Appended only when the active category has synced spec-field definitions from the catalog
+ *  platform (VTEX's specification module — see vtex.client.ts's getCategoryFieldDefinitions).
+ *  Constrains 'attributesPatch'/'technicalSpecs' to fields the platform actually accepts for this
+ *  category, so generation never proposes an attribute the store has no way to save — deliberately
+ *  never mentions price/stock/category, since those aren't part of this "specification" concept at
+ *  all (separate VTEX APIs entirely, see category_spec_fields' schema doc comment). */
+export function buildCategoryFieldsSuffix(fields?: Array<{ name: string }>): string {
+  if (!fields || fields.length === 0) return "";
+  const list = fields.map((f) => f.name).join(", ");
+  return (
+    ` Os campos de especificação que esta categoria aceita na plataforma são: ${list}. Ao preencher ` +
+    `'attributesPatch'/'technicalSpecs', use só esses rótulos (ou o mais próximo semanticamente) — nunca invente ` +
+    `um atributo fora dessa lista.`
+  );
+}
+
+/** Appended only when the active category has a resolved structural profile (see
+ *  category-content-profile.repo.ts's resolveCategoryContentProfile — manual override, market-
+ *  reference consensus, or derived from the store's own best-scoring products, in that priority
+ *  order). A STRUCTURAL target only: word-count range, bullet count, presence of FAQ/spec-table/
+ *  warranty section — never content itself, so this can't leak a competitor's copy into a
+ *  generation. Missing individual fields (e.g. bulletCount unset) are simply omitted from the
+ *  sentence instead of forcing a guess. */
+export function buildContentProfileSuffix(profile?: {
+  wordCountMin: number | null;
+  wordCountMax: number | null;
+  bulletCount: number | null;
+  hasFaq: boolean | null;
+  hasSpecTable: boolean | null;
+  hasWarrantySection: boolean | null;
+} | null): string {
+  if (!profile) return "";
+  const parts: string[] = [];
+  if (profile.wordCountMin != null && profile.wordCountMax != null) {
+    parts.push(`entre ${profile.wordCountMin} e ${profile.wordCountMax} palavras na descrição`);
+  }
+  if (profile.bulletCount != null) parts.push(`cerca de ${profile.bulletCount} bullets de benefício`);
+  if (profile.hasFaq) parts.push("uma seção de FAQ");
+  if (profile.hasSpecTable) parts.push("uma tabela de especificações técnicas");
+  if (profile.hasWarrantySection) parts.push("uma menção explícita à garantia");
+  if (parts.length === 0) return "";
+  return (
+    ` Anúncios de referência de qualidade para esta categoria costumam ter: ${parts.join("; ")}. Use isso como ` +
+    `alvo estrutural quando o campo correspondente for gerado, mas nunca invente conteúdo só para atingir esses ` +
+    `números — se os dados do produto não sustentarem, prefira ficar mais curto/simples do que inventar.`
+  );
+}
+
 /** Extra instruction appended when "description" should be more than flowing text — see
  *  `DescriptionRichness`. Returns "" for "plain" so existing prompts are byte-identical to before. */
 export function buildDescriptionRichnessSuffix(richness: DescriptionRichness): string {

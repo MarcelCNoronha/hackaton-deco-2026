@@ -2,6 +2,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { RequestLogEntry } from "./http.js";
 import { computeCostUsd } from "./model-recommendations.js";
 import {
+  buildCategoryFieldsSuffix,
+  buildContentProfileSuffix,
   buildDescriptionRichnessSuffix,
   buildEnrichmentInstructionSuffix,
   buildEnrichmentSchema,
@@ -161,6 +163,16 @@ export class ClaudeClient implements LlmClient {
     imageUrls?: string[];
     knownAttributeFields?: Array<{ key: string; name: string }>;
     topSearchQueries?: string[];
+    categoryFields?: Array<{ name: string }>;
+    contentProfile?: {
+      wordCountMin: number | null;
+      wordCountMax: number | null;
+      bulletCount: number | null;
+      hasFaq: boolean | null;
+      hasSpecTable: boolean | null;
+      hasWarrantySection: boolean | null;
+    } | null;
+    manufacturerFacts?: Record<string, string> | null;
   }): Promise<EnrichedContent> {
     const requestedFields = resolveRequestedFields(product.fields);
     const richness = product.descriptionRichness ?? "plain";
@@ -182,6 +194,7 @@ export class ClaudeClient implements LlmClient {
         : {}),
       ...(product.reuseReference ? { referencia: product.reuseReference } : {}),
       ...(useVision ? { fotosDisponiveis: candidateImageUrls } : {}),
+      ...(product.manufacturerFacts ? { especificacoesFabricante: product.manufacturerFacts } : {}),
     });
 
     const content: Anthropic.MessageParam["content"] = useVision
@@ -210,7 +223,13 @@ export class ClaudeClient implements LlmClient {
         buildDescriptionRichnessSuffix(richness) +
         buildKnownAttributeFieldsSuffix(product.knownAttributeFields) +
         buildTopSearchQueriesSuffix(product.topSearchQueries) +
+        buildCategoryFieldsSuffix(product.categoryFields) +
+        buildContentProfileSuffix(product.contentProfile) +
         toneInstruction(product.communicationTone) +
+        (product.manufacturerFacts
+          ? " O campo 'especificacoesFabricante' vem da página oficial do fabricante deste produto específico — é " +
+            "fonte primária de fatos: nunca contradiga, nunca invente valor que não esteja lá nem em 'attributes'."
+          : "") +
         (useVision
           ? " As imagens anexadas a esta mensagem, na mesma ordem de 'fotosDisponiveis', são as fotos reais " +
             "already existentes do produto — use-as para escolher 'featuredImageUrl'."
@@ -328,6 +347,26 @@ export class ClaudeClient implements LlmClient {
         }
         return textBlock.text.trim();
       },
+    });
+  }
+
+  async extractStructuredData<T>(params: {
+    operation: string;
+    systemInstruction: string;
+    text: string;
+    schema: Record<string, unknown>;
+    maxTokens?: number;
+    productId?: number;
+  }): Promise<T> {
+    return this.callWithTool<T>({
+      operation: params.operation,
+      productId: params.productId,
+      system: params.systemInstruction,
+      content: params.text,
+      toolName: "extract_structured_data",
+      toolDescription: "Retorna os dados extraídos no formato pedido.",
+      inputSchema: { type: "object", ...params.schema } as Anthropic.Tool.InputSchema,
+      maxTokens: params.maxTokens ?? 800,
     });
   }
 
