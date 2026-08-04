@@ -577,6 +577,74 @@ código pra questionar se as regras de negócio fazem sentido. 3 achados corrigi
   define o que está sendo medido. Sem correção fácil sem um catálogo de atributos esperados por
   categoria (feature maior, fora do escopo do prazo restante).
 
+### Qualidade de conteúdo com dados reais + impacto real sem tabela de snapshot (2026-08-05, sétima rodada)
+
+Pedido do usuário: 3 melhorias de qualidade de conteúdo discutidas em rodada anterior
+("Pode implementar tudo"), seguidas de uma repensada completa de como medir impacto de negócio.
+
+**As 3 melhorias de conteúdo:**
+- **SEO ancorado em buscas reais do Search Console**: `GscClient.queryTopQueriesByPage`
+  (dimensions `["page","query"]`) busca, uma vez por run, as top buscas reais por página; o
+  Analyst resolve por produto via `pathnameOf` (agora exportado) e passa `topSearchQueries` pro
+  `enrichProductContent` dos 3 clients — o prompt passa a priorizar termos que compradores de
+  fato digitam em `seoTitle`/`keywords`/`description`, em vez da IA inventar palavras-chave
+  plausíveis (`enrichment-schema.ts`'s `buildTopSearchQueriesSuffix`).
+- **Evaluator em provedor diferente do Content Enrichment**: `DEFAULT_ROUTING` em
+  `model-routing.repo.ts` passou de tudo-Anthropic para Content Enrichment=Anthropic,
+  Evaluator=OpenAI — julgar um rascunho com o mesmo modelo que o escreveu é circular (tende a
+  aprovar seu próprio estilo). **Atenção**: uma instância já em produção tem uma linha salva no
+  banco que sobrepõe esse default do código — precisa ajustar manualmente em Integrações →
+  Roteamento de Modelos.
+- **Completude do catálogo com alvo fixo por categoria**: era a limitação documentada na rodada
+  anterior (denominador = união entre atributos originais e o que a própria IA propunha, o mesmo
+  agente medido definia o que estava sendo medido). `catalog-attributes.repo.ts`'s
+  `getExpectedAttributeKeys(category)` calcula a frequência real de cada atributo entre produtos
+  **já sincronizados** dessa categoria (≥50% de presença, mínimo 3 produtos) e usa isso como alvo
+  fixo em `evaluator.agent.ts`, passado desde `content-enrichment.agent.ts`.
+
+**Impacto real repensado — removida a tabela de snapshot:**
+
+Discussão com o usuário sobre os números de impacto mostrarem `+0pp` pra quase tudo: o banner
+"Impacto Estimado" é 100% auto-avaliado pela mesma IA (original vs. proposto), com média de só 2
+produtos e arredondamento pra inteiro — ganho real pequeno arredonda pra zero. Renomeado pra
+**"Confiança de conteúdo (estimada por IA)"** pra não se passar por medição real
+(`ImpactSummaryBanner.tsx`).
+
+Pra medir impacto de verdade, a ideia inicial era popular `product_metrics` com um job
+recorrente — descartada pelo próprio usuário ("podemos remover o snapshot e alterar por consulta
+padrão"): GSC guarda ~16 meses de histórico diário e GA4 cobre qualquer range dentro da retenção
+da propriedade, então **não há necessidade de guardar cópia própria** — só consultar ao vivo com
+o range certo. Implementado:
+- **Tabela `product_metrics` removida** (migração `0021_legal_marvex.sql`, `DROP TABLE ...
+  CASCADE` + `DROP TYPE metric_source`) — o Analyst continua consultando GSC/GA4 ao vivo pra
+  priorizar, só parou de persistir o resultado.
+- **`real-impact.repo.ts`**: `getEarliestPublishedAtByProduct` — o `publishedAt` mais antigo entre
+  as proposals aprovadas de um produto é o pivô real "antes vs. depois" (não mais "quando o
+  Analyst rodou por acaso").
+- **`impact.agent.ts`**: `getProductRealImpact` — compara uma janela de 28 dias antes do publish
+  com uma janela de 28 dias começando 14 dias depois (`MATURATION_DAYS`, tempo que o Google
+  precisa pra refletir a mudança); antes disso retorna `status: "maturing"` com contagem
+  regressiva em vez de um número de ruído. 4 chamadas ao Google por produto, só quando o usuário
+  abre a comparação — nada em lote, nada agendado.
+- **Página Impacto**: as duas tabelas de histórico (GSC/GA4) trocadas por `RealImpactPanel.tsx`,
+  que trata os 4 estados (`no_url`/`not_published`/`maturing`/`ready`) explicitamente em vez de só
+  "sem dado".
+- Badge "Impacto" na lista de produtos (`catalogRoutes`'s `impactReadiness`) trocou de "contagem
+  de snapshots" pra "dias desde a primeira publicação vs. `MATURATION_DAYS`" — mesma cor
+  (verde/amarelo/vermelho), significado mais correto.
+- **Escopo cortado deliberadamente**: o banner agregado (toda a conta) ainda é só o de IA — um
+  agregado de Impacto real cruzando todos os produtos publicados e maturados fica como ideia
+  futura, não implementado agora (custo de N chamadas ao Google por produto na carga da página
+  de Impacto, sem paralelo ainda com dados suficientes pra valer o esforço com só 2 produtos
+  otimizados até agora).
+
+**Reorganização de UI**: "Padrões de Otimização por Categoria" (limites Ouro/Prata/Bronze) saiu
+de Connections.tsx e passou a viver dentro de "Configuração de PDP" — mesma tela onde a categoria
+e o nível já são configurados, evitando espalhar configuração de otimização por duas páginas.
+Removida a entrada "Exemplo de PDP — nível Excelente" (mockup estático) da Documentação — hoje a
+própria "Configuração de PDP" tem preview ao vivo renderizado pela função real de publicação, o
+mockup ficou redundante (`docs/README.md` atualizado no mesmo sentido).
+
 ## Formação de equipes
 
 - 1 a 5 pessoas por equipe (pode ser solo)

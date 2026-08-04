@@ -1,5 +1,13 @@
 import { useEffect, useState } from "react";
-import { api, PDP_BLOCKS, type CatalogPlatform, type DescriptionRichness, type PdpBlock } from "../api/client";
+import {
+  api,
+  DEFAULT_THRESHOLD_CATEGORY,
+  PDP_BLOCKS,
+  type CatalogPlatform,
+  type CategoryScoreThreshold,
+  type DescriptionRichness,
+  type PdpBlock,
+} from "../api/client";
 
 const BLOCK_LABELS: Record<PdpBlock, string> = {
   description: "Descrição (texto corrido)",
@@ -79,13 +87,53 @@ export function PdpConfig() {
   const [loading, setLoading] = useState(true);
   const [previewHtml, setPreviewHtml] = useState<string>("");
 
+  const [thresholdCategories, setThresholdCategories] = useState<string[]>([]);
+  const [thresholdInputs, setThresholdInputs] = useState<Record<string, { excellentMin: string; goodMin: string }>>({});
+  const [savingThreshold, setSavingThreshold] = useState<string | null>(null);
+
   useEffect(() => {
     api.getPdpTemplates().then(({ platform, templates }) => {
       setPlatform(platform);
       setBlocksByLevel(Object.fromEntries(templates.map((t) => [t.level, t.blocks])) as Record<DescriptionRichness, PdpBlock[]>);
       setLoading(false);
     });
+    api.getOptimizationThresholds().then(({ thresholds, categories }) => {
+      setThresholdCategories(categories);
+      applyThresholdInputs(thresholds, categories);
+    });
   }, []);
+
+  function applyThresholdInputs(thresholds: CategoryScoreThreshold[], categories: string[]) {
+    const byCategory = new Map(thresholds.map((t) => [t.category, t]));
+    const allCategories = [DEFAULT_THRESHOLD_CATEGORY, ...categories];
+    setThresholdInputs(
+      Object.fromEntries(
+        allCategories.map((category) => {
+          const t = byCategory.get(category);
+          return [category, { excellentMin: String(t?.excellentMin ?? 85), goodMin: String(t?.goodMin ?? 60) }];
+        }),
+      ),
+    );
+  }
+
+  async function handleSaveThreshold(category: string) {
+    const input = thresholdInputs[category];
+    if (!input) return;
+    setSavingThreshold(category);
+    try {
+      await api.setOptimizationThreshold({
+        category,
+        excellentMin: Number(input.excellentMin) || 0,
+        goodMin: Number(input.goodMin) || 0,
+      });
+      const res = await api.getOptimizationThresholds();
+      setThresholdCategories(res.categories);
+      applyThresholdInputs(res.thresholds, res.categories);
+      setMessage(`Padrão de otimização salvo para ${category === DEFAULT_THRESHOLD_CATEGORY ? "todas as categorias" : category}.`);
+    } finally {
+      setSavingThreshold(null);
+    }
+  }
 
   useEffect(() => {
     if (loading) return;
@@ -236,6 +284,62 @@ export function PdpConfig() {
                 />
               </section>
             </div>
+
+            <section className="card" style={{ marginTop: "1.5rem" }}>
+              <h2>Padrões de Otimização por Categoria</h2>
+              <p className="muted">
+                Faixas do score composto que classificam um produto como Ouro, Prata ou Bronze (badge exibido no
+                RunDetail — nomes deliberadamente diferentes do nível Médio/Bom/Excelente escolhido antes de gerar,
+                já que os dois podem discordar). Cada categoria pode ter seu próprio limite; "Padrão" vale para
+                qualquer categoria sem limite específico.
+              </p>
+
+              {[DEFAULT_THRESHOLD_CATEGORY, ...thresholdCategories].map((category) => {
+                const input = thresholdInputs[category] ?? { excellentMin: "85", goodMin: "60" };
+                return (
+                  <div key={category} className="card" style={{ background: "var(--surface-2)", marginBottom: "1rem" }}>
+                    <div className="proposal-header">
+                      <h3 style={{ margin: 0 }}>
+                        {category === DEFAULT_THRESHOLD_CATEGORY ? "Padrão (todas as categorias)" : category}
+                      </h3>
+                    </div>
+                    <div className="form-grid">
+                      <div style={{ flex: "1 1 180px" }}>
+                        <label className="muted" style={{ display: "block", marginBottom: "0.3rem" }}>
+                          Limite Ouro (score ≥)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={input.excellentMin}
+                          onChange={(e) =>
+                            setThresholdInputs((prev) => ({ ...prev, [category]: { ...input, excellentMin: e.target.value } }))
+                          }
+                        />
+                      </div>
+                      <div style={{ flex: "1 1 180px" }}>
+                        <label className="muted" style={{ display: "block", marginBottom: "0.3rem" }}>
+                          Limite Prata (score ≥)
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={input.goodMin}
+                          onChange={(e) =>
+                            setThresholdInputs((prev) => ({ ...prev, [category]: { ...input, goodMin: e.target.value } }))
+                          }
+                        />
+                      </div>
+                      <button type="button" onClick={() => handleSaveThreshold(category)} disabled={savingThreshold === category}>
+                        {savingThreshold === category ? "Salvando…" : "Salvar"}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </section>
           </>
         )}
       </div>

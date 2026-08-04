@@ -64,16 +64,11 @@ campos enviados/lidos, e as ressalvas relevantes (ex: o bug do PUT não-parcial 
 - **Fonte viva**: [`web/src/lib/api-reference.ts`](../web/src/lib/api-reference.ts).
 - **No app**: página própria "Referência de APIs" (`/api-reference`), uma aba por sistema.
 
-## Exemplo de PDP — nível Excelente
+## Configuração de PDP
 
-Mockup de uma página de produto real (porcelanato, segmento "acabamentos para construção") mostrando
-exatamente o que o nível **Excelente** gera — cada bloco leva uma etiqueta indicando qual campo do
-CatalogIA o preencheu (`seo_title`, `description · structured_with_image`, `technical_specs`,
-`faq`, `keywords + tags`, `structured_data`, `cta`).
+Preview de verdade (não um mockup estático) — configurável por nível, renderizado pela mesma
+função (`renderPdpHtml`) que publica de fato. Também reúne, na mesma tela, os Padrões de
+Otimização por Categoria (limites de score Ouro/Prata/Bronze).
 
-- **Arquivo neste repo**: [`docs/exemplos/pdp-nivel-excelente.html`](./exemplos/pdp-nivel-excelente.html)
-  — abra direto no navegador.
-
-Este exemplo é estático (não é gerado do código) — serve pra ilustrar o resultado esperado, não
-é atualizado automaticamente. Pra um preview de verdade (configurável, renderizado pela mesma
-função que publica), ver a página "Configuração de PDP" (`/pdp-config`) no app.
+- **Fonte viva**: [`web/src/pages/PdpConfig.tsx`](../web/src/pages/PdpConfig.tsx).
+- **No app**: página "Configuração de PDP" (`/pdp-config`).

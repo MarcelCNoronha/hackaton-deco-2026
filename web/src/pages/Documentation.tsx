@@ -24,13 +24,6 @@ const DOCS: DocEntry[] = [
     liveRoute: { label: "Ver Referência de APIs", to: "/api-reference" },
     repoPath: "web/src/lib/api-reference.ts",
   },
-  {
-    title: "Exemplo de PDP — nível Excelente",
-    description:
-      "Mockup de uma página de produto real (porcelanato) mostrando o que o nível Excelente gera, com etiquetas " +
-      "indicando qual campo do CatalogIA preenche cada bloco. Estático — abra o arquivo direto no navegador.",
-    repoPath: "docs/exemplos/pdp-nivel-excelente.html",
-  },
 ];
 
 /** Índice dos materiais de documentação gerados durante o desenvolvimento — cada item tem uma

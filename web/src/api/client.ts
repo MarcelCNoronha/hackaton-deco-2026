@@ -262,19 +262,37 @@ export interface GeneratedImage {
   createdAt: string;
 }
 
-export interface ProductMetric {
-  id: number;
-  source: "gsc" | "ga4";
-  periodStart: string;
-  periodEnd: string;
+export type RealImpactStatus = "no_url" | "not_published" | "maturing" | "ready";
+
+export interface RealImpactWindow {
+  startDate: string;
+  endDate: string;
   impressions: number | null;
   clicks: number | null;
-  ctr: string | null;
-  avgPosition: string | null;
+  ctr: number | null;
+  avgPosition: number | null;
   sessions: number | null;
-  conversionRate: string | null;
-  revenue: string | null;
-  fetchedAt: string;
+  conversionRate: number | null;
+  revenue: number | null;
+}
+
+/** Live antes/depois comparison read straight from GSC/GA4 (no local snapshot table) — see
+ *  server/src/agents/impact.agent.ts. */
+export interface RealImpact {
+  status: RealImpactStatus;
+  publishedAt?: string;
+  daysSincePublish?: number;
+  daysUntilReady?: number;
+  before?: RealImpactWindow;
+  after?: RealImpactWindow;
+  deltas?: {
+    impressionsPct: number | null;
+    positionDelta: number | null;
+    ctrDeltaPct: number | null;
+    sessionsPct: number | null;
+    conversionRateDeltaPct: number | null;
+    revenueDeltaAbs: number | null;
+  };
 }
 
 export interface ContentScore {
@@ -464,7 +482,7 @@ export const api = {
     request<GeneratedImage>(`/products/${productId}/generated-images`, { method: "POST", body: JSON.stringify(body) }),
   publishGeneratedImage: (productId: number, imageId: number) =>
     request<GeneratedImage>(`/products/${productId}/generated-images/${imageId}/publish`, { method: "POST" }),
-  productMetrics: (id: number) => request<ProductMetric[]>(`/products/${id}/metrics`),
+  productRealImpact: (id: number) => request<RealImpact>(`/products/${id}/real-impact`),
   optimizedProductCount: () => request<{ count: number }>("/products/optimized-count"),
   pendingReviewCount: () => request<{ count: number }>("/products/pending-review-count"),
 

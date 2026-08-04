@@ -154,6 +154,11 @@ export interface LlmClient {
      *  info exists, instead of inventing an arbitrary label, so the value can publish straight into
      *  that real platform field. Empty/omitted on VTEX (no metafield concept there). */
     knownAttributeFields?: Array<{ key: string; name: string }>;
+    /** Real Search Console queries that actually bring shoppers to this product's page (fetched
+     *  once per run in the orchestrator, matched by URL) — grounds seo_title/keywords/description
+     *  in what buyers really type instead of the model inventing plausible-sounding terms. Empty/
+     *  omitted when GSC isn't connected or the product has no matching page yet. */
+    topSearchQueries?: string[];
   }): Promise<EnrichedContent>;
 
   evaluateContent(params: { text: string; knownFacts?: string | null; productId?: number }): Promise<ContentEvaluation>;

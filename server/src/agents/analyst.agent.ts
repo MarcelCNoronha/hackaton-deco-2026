@@ -1,5 +1,3 @@
-import { db } from "../db/client.js";
-import { productMetrics } from "../db/schema.js";
 import type { GscClient } from "../clients/gsc.client.js";
 import type { Ga4Client } from "../clients/ga4.client.js";
 import type { ProductRow } from "./catalog-reader.agent.js";
@@ -10,7 +8,10 @@ export interface PrioritizedProduct {
   reason: string;
 }
 
-function pathnameOf(urlOrPath: string): string {
+/** Exported so other GSC-consuming code (enrichment-run.orchestrator.ts, matching real search
+ *  queries to a product) uses the exact same URL-to-pathname normalization as prioritization,
+ *  instead of a second, possibly-drifting copy. */
+export function pathnameOf(urlOrPath: string): string {
   try {
     return new URL(urlOrPath).pathname;
   } catch {
@@ -97,30 +98,6 @@ export async function prioritizeProducts(params: {
       score,
       reason: reasonParts.length ? reasonParts.join(" · ") : "Sem dado de GSC/GA4 para esta página",
     });
-
-    if (gsc) {
-      await db.insert(productMetrics).values({
-        productId: product.id,
-        source: "gsc",
-        periodStart: startDate,
-        periodEnd: endDate,
-        impressions: gsc.impressions,
-        clicks: gsc.clicks,
-        ctr: gsc.ctr.toString(),
-        avgPosition: gsc.position.toString(),
-      });
-    }
-    if (ga4) {
-      await db.insert(productMetrics).values({
-        productId: product.id,
-        source: "ga4",
-        periodStart: startDate,
-        periodEnd: endDate,
-        sessions: ga4.sessions,
-        conversionRate: ga4.conversionRate.toString(),
-        revenue: ga4.revenue.toString(),
-      });
-    }
   }
 
   return results.sort((a, b) => b.score - a.score);

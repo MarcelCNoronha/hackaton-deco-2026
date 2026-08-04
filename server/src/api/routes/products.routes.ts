@@ -2,14 +2,17 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../../db/client.js";
-import { enrichmentProposals, generatedImages, productMetrics, products } from "../../db/schema.js";
+import { enrichmentProposals, generatedImages, products } from "../../db/schema.js";
 import { requireAuth } from "../../auth/guards.js";
 import { syncProduct } from "../../agents/catalog-reader.agent.js";
 import { generateProductImage } from "../../agents/image-generation.agent.js";
+import { getProductRealImpact } from "../../agents/impact.agent.js";
 import { requireActiveCatalogClient } from "./catalog.routes.js";
 import { getConnectionCredentials } from "../../repositories/connections.repo.js";
 import { makeRequestLogger } from "../../repositories/logs.repo.js";
 import { GeminiClient } from "../../clients/gemini.client.js";
+import { GscClient } from "../../clients/gsc.client.js";
+import { Ga4Client } from "../../clients/ga4.client.js";
 import { IMAGE_GENERATION_MODEL } from "../../clients/model-recommendations.js";
 import { env } from "../../config/env.js";
 
@@ -45,11 +48,19 @@ export async function productsRoutes(app: FastifyInstance) {
     return { count: Number(row?.count ?? 0) };
   });
 
-  app.get<{ Params: { id: string } }>("/api/products/:id/metrics", async (req) => {
-    return db.query.productMetrics.findMany({
-      where: eq(productMetrics.productId, Number(req.params.id)),
-      orderBy: desc(productMetrics.fetchedAt),
-    });
+  /** Live antes/depois comparison read straight from GSC/GA4 (no local snapshot table — see
+   *  impact.agent.ts) pivoted on this product's earliest publish date. Works with only one of the
+   *  two Google connections (e.g. GSC without GA4) — whichever side is missing just comes back null. */
+  app.get<{ Params: { id: string } }>("/api/products/:id/real-impact", async (req, reply) => {
+    const product = await db.query.products.findFirst({ where: eq(products.id, Number(req.params.id)) });
+    if (!product) return reply.status(404).send({ error: "Produto não encontrado" });
+
+    const googleCreds = await getConnectionCredentials("google");
+    const logger = makeRequestLogger();
+    const gsc = googleCreds ? new GscClient(googleCreds.gscSiteUrl, googleCreds.refreshToken, logger) : null;
+    const ga4 = googleCreds ? new Ga4Client(googleCreds.ga4PropertyId, googleCreds.refreshToken, logger) : null;
+
+    return getProductRealImpact({ gsc, ga4, product });
   });
 
   /** Re-fetches one product from the active catalog platform and refreshes the local snapshot —

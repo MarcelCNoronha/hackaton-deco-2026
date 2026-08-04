@@ -19,7 +19,6 @@ export const providerEnum = pgEnum("provider", ["vtex", "google", "anthropic", "
 export const llmTaskEnum = pgEnum("llm_task", ["contentEnrichment", "imageAltText", "evaluator"]);
 export const llmProviderEnum = pgEnum("llm_provider", ["anthropic", "openai", "gemini"]);
 export const catalogPlatformEnum = pgEnum("catalog_platform", ["vtex", "shopify"]);
-export const metricSourceEnum = pgEnum("metric_source", ["gsc", "ga4"]);
 export const runStatusEnum = pgEnum("run_status", ["running", "success", "failed", "partial"]);
 export const proposalFieldEnum = pgEnum("proposal_field", [
   "description",
@@ -118,27 +117,6 @@ export const generatedImages = pgTable("generated_images", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
   productIdIdx: index("generated_images_product_id_idx").on(table.productId),
-}));
-
-/** GSC/GA4 snapshots per product, used to prioritize and to prove before/after impact. */
-export const productMetrics = pgTable("product_metrics", {
-  id: bigserial("id", { mode: "number" }).primaryKey(),
-  productId: bigint("product_id", { mode: "number" })
-    .notNull()
-    .references(() => products.id),
-  source: metricSourceEnum("source").notNull(),
-  periodStart: timestamp("period_start", { withTimezone: true }).notNull(),
-  periodEnd: timestamp("period_end", { withTimezone: true }).notNull(),
-  impressions: integer("impressions"),
-  clicks: integer("clicks"),
-  ctr: numeric("ctr"),
-  avgPosition: numeric("avg_position"),
-  sessions: integer("sessions"),
-  conversionRate: numeric("conversion_rate"),
-  revenue: numeric("revenue"),
-  fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
-}, (table) => ({
-  productIdIdx: index("product_metrics_product_id_idx").on(table.productId),
 }));
 
 /** Top-level tracking for one enrichment pipeline execution — mirrors Mundial's integration_sync_runs. */

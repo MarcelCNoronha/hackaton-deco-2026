@@ -6,6 +6,7 @@ import {
   buildEnrichmentInstructionSuffix,
   buildEnrichmentSchema,
   buildKnownAttributeFieldsSuffix,
+  buildTopSearchQueriesSuffix,
   resolveRequestedFields,
 } from "./enrichment-schema.js";
 import {
@@ -159,6 +160,7 @@ export class ClaudeClient implements LlmClient {
     communicationTone?: CommunicationTone;
     imageUrls?: string[];
     knownAttributeFields?: Array<{ key: string; name: string }>;
+    topSearchQueries?: string[];
   }): Promise<EnrichedContent> {
     const requestedFields = resolveRequestedFields(product.fields);
     const richness = product.descriptionRichness ?? "plain";
@@ -207,6 +209,7 @@ export class ClaudeClient implements LlmClient {
         buildEnrichmentInstructionSuffix(requestedFields) +
         buildDescriptionRichnessSuffix(richness) +
         buildKnownAttributeFieldsSuffix(product.knownAttributeFields) +
+        buildTopSearchQueriesSuffix(product.topSearchQueries) +
         toneInstruction(product.communicationTone) +
         (useVision
           ? " As imagens anexadas a esta mensagem, na mesma ordem de 'fotosDisponiveis', são as fotos reais " +

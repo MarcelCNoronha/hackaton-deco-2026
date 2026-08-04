@@ -5,17 +5,19 @@ function formatDelta(pp: number): string {
   return `${pp >= 0 ? "+" : ""}${pp}pp`;
 }
 
-/** "Impacto Estimado" banner — aggregate before/after deltas across every product with both an
+/** "Confiança de conteúdo" banner — aggregate before/after deltas across every product with both an
  *  original and a proposed content_scores row in scope (one run, or the whole account — see
- *  impact-summary.repo.ts). Reuses StatTile/.stat-row exactly like every other stat block in this
- *  app instead of introducing a new chart component. */
+ *  impact-summary.repo.ts). Deliberately NOT called "Impacto" — every number here is the AI judging
+ *  its own before/after text, available instantly; the real, Google-data impact (which takes days
+ *  to mature) lives in RealImpactPanel/impact.agent.ts. Reuses StatTile/.stat-row exactly like every
+ *  other stat block in this app instead of introducing a new chart component. */
 export function ImpactSummaryBanner({ summary }: { summary: ImpactSummary }) {
   if (summary.productCount === 0) return null;
 
   return (
     <div className="card" style={{ marginBottom: "1rem" }}>
       <div className="proposal-header">
-        <h3 style={{ margin: 0 }}>Impacto estimado</h3>
+        <h3 style={{ margin: 0 }}>Confiança de conteúdo (estimada por IA)</h3>
         <span className="muted" style={{ fontSize: "0.8rem" }}>
           {summary.productCount} {summary.productCount === 1 ? "produto otimizado" : "produtos otimizados"}
         </span>

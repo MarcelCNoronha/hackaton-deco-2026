@@ -2,9 +2,11 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../../db/client.js";
-import { agentRequestLogs, enrichmentProposals, productMetrics, products } from "../../db/schema.js";
+import { agentRequestLogs, enrichmentProposals, products } from "../../db/schema.js";
 import { getConnectionCredentials } from "../../repositories/connections.repo.js";
 import { getCatalogPlatform, setCatalogPlatform } from "../../repositories/catalog-settings.repo.js";
+import { getEarliestPublishedAtByProduct } from "../../repositories/real-impact.repo.js";
+import { MATURATION_DAYS } from "../../agents/impact.agent.js";
 import { VtexClient, type VtexCredentials } from "../../clients/vtex.client.js";
 import { ShopifyClient, type ShopifyCredentials } from "../../clients/shopify.client.js";
 import type { CatalogClient, CatalogListResult, CatalogPlatform } from "../../clients/catalog-types.js";
@@ -94,19 +96,10 @@ async function withOptimizationStatus(result: CatalogListResult, platform: Catal
     }
   }
 
-  // Impact (antes/depois) needs at least 2 GSC/GA4 snapshots to show a trend — 1 shows only a
-  // single point (not comparable yet), 0 means nothing collected. Drives the Impacto button color.
-  const metricsCountByProductId = new Map<number, number>();
-  if (localIds.length > 0) {
-    const metricsRows = await db
-      .select({ productId: productMetrics.productId, count: sql<string>`count(*)` })
-      .from(productMetrics)
-      .where(inArray(productMetrics.productId, localIds))
-      .groupBy(productMetrics.productId);
-    for (const row of metricsRows) {
-      metricsCountByProductId.set(row.productId, Number(row.count));
-    }
-  }
+  // Impact (antes/depois) is a LIVE Google comparison pivoted on each product's earliest publish
+  // date (see impact.agent.ts) — no local snapshot to count anymore, just how long ago it was
+  // published. Drives the Impacto button color: not published yet, still maturing, or ready to compare.
+  const earliestPublishedAtByProductId = await getEarliestPublishedAtByProduct(localIds);
 
   return {
     ...result,
@@ -115,9 +108,12 @@ async function withOptimizationStatus(result: CatalogListResult, platform: Catal
       const lastRun = productId !== undefined ? lastRunByProductId.get(productId) : undefined;
       const costUsd =
         productId !== undefined && lastRun ? costByProductAndRun.get(`${productId}:${lastRun.runId}`) ?? 0 : null;
-      const metricsCount = productId !== undefined ? metricsCountByProductId.get(productId) ?? 0 : 0;
+      const earliestPublishedAt = productId !== undefined ? earliestPublishedAtByProductId.get(productId) : undefined;
+      const daysSincePublish = earliestPublishedAt
+        ? Math.floor((Date.now() - earliestPublishedAt.getTime()) / (24 * 60 * 60 * 1000))
+        : null;
       const impactReadiness: "none" | "partial" | "ready" =
-        metricsCount >= 2 ? "ready" : metricsCount === 1 ? "partial" : "none";
+        daysSincePublish === null ? "none" : daysSincePublish >= MATURATION_DAYS ? "ready" : "partial";
       return {
         ...item,
         productId: productId ?? null,

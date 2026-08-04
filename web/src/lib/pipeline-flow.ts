@@ -32,8 +32,8 @@ export const PIPELINE_FLOW: FlowStage[] = [
     title: "3. O run em si (fila BullMQ, orquestrador)",
     steps: [
       "Catalog Reader sincroniza os produtos escolhidos da plataforma ativa.",
-      "Analyst prioriza por sinais de GSC/GA4 (casamento por URL) se o Top N cortar a lista.",
-      "Content Enrichment chama o LLM roteado — consulta metafields conhecidos antes (Shopify) e usa visão real quando o nível pede imagem.",
+      "Analyst prioriza por sinais de GSC/GA4 (casamento por URL) se o Top N cortar a lista, e expõe as top buscas reais de cada página (queryTopQueriesByPage).",
+      "Content Enrichment chama o LLM roteado — consulta metafields conhecidos antes (Shopify), prioriza as buscas reais do Search Console pra essa página (quando existir) em vez de inventar palavras-chave, e usa visão real quando o nível pede imagem.",
       "Evaluator julga o rascunho na régua de 8 sub-scores (SEO, GEO, conversão, legibilidade, estrutura, confiança do comprador, completude, consistência); se não bate a nota mínima, volta com feedback pro LLM, até 3 tentativas, sempre guardando a melhor.",
       "Produto muito parecido com outro já aprovado reaproveita o conteúdo (RAG) em vez de gastar as 3 tentativas.",
       "Image Alt-Text roda separado, por imagem.",
@@ -44,7 +44,7 @@ export const PIPELINE_FLOW: FlowStage[] = [
     title: "4. Revisão humana (RunDetail)",
     steps: [
       "Cada campo gerado é uma proposta separada (aprovar/editar/rejeitar).",
-      "Score antes→depois nos 8 sub-scores + score geral, badge de classificação (Ouro/Prata/Bronze), banner de Impacto Estimado, fotos geradas (com aviso se a integridade não foi confirmada).",
+      "Score antes→depois nos 8 sub-scores + score geral, badge de classificação (Ouro/Prata/Bronze), banner de Confiança de conteúdo (estimado por IA), fotos geradas (com aviso se a integridade não foi confirmada).",
     ],
   },
   {
@@ -60,7 +60,12 @@ export const PIPELINE_FLOW: FlowStage[] = [
   },
   {
     title: "6. Medir impacto",
-    steps: ["Página Impacto: histórico real de GSC/GA4 por produto + banner agregado de Impacto Estimado pra conta toda."],
+    steps: [
+      "Página Impacto: consulta ao vivo ao GSC/GA4 por produto (sem tabela de snapshot local) — janela antes da " +
+        "primeira publicação vs. janela depois, pivotada no publishedAt real; só fica disponível ~14 dias após " +
+        "publicar (tempo do Google refletir a mudança), antes disso mostra 'maturando'.",
+      "Banner de Confiança de conteúdo (estimado por IA) fica separado — é instantâneo, mas é a mesma IA julgando seu próprio antes/depois.",
+    ],
   },
 ];
 
@@ -82,11 +87,11 @@ export const KNOWN_RISKS: KnownRisk[] = [
   },
   {
     title: "Casamento de GSC/GA4 é só por URL",
-    body: "Se a URL do produto não bater exatamente com o que o Google indexou, o produto não mostra dado de impacto real (SEO/receita) — falha silenciosa, sem aviso.",
+    body: "Se a URL do produto não bater exatamente com o que o Google indexou, o produto não mostra dado de impacto real (SEO/receita) — falha silenciosa, sem aviso. Vale tanto pra priorização (Analyst) quanto pra comparação ao vivo da página Impacto.",
   },
   {
     title: "Score é auto-avaliado pela própria IA",
-    body: "O Evaluator julga o que o Content Enrichment gerou — é rotulado como \"estimado\" no produto, mas vale ter pronta a resposta pra \"quem garante que essa nota significa algo real\".",
+    body: "O Evaluator julga o que o Content Enrichment gerou — é rotulado como \"estimado\" no produto, mas vale ter pronta a resposta pra \"quem garante que essa nota significa algo real\". Mitigado por dois lados: o painel de Impacto real (GSC/GA4 ao vivo, ver Fluxo #6) é uma medida totalmente independente da IA; e o roteamento padrão agora usa provedores DIFERENTES pra Content Enrichment (Anthropic) e Evaluator (OpenAI) — reduz mas não elimina a circularidade, e uma instância já em produção antes dessa mudança precisa ajustar manualmente em Integrações → Roteamento de Modelos, já que uma linha salva no banco sobrepõe o novo default do código.",
   },
   {
     title: "Sem limite de concorrência entre produtos num run",

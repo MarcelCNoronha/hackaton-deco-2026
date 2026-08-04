@@ -262,8 +262,23 @@ export const API_REFERENCE: ApiSystem[] = [
         endpoint: "/sites/{siteUrl}/searchAnalytics/query",
         kind: "read",
         fields: "dimension page → clicks, impressions, ctr, position",
-        purpose: "Impressões/cliques/CTR/posição por página — sinal de priorização do Analyst e linha de base de SEO.",
+        purpose:
+          "Impressões/cliques/CTR/posição por página — sinal de priorização do Analyst, linha de base de SEO, e as " +
+          "janelas antes/depois do painel de Impacto real (impact.agent.ts) — sempre consultado ao vivo, nunca " +
+          "guardado numa tabela própria (GSC já retém ~16 meses de histórico diário).",
         caveat: "Casamento é só por URL/pathname — GSC não tem conceito de SKU.",
+      },
+      {
+        name: "queryTopQueriesByPage",
+        method: "POST",
+        endpoint: "/sites/{siteUrl}/searchAnalytics/query",
+        kind: "read",
+        fields: "dimensions [page, query] → agrupado por página, top N por cliques/impressões",
+        purpose:
+          "Buscas reais que trazem gente pra cada página — passadas pro Content Enrichment (topSearchQueries) " +
+          "pra priorizar termos que compradores de fato digitam em seoTitle/keywords/description, em vez da IA " +
+          "inventar palavras-chave plausíveis.",
+        caveat: "Mesmo casamento por URL/pathname que queryByPage.",
       },
       {
         name: "testConnection",
@@ -288,7 +303,9 @@ export const API_REFERENCE: ApiSystem[] = [
         endpoint: "/properties/{propertyId}:runReport",
         kind: "read",
         fields: "dimension pagePath → sessions, sessionConversionRate, totalRevenue",
-        purpose: "Sessões/conversão/receita por página — fecha a ponta que o GSC não cobre (negócio, não só visibilidade).",
+        purpose:
+          "Sessões/conversão/receita por página — fecha a ponta que o GSC não cobre (negócio, não só visibilidade); " +
+          "mesmo uso duplo do queryByPage do GSC (priorização + janelas do painel de Impacto real, sempre ao vivo).",
         caveat: "Também casado só por pathname hoje — daria pra trocar pra dimensão itemId (SKU) se a loja já mandar item_id nos eventos de e-commerce.",
       },
       {

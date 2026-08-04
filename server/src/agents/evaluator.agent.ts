@@ -70,17 +70,25 @@ export function readabilityScore(text: string | null): number {
   return Math.max(0, Math.round(100 - lengthPenalty * 0.6 - wordPenalty * 0.4));
 }
 
-/** `attributesExpected` is the union of keys between the original attributes and whatever the
- *  model proposed adding/fixing (attributesPatch) — a product with no attributes and no patch has
- *  nothing "expected" (treated as 100% complete, not penalized for a category that just has none).
+/** `attributesExpected` is normally derived from `expectedKeys` — attribute keys that already
+ *  show up filled in at least half of this product's category's OTHER synced products (see
+ *  catalog-attributes.repo.ts's `getExpectedAttributeKeys`), a FIXED target independent of
+ *  whatever this same run's AI proposed. Only falls back to the union of original+patch keys
+ *  when there's no such catalog baseline yet (a brand-new/tiny category) — that fallback is
+ *  self-referential (the model scoring itself defines its own denominator) and is a known,
+ *  documented limitation for that edge case only, not the common path anymore.
  *  `attributesFilled` counts how many of those keys end up with a non-empty value. */
 export function computeAttributeCompleteness(
   originalAttributes: Record<string, unknown> | null | undefined,
   attributesPatch: Record<string, string> | null | undefined,
+  expectedKeys?: string[] | null,
 ): { attributesFilled: number; attributesExpected: number } {
   const original = originalAttributes ?? {};
   const patch = attributesPatch ?? {};
-  const allKeys = new Set([...Object.keys(original), ...Object.keys(patch)]);
+  const allKeys =
+    expectedKeys && expectedKeys.length > 0
+      ? new Set(expectedKeys)
+      : new Set([...Object.keys(original), ...Object.keys(patch)]);
 
   let filled = 0;
   for (const key of allKeys) {
@@ -109,6 +117,10 @@ export async function computeContentScore(params: {
   metaDescription?: string | null;
   originalAttributes?: Record<string, unknown> | null;
   attributesPatch?: Record<string, string> | null;
+  /** Category-derived "expected attributes" baseline — see catalog-attributes.repo.ts. Fetched
+   *  once per product (not per attempt) by the caller, since it doesn't change across a
+   *  quality-gate retry loop. */
+  expectedAttributeKeys?: string[] | null;
 }): Promise<ComputedContentScore> {
   const hasSeoFields = Boolean(params.seoTitle || params.metaDescription);
   const structure = structureScore({
@@ -121,6 +133,7 @@ export async function computeContentScore(params: {
   const { attributesFilled, attributesExpected } = computeAttributeCompleteness(
     params.originalAttributes,
     params.attributesPatch,
+    params.expectedAttributeKeys,
   );
 
   const evaluation = params.text
@@ -230,6 +243,7 @@ export async function scoreContent(params: {
   metaDescription?: string | null;
   originalAttributes?: Record<string, unknown> | null;
   attributesPatch?: Record<string, string> | null;
+  expectedAttributeKeys?: string[] | null;
 }): Promise<typeof contentScores.$inferSelect> {
   const score = await computeContentScore(params);
   return persistContentScore({ runId: params.runId, productId: params.productId, target: params.target, score });

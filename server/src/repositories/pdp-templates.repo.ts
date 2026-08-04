@@ -25,8 +25,8 @@ export interface PdpTemplate {
 function defaultBlocksFor(level: DescriptionRichness): PdpBlock[] {
   const base: PdpBlock[] = ["description", "benefit_bullets", "technical_specs", "faq", "cta"];
   if (level !== "structured_with_image") return base;
-  // Highlight image sits right after the intro paragraph, matching the "destaque logo no topo"
-  // placement validated in the Excelente example (docs/exemplos/pdp-nivel-excelente.html).
+  // Highlight image sits right after the intro paragraph — "destaque logo no topo" placement,
+  // adjustable live in the "Configuração de PDP" page's preview.
   return ["description", "featured_image", "benefit_bullets", "technical_specs", "faq", "cta"];
 }
 

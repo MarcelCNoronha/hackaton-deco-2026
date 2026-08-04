@@ -26,14 +26,15 @@ export const ARCHITECTURE_DIAGRAM = `flowchart TB
     tpl["Configuração de PDP — blocos e ordem por plataforma/nível"]
     pub["Publisher — monta o HTML final a partir do template"]
     thr["Classificação por categoria — Ouro / Prata / Bronze"]
-    imp["Impacto Estimado — SEO, GEO, conversão, completude, tempo economizado"]
+    conf["Confiança de conteúdo — score de IA, deltas instantâneos"]
+    rimp["Impacto real — consulta ao vivo GSC/GA4, pivotada no 1º publish"]
   end
 
   vtex --> cr
   gsc --> an
   ga4 --> an
   cr --> an
-  an -- "produtos priorizados" --> ce
+  an -- "produtos priorizados, buscas reais por página" --> ce
   ce -- "draft" --> ev
   ev -- "feedback: perguntas sem resposta, alegações não sustentadas" --> ce
   ev -- "score final atinge a nota mínima" --> rev
@@ -51,7 +52,10 @@ export const ARCHITECTURE_DIAGRAM = `flowchart TB
   pub --> vtex
 
   ev --> thr
-  ev --> imp
+  ev --> conf
+  pub -- "publishedAt = corte antes/depois" --> rimp
+  gsc -- "consulta ao vivo, sem cópia local" --> rimp
+  ga4 -- "consulta ao vivo, sem cópia local" --> rimp
 `;
 
 export const ARCHITECTURE_NOTES: Array<{ title: string; body: string }> = [
@@ -60,7 +64,9 @@ export const ARCHITECTURE_NOTES: Array<{ title: string; body: string }> = [
     body:
       "O conteúdo gerado nunca vai direto pra revisão humana sem passar por um julgamento na régua fixa " +
       "(comprador simulado + perguntas GEO + SEO/conversão/consistência) — até 3 tentativas, sempre ficando " +
-      "com a melhor pontuação vista, nunca a última se ela for pior.",
+      "com a melhor pontuação vista, nunca a última se ela for pior. Roteamento padrão usa provedores " +
+      "diferentes pras duas tarefas (Anthropic gera, OpenAI avalia) — julgar com o mesmo modelo que escreveu " +
+      "é mais circular do que um provedor independente julgando.",
   },
   {
     title: "Image Generation ↔ Gate de integridade",
@@ -71,11 +77,28 @@ export const ARCHITECTURE_NOTES: Array<{ title: string; body: string }> = [
       "silenciosamente.",
   },
   {
-    title: "Evaluator → Classificação + Impacto",
+    title: "Evaluator → Classificação + Confiança de conteúdo",
     body:
       "O mesmo score composto alimenta tanto o badge Ouro/Prata/Bronze (limites configuráveis por " +
-      "categoria) quanto o banner de Impacto Estimado (deltas antes/depois agregados por run ou pra conta " +
-      "toda).",
+      "categoria) quanto o banner de Confiança de conteúdo (deltas antes/depois agregados por run ou pra " +
+      "conta toda) — deliberadamente NÃO chamado de 'Impacto': é a mesma IA julgando seu próprio antes/depois, " +
+      "disponível na hora. O Impacto real (dados do Google) é uma coisa separada, ver abaixo.",
+  },
+  {
+    title: "Impacto real — sem tabela de snapshot",
+    body:
+      "productMetrics foi removida: em vez de guardar uma cópia própria dos números do GSC/GA4, a página de " +
+      "Impacto consulta o Google ao vivo, comparando uma janela antes da primeira publicação do produto com " +
+      "uma janela depois — o pivô é o publishedAt real de enrichment_proposals. Como o Google leva cerca de " +
+      "14 dias pra refletir uma mudança de conteúdo/SEO, a comparação só aparece depois desse prazo; antes " +
+      "disso a página mostra 'maturando' em vez de um número de ruído.",
+  },
+  {
+    title: "Analyst → buscas reais por página",
+    body:
+      "Além de priorizar produtos, o Analyst expõe as top buscas reais do Search Console por URL " +
+      "(queryTopQueriesByPage) pro Content Enrichment — o prompt de SEO passa a priorizar cobrir termos que " +
+      "compradores de fato digitam, em vez de a IA inventar palavras-chave plausíveis.",
   },
   {
     title: "Configuração de PDP → Publisher",

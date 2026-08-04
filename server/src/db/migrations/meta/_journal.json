@@ -148,6 +148,13 @@
       "when": 1785803039013,
       "tag": "0020_clear_big_bertha",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1785809596671,
+      "tag": "0021_legal_marvex",
+      "breakpoints": true
     }
   ]
 }

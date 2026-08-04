@@ -17,7 +17,7 @@ import type { CommunicationTone, DescriptionRichness, EnrichmentField, LlmClient
 import type { CatalogClient } from "../clients/catalog-types.js";
 import type { RequestLogEntry } from "../clients/http.js";
 import { syncCatalogByProductIds, type ProductRow } from "../agents/catalog-reader.agent.js";
-import { prioritizeProducts } from "../agents/analyst.agent.js";
+import { prioritizeProducts, pathnameOf } from "../agents/analyst.agent.js";
 import { proposeContentEnrichment } from "../agents/content-enrichment.agent.js";
 import { proposeImageAltText } from "../agents/image-alttext.agent.js";
 import { generateProductImage } from "../agents/image-generation.agent.js";
@@ -243,6 +243,18 @@ export async function executeEnrichmentRun(runId: number, params: StartEnrichmen
     // inventing labels. Always [] on VTEX (no metafield concept there).
     const knownAttributeFields = await catalog.getKnownAttributeFields();
 
+    // Real search queries per page, fetched once for the whole run (not per product) and resolved
+    // below by URL — grounds SEO generation in what buyers actually search for instead of the
+    // model inventing plausible-sounding terms. 90-day window (wider than Analyst's 28-day
+    // prioritization lookback) since long-tail query volume per page accumulates slowly. Empty map
+    // when GSC isn't connected — every product just gets `undefined`, same as before this existed.
+    const topQueriesEndDate = new Date();
+    const topQueriesStartDate = new Date(topQueriesEndDate.getTime() - 90 * 24 * 60 * 60 * 1000);
+    const fmtDate = (d: Date) => d.toISOString().slice(0, 10);
+    const topQueriesByPath = gsc
+      ? await gsc.queryTopQueriesByPage({ startDate: fmtDate(topQueriesStartDate), endDate: fmtDate(topQueriesEndDate) })
+      : new Map<string, string[]>();
+
     // `fields: []` is an explicit "skip content generation entirely" (an alt-text-only run) —
     // distinct from `undefined`, which keeps the pre-existing "all 5 fields" default.
     const runContent = !params.fields || params.fields.length > 0;
@@ -263,6 +275,7 @@ export async function executeEnrichmentRun(runId: number, params: StartEnrichmen
                 descriptionRichness: params.descriptionRichness,
                 communicationTone: params.communicationTone,
                 knownAttributeFields,
+                topSearchQueries: product.url ? topQueriesByPath.get(pathnameOf(product.url)) : undefined,
               }),
             ),
           )

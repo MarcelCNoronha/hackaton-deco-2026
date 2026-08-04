@@ -11,6 +11,7 @@ import {
 import type { ProductRow } from "./catalog-reader.agent.js";
 import { computeContentScore, persistContentScore, scoreContent, type ComputedContentScore } from "./evaluator.agent.js";
 import { findReuseDonor } from "../repositories/product-similarity.repo.js";
+import { getExpectedAttributeKeys } from "../repositories/catalog-attributes.repo.js";
 
 interface VtexImage {
   ImageUrl: string;
@@ -234,6 +235,11 @@ export async function proposeContentEnrichment(params: {
    *  getKnownAttributeFields, fetched once per run in the orchestrator) — steers attributesPatch
    *  to reuse these exact keys. Empty/omitted on VTEX. */
   knownAttributeFields?: Array<{ key: string; name: string }>;
+  /** Real Search Console queries for this product's page (resolved once per run in the
+   *  orchestrator via GSC.queryTopQueriesByPage + pathnameOf) — grounds seoTitle/keywords/
+   *  description in what buyers actually search for. Empty/omitted when GSC isn't connected or
+   *  has no data for this product's page. */
+  topSearchQueries?: string[];
 }): Promise<{ attempts: number; finalScore: number; reused: boolean }> {
   const { contentLlm, evaluatorLlm, runId, product } = params;
   const fields = params.fields ?? ALL_ENRICHMENT_FIELDS;
@@ -242,6 +248,12 @@ export async function proposeContentEnrichment(params: {
     descriptionRichness === "structured_with_image"
       ? ((product.images as VtexImage[]) ?? []).map((img) => img.ImageUrl)
       : undefined;
+
+  // Fetched once per product (not per quality-gate attempt, since it's a category-level fact
+  // that doesn't change across retries) — see catalog-attributes.repo.ts for what "expected"
+  // means here (a fixed baseline from the category's OWN synced products, not from whatever this
+  // same run's AI proposes for this one product).
+  const expectedAttributeKeys = await getExpectedAttributeKeys(product.category);
 
   const originalScore = await scoreContent({
     llm: evaluatorLlm,
@@ -252,6 +264,7 @@ export async function proposeContentEnrichment(params: {
     hasStructuredData: false,
     faqCount: 0,
     originalAttributes: product.attributes as Record<string, unknown>,
+    expectedAttributeKeys,
   });
 
   const knownFacts = JSON.stringify({
@@ -279,6 +292,7 @@ export async function proposeContentEnrichment(params: {
       communicationTone: params.communicationTone,
       imageUrls,
       knownAttributeFields: params.knownAttributeFields,
+      topSearchQueries: params.topSearchQueries,
     });
 
     const score = await computeContentScore({
@@ -292,6 +306,7 @@ export async function proposeContentEnrichment(params: {
       metaDescription: enriched.metaDescription,
       originalAttributes: product.attributes as Record<string, unknown>,
       attributesPatch: enriched.attributesPatch,
+      expectedAttributeKeys,
     });
 
     const donorRows = buildProposalRows({
@@ -328,6 +343,7 @@ export async function proposeContentEnrichment(params: {
       communicationTone: params.communicationTone,
       imageUrls,
       knownAttributeFields: params.knownAttributeFields,
+      topSearchQueries: params.topSearchQueries,
     });
 
     const score = await computeContentScore({
@@ -341,6 +357,7 @@ export async function proposeContentEnrichment(params: {
       metaDescription: enriched.metaDescription,
       originalAttributes: product.attributes as Record<string, unknown>,
       attributesPatch: enriched.attributesPatch,
+      expectedAttributeKeys,
     });
 
     if (!best || score.overallScore > best.score.overallScore) {

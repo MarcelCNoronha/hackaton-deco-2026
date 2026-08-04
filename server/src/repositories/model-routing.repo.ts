@@ -12,11 +12,15 @@ export interface ModelRoutingRow {
 }
 
 /** Sensible out-of-the-box routing so the pipeline works before anyone visits the Connections
- *  panel — all on Anthropic, matching the previous DEFAULT_MODELS. */
+ *  panel. Evaluator defaults to a DIFFERENT provider than Content Enrichment on purpose — grading
+ *  a draft with the same model family that wrote it is circular (it tends to rate its own style
+ *  favorably); a different provider judging is a meaningfully more independent check. Falls back
+ *  to the same DEFAULT_ROUTING shape either way when the user has already saved a routing row in
+ *  Connections, this default is never consulted again for that task. */
 const DEFAULT_ROUTING: ModelRoutingRow[] = [
   { task: "contentEnrichment", provider: "anthropic", model: resolveModel("anthropic", "balanced").id },
   { task: "imageAltText", provider: "anthropic", model: resolveModel("anthropic", "price").id },
-  { task: "evaluator", provider: "anthropic", model: resolveModel("anthropic", "balanced").id },
+  { task: "evaluator", provider: "openai", model: resolveModel("openai", "balanced").id },
 ];
 
 export async function getModelRouting(): Promise<ModelRoutingRow[]> {

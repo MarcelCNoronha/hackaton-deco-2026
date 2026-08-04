@@ -206,6 +206,20 @@ export function buildKnownAttributeFieldsSuffix(fields?: Array<{ key: string; na
   );
 }
 
+/** Appended only when Search Console is connected AND has real query data for this product's
+ *  page — grounds seo_title/keywords/description in what buyers actually search for, instead of
+ *  the model inventing plausible-sounding terms. Never told to invent a query — only to prefer
+ *  covering these when a claim about the product genuinely supports it. */
+export function buildTopSearchQueriesSuffix(queries?: string[]): string {
+  if (!queries || queries.length === 0) return "";
+  return (
+    ` Estas são buscas reais que já trazem gente pra esta página no Google: ${queries.join(", ")}. ` +
+    `Sempre que fizer sentido pro produto de verdade, priorize cobrir esses termos (naturalmente, nunca ` +
+    `forçado) em 'seoTitle'/'keywords'/'description' — são termos reais de comprador, não invente outros ` +
+    `no lugar deles.`
+  );
+}
+
 /** Extra instruction appended when "description" should be more than flowing text — see
  *  `DescriptionRichness`. Returns "" for "plain" so existing prompts are byte-identical to before. */
 export function buildDescriptionRichnessSuffix(richness: DescriptionRichness): string {

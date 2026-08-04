@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api, type CatalogFilterOptions, type ImpactSummary, type Product, type ProductMetric } from "../api/client";
+import { api, type CatalogFilterOptions, type ImpactSummary, type Product, type RealImpact } from "../api/client";
 import { CatalogFilterBar } from "../components/CatalogFilterBar";
 import { ImpactSummaryBanner } from "../components/ImpactSummaryBanner";
+import { RealImpactPanel } from "../components/RealImpactPanel";
 import { shortId } from "../lib/format";
 
 export function Impact() {
@@ -12,7 +13,7 @@ export function Impact() {
     const fromQuery = searchParams.get("productId");
     return fromQuery ? Number(fromQuery) : null;
   });
-  const [metrics, setMetrics] = useState<ProductMetric[]>([]);
+  const [realImpact, setRealImpact] = useState<RealImpact | null>(null);
   const [impactSummary, setImpactSummary] = useState<ImpactSummary | null>(null);
 
   const [search, setSearch] = useState("");
@@ -30,7 +31,8 @@ export function Impact() {
 
   useEffect(() => {
     if (selected == null) return;
-    api.productMetrics(selected).then(setMetrics);
+    setRealImpact(null);
+    api.productRealImpact(selected).then(setRealImpact);
   }, [selected]);
 
   function handleSearch(e: React.FormEvent) {
@@ -47,19 +49,15 @@ export function Impact() {
     return true;
   });
 
-  const gscHistory = metrics.filter((m) => m.source === "gsc").sort((a, b) => a.fetchedAt.localeCompare(b.fetchedAt));
-  const ga4History = metrics.filter((m) => m.source === "ga4").sort((a, b) => a.fetchedAt.localeCompare(b.fetchedAt));
-
   return (
     <>
       <div className="page-header">
         <div>
           <h1>Impacto (antes/depois)</h1>
           <p className="muted">
-            Cada snapshot é gravado quando o Analyst roda para um produto. Rodar novos enrichment
-            runs ao longo dos dias cria a série "antes vs. depois" que sustenta a métrica de impacto
-            no Search Console e no GA4 — para uma leitura imediata, sem esperar o Google, veja o
-            score de conteúdo em cada run.
+            Consulta em tempo real ao Search Console e ao GA4 — sem cópia local. O corte "antes/depois" é a
+            primeira publicação do produto; o Google leva cerca de 14 dias para refletir a mudança, então a
+            comparação só fica disponível depois desse prazo.
           </p>
         </div>
       </div>
@@ -93,67 +91,12 @@ export function Impact() {
         </section>
 
         {selected == null ? (
-          <div className="empty-state">Selecione um produto para ver o histórico de métricas.</div>
+          <div className="empty-state">Selecione um produto para ver o impacto real (Google).</div>
         ) : (
-          <>
-            <section className="card">
-              <h2>Search Console</h2>
-              {gscHistory.length === 0 ? (
-                <div className="empty-state">Sem dado ainda — rode um enrichment run com este produto no escopo.</div>
-              ) : (
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Coletado em</th>
-                      <th>Impressões</th>
-                      <th>Cliques</th>
-                      <th>CTR</th>
-                      <th>Posição média</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {gscHistory.map((m) => (
-                      <tr key={m.id}>
-                        <td>{new Date(m.fetchedAt).toLocaleDateString("pt-BR")}</td>
-                        <td>{m.impressions}</td>
-                        <td>{m.clicks}</td>
-                        <td>{m.ctr ? `${(Number(m.ctr) * 100).toFixed(1)}%` : "—"}</td>
-                        <td>{m.avgPosition ?? "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </section>
-
-            <section className="card">
-              <h2>GA4</h2>
-              {ga4History.length === 0 ? (
-                <div className="empty-state">Sem dado ainda — rode um enrichment run com este produto no escopo.</div>
-              ) : (
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Coletado em</th>
-                      <th>Sessões</th>
-                      <th>Conversão</th>
-                      <th>Receita</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ga4History.map((m) => (
-                      <tr key={m.id}>
-                        <td>{new Date(m.fetchedAt).toLocaleDateString("pt-BR")}</td>
-                        <td>{m.sessions}</td>
-                        <td>{m.conversionRate ? `${(Number(m.conversionRate) * 100).toFixed(1)}%` : "—"}</td>
-                        <td>{m.revenue ? `R$ ${Number(m.revenue).toFixed(2)}` : "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </section>
-          </>
+          <section className="card">
+            <h2>Impacto real (Google)</h2>
+            {realImpact ? <RealImpactPanel impact={realImpact} /> : <p className="muted">Consultando…</p>}
+          </section>
         )}
       </div>
     </>
