@@ -4,6 +4,27 @@ import { enrichmentProposals, enrichmentRuns, products } from "../db/schema.js";
 import type { CatalogClient } from "../clients/catalog-types.js";
 import type { DescriptionRichness } from "../clients/llm-types.js";
 import { resolvePdpTemplate, type PdpBlock } from "../repositories/pdp-templates.repo.js";
+import { getCategoryFields } from "../repositories/category-spec-fields.repo.js";
+import type { CatalogPlatform } from "../clients/catalog-types.js";
+
+/** Resolves label→fieldId against the product's category's synced spec fields (empty/no-op on
+ *  Shopify, which has no such registry — see category-spec-fields.repo.ts). Case-insensitive since
+ *  the LLM's label casing doesn't always match VTEX's own field Name exactly (e.g. "Cor" vs "cor"). */
+async function resolveSpecFieldValues(
+  platform: CatalogPlatform,
+  category: string | null,
+  entries: Array<[string, string]>,
+): Promise<{ specValues: Array<{ fieldId: string; value: string }>; rest: Array<[string, string]> }> {
+  const fields = category ? await getCategoryFields(platform, category) : null;
+  const specValues: Array<{ fieldId: string; value: string }> = [];
+  const rest: Array<[string, string]> = [];
+  for (const [label, value] of entries) {
+    const field = fields?.find((f) => f.name.toLowerCase() === label.toLowerCase());
+    if (field) specValues.push({ fieldId: field.id, value });
+    else rest.push([label, value]);
+  }
+  return { specValues, rest };
+}
 
 type Proposal = typeof enrichmentProposals.$inferSelect;
 
@@ -182,6 +203,24 @@ export async function publishApprovedProposals(params: {
           await markPublished(p.id);
           published++;
         }
+
+        // Best-effort, in addition to the merged-HTML block above: any spec whose label matches a
+        // field the platform's category actually accepts also gets written into the REAL
+        // Specification module ("Características do Produto" on VTEX) — not just the description's
+        // inline table. Never lets a failure here undo the successful description publish just above.
+        if (specsProposal) {
+          try {
+            const specs = JSON.parse(specsProposal.proposedValue) as Array<{ label: string; value: string }>;
+            const { specValues } = await resolveSpecFieldValues(
+              params.catalog.platform,
+              product.category,
+              specs.map((s) => [s.label, s.value]),
+            );
+            if (specValues.length > 0) await params.catalog.updateProductSpecificationValues(product.vtexProductId, specValues);
+          } catch (err) {
+            console.error(`Failed to publish technical_specs to the native Specification module for product ${productId}:`, err);
+          }
+        }
       } catch (err) {
         console.error(`Failed to publish PDP blocks for product ${productId}:`, err);
         failed += mergedProposals.filter(Boolean).length;
@@ -218,37 +257,59 @@ export async function publishApprovedProposals(params: {
       }
     }
 
-    // Our own synthesized data (no pre-existing merchant field for either) — written under a
-    // fixed "catalogia" namespace on Shopify; no-op on VTEX (no metafield concept there).
-    if (structuredDataProposal || keywordsProposal) {
+    // Our own synthesized data with no pre-existing merchant field — written under a fixed
+    // "catalogia" namespace on Shopify; no-op on VTEX (no metafield concept there).
+    if (structuredDataProposal) {
       try {
-        const values: Array<{ key: string; value: string; type: string; namespace: string }> = [];
-        if (structuredDataProposal) {
-          values.push({ key: "structured_data", value: structuredDataProposal.proposedValue, type: "json", namespace: "catalogia" });
-        }
-        if (keywordsProposal) {
-          values.push({ key: "keywords", value: keywordsProposal.proposedValue, type: "json", namespace: "catalogia" });
-        }
-        await params.catalog.updateProductMetafields(product.vtexProductId, values);
-        for (const p of [structuredDataProposal, keywordsProposal]) {
-          if (!p) continue;
-          await markPublished(p.id);
-          published++;
-        }
+        await params.catalog.updateProductMetafields(product.vtexProductId, [
+          { key: "structured_data", value: structuredDataProposal.proposedValue, type: "json", namespace: "catalogia" },
+        ]);
+        await markPublished(structuredDataProposal.id);
+        published++;
       } catch (err) {
-        console.error(`Failed to publish structured_data/keywords for product ${productId}:`, err);
-        failed += [structuredDataProposal, keywordsProposal].filter(Boolean).length;
+        console.error(`Failed to publish structured_data for product ${productId}:`, err);
+        failed++;
       }
     }
 
-    // Attribute normalization/fill — targets the platform's OWN already-registered fields (Shopify
-    // Category/Product metafields), matching existing terminology or creating a new field only
-    // when nothing matches (see ShopifyClient.updateProductMetafields). No-op on VTEX.
+    // VTEX: real native field (`KeyWords`, "Palavras similares" in the admin — confirmed live
+    // against a real account). Shopify: no native equivalent, publishes via the metafield below
+    // instead (see ShopifyClient.updateProductKeywords's doc comment).
+    if (keywordsProposal) {
+      try {
+        const { primary, secondary } = JSON.parse(keywordsProposal.proposedValue) as { primary: string[]; secondary: string[] };
+        await params.catalog.updateProductKeywords(product.vtexProductId, [...primary, ...secondary].join(", "));
+        await params.catalog.updateProductMetafields(product.vtexProductId, [
+          { key: "keywords", value: keywordsProposal.proposedValue, type: "json", namespace: "catalogia" },
+        ]);
+        await markPublished(keywordsProposal.id);
+        published++;
+      } catch (err) {
+        console.error(`Failed to publish keywords for product ${productId}:`, err);
+        failed++;
+      }
+    }
+
+    // Attribute normalization/fill — VTEX: any key matching a field the product's category
+    // actually accepts goes to the real Specification module (updateProductSpecificationValues);
+    // anything left over falls through to updateProductMetafields, same as before (Shopify's real
+    // path — matches existing terminology or creates a new field; a no-op on VTEX, which has no
+    // metafield concept, so a key VTEX doesn't recognize as a spec field simply isn't published).
     if (attributesPatchProposal) {
       try {
         const patch = JSON.parse(attributesPatchProposal.proposedValue) as Record<string, string>;
-        const values = Object.entries(patch).map(([key, value]) => ({ key, value }));
-        await params.catalog.updateProductMetafields(product.vtexProductId, values);
+        const { specValues, rest: unresolved } = await resolveSpecFieldValues(
+          params.catalog.platform,
+          product.category,
+          Object.entries(patch),
+        );
+        if (specValues.length > 0) await params.catalog.updateProductSpecificationValues(product.vtexProductId, specValues);
+        if (unresolved.length > 0) {
+          await params.catalog.updateProductMetafields(
+            product.vtexProductId,
+            unresolved.map(([key, value]) => ({ key, value })),
+          );
+        }
         await markPublished(attributesPatchProposal.id);
         published++;
       } catch (err) {

@@ -418,6 +418,39 @@ export class VtexClient implements CatalogClient {
    *  stay in-app only on this platform, see CatalogClient's doc comment. */
   async updateProductTags(): Promise<void> {}
 
+  /** `KeyWords` — confirmed live against a real account's `GET /pvt/product/{id}` response (present
+   *  as an empty string on an unpublished product), matching the "Palavras similares" field shown
+   *  in the VTEX admin's Frente de loja tab. */
+  async updateProductKeywords(productId: string | number, keywords: string): Promise<void> {
+    await this.updateProductFields(productId, { KeyWords: keywords });
+  }
+
+  /** `PUT /pvt/product/{id}/specificationvalue` with `{FieldId, FieldValues}` — validated live
+   *  against a real account/product: correctly reuses the field's existing value row (no
+   *  duplicate) when `FieldId` names the SAME field already on the product. One request per field
+   *  — the endpoint takes exactly one FieldId per call, not a batch. Deliberately does NOT accept
+   *  `FieldName` as an alternative key: tried live first, and it matched/created an unrelated field
+   *  sharing the same display name in a different field group instead of updating the intended one,
+   *  duplicating the spec on the product — confirmed and reverted before ever trusting this path. */
+  async updateProductSpecificationValues(
+    productId: string | number,
+    values: Array<{ fieldId: string; value: string }>,
+  ): Promise<void> {
+    for (const { fieldId, value } of values) {
+      await requestWithRetry({
+        provider: "vtex",
+        operation: "updateProductSpecificationValue",
+        url: `${this.baseUrl}/pvt/product/${productId}/specificationvalue`,
+        init: {
+          method: "PUT",
+          headers: this.headers(),
+          body: JSON.stringify({ FieldId: Number(fieldId), FieldValues: [value] }),
+        },
+        onAttempt: this.onAttempt,
+      });
+    }
+  }
+
   /** VTEX has no metafield concept — attribute normalization / structured_data / keywords stay
    *  in-app only on this platform. */
   async getKnownAttributeFields(): Promise<Array<{ key: string; name: string }>> {

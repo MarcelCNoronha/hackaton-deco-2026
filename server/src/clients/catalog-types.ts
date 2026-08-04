@@ -109,6 +109,22 @@ export interface CatalogClient {
    *  touching its category tree, so its implementation is a no-op and `tags` proposals stay
    *  in-app only there (see publisher.agent.ts). */
   updateProductTags(externalId: string, tags: string[]): Promise<void>;
+  /** VTEX's `KeyWords` field (shown in the admin as "Palavras similares", under a product's Frente
+   *  de loja tab) — free-text, comma-separated, used for search relevance. Found live on a real
+   *  account after initially assuming VTEX had no keywords field at all. Shopify's implementation
+   *  is a no-op — its keywords proposal already publishes through updateProductMetafields instead,
+   *  and doing both would be redundant. */
+  updateProductKeywords(externalId: string, keywords: string): Promise<void>;
+  /** Writes real values into VTEX's Specification module (the "Características do Produto" tab —
+   *  distinct from the description HTML's technical_specs BLOCK, which only ever renders inline
+   *  text). `fieldId` must be one already accepted by the product's category (see
+   *  category-spec-fields.repo.ts / getCategoryFieldDefinitions) — callers resolve a label to a
+   *  fieldId themselves; this never invents one. Confirmed live against a real account: writing by
+   *  FieldName alone is NOT safe (VTEX matched/created an unrelated field with the same display
+   *  name in a different field group, duplicating the spec) — FieldId is the only reliable key.
+   *  Shopify has no equivalent module, so its implementation is a no-op (attributes_patch already
+   *  has its own real path there via updateProductMetafields). */
+  updateProductSpecificationValues(externalId: string, values: Array<{ fieldId: string; value: string }>): Promise<void>;
   /** The category/product metafield slots already registered on the platform (e.g. Shopify's
    *  "Category metafields"/"Product metafields" panel) that are SAFE to write blind — scalar types
    *  only (text/number/boolean), never a reference/list type (those need resolving a value to a

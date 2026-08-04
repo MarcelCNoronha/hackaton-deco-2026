@@ -92,12 +92,12 @@ export interface KnownRisk {
  *  precisa ser validado/endurecido antes da submissão, priorizado sobre escopo novo. */
 export const KNOWN_RISKS: KnownRisk[] = [
   {
-    title: "VTEX — parcialmente validada contra uma conta real (2026-08-04)",
-    body: "getCategoryFieldDefinitions/listCategoryTree foram validados ao vivo contra a conta real da Mundial Acabamentos (category/tree/3, specification/field/listTreeByCategoryId — não listByCategoryId, que voltava vazio mesmo com campos configurados; achado só testando contra dados reais). O restante do client (PUT corrigido, addProductImage) ainda não foi validado ao vivo.",
+    title: "VTEX — validada contra uma conta real (2026-08-04)",
+    body: "getCategoryFieldDefinitions/listCategoryTree, o PUT de produto (Title/MetaTagDescription/KeyWords) e a Specification API (.../specificationvalue, escrita real de \"Características do Produto\") foram todos validados ao vivo contra a conta real da Mundial Acabamentos. Um bug real foi encontrado e revertido nesse processo: escrever uma especificação por FieldName (em vez de FieldId) casou/criou um campo ERRADO de mesmo nome em outro grupo, duplicando a especificação no produto — reproduzido, revertido, e confirmado que só FieldId é seguro. addProductImage segue não validado ao vivo.",
   },
   {
-    title: "Escrita de atributos/metafields só funciona no Shopify",
-    body: "A feature mais recente (attributes_patch → metafield real, casando terminologia ou criando campo) não tem equivalente implementado na VTEX ainda — o diferencial mais novo não aparece com dado real a menos que seja estendido pra VTEX.",
+    title: "Escrita de atributos/technical_specs — real nas duas plataformas agora",
+    body: "Shopify: metafields (já existia). VTEX (novo, 2026-08-04): updateProductSpecificationValues escreve na Specification API real — qualquer label de technical_specs/attributes_patch que bata com um campo aceito da categoria do produto vai pra aba \"Características do Produto\" de verdade, não só pro HTML mesclado da descrição. O que não bate com nenhum campo continua só em-app.",
   },
   {
     title: "Casamento de GSC/GA4 é só por URL",

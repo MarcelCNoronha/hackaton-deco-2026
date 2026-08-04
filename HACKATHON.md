@@ -835,6 +835,60 @@ estrutura dos 3 níveis pra ESSA categoria especificamente.
   específica está selecionada (não fazem sentido pro catálogo inteiro); a estrutura Médio/Bom/
   Excelente aparece sempre, com o aviso de herança/customização acima descrito.
 
+### Escrita real na VTEX: KeyWords e Specification API, validadas ao vivo (2026-08-04, décima segunda rodada)
+
+Com o token real da VTEX finalmente em uso (billing do Gemini ativado, primeira otimização
+completa do dia rodada com sucesso), o usuário revisou o produto real publicado e apontou dois
+problemas que só apareceriam contra dados de verdade:
+
+1. **"Ver na loja" apontava pro domínio errado** — `VtexClient.getProduct` construía a URL a partir
+   de `{account}.{environment}.com.br` (o domínio bruto hospedado pela VTEX), não do domínio próprio
+   da loja (`mundialacabamentos.com.br`). A API pública de busca (`fetchProductSpecifications`, já
+   chamada pra atributos/marca/categoria) já retorna o campo `link` de verdade — só nunca tinha sido
+   aproveitado aqui. Corrigido reaproveitando essa mesma chamada, sem custo de request extra.
+2. **`keywords` "não tinha onde publicar na VTEX"** — documentado (errado) desde a rodada anterior.
+   O usuário, olhando o admin da VTEX, apontou o campo "Palavras similares" (Frente de Loja) — uma
+   busca ao vivo contra `GET /pvt/product/{id}` confirmou um campo real `KeyWords`, gravável pelo
+   mesmo endpoint já usado por Title/MetaTagDescription. Implementado.
+
+**Pedido maior do usuário**: validar e corrigir de verdade as especificações técnicas — na aba
+"Características do Produto" real da VTEX, não só mescladas como HTML dentro da Descrição (que é
+tudo que `technical_specs` fazia até aqui). Investigação ao vivo contra a conta real (com
+autorização do usuário pra testar escrita, não só leitura):
+
+- `GET /pvt/product/{id}/specification` retorna os valores atuais: `{Id, ProductId, FieldId,
+  FieldValueId, Text}` — bate com os `FieldId`s que `category_spec_fields` já sincroniza.
+- **Escrita real**: `PUT /pvt/product/{id}/specificationvalue`. Documentação pública não expõe o
+  schema do corpo — descoberto por tentativa e erro controlado (erros de validação 400 revelando
+  campos faltando) até chegar em `{FieldId: number, FieldValues: string[]}`.
+- **Achado crítico, corrigido antes de virar código**: a primeira tentativa usou `FieldName`
+  (`"Marca"`) em vez de `FieldId` — a chamada retornou 200 (sucesso!), mas criou um campo **novo e
+  duplicado** ("Marca" com FieldId diferente, em outro grupo/tipo) no produto real, em vez de
+  atualizar o campo existente. Revertido na hora (`DELETE /pvt/product/{id}/specification/{id}`,
+  confirmado por getback). Reproduzido de novo só com `FieldId` (o que `category_spec_fields` já
+  fornece) — reaproveitou a linha existente corretamente, sem duplicar. **Só `FieldId` é seguro；
+  nunca escrever por `FieldName`.**
+- Implementado `VtexClient.updateProductSpecificationValues` (um request por campo — o endpoint não
+  aceita lote) e wireado em `publisher.agent.ts` pros dois proposals relevantes:
+  - `technical_specs`: além do bloco HTML já mesclado na descrição, cada label que casa com um
+    campo aceito da categoria também é escrito na aba real (best-effort, não desfaz o publish da
+    descrição se falhar).
+  - `attributes_patch`: o que casar com um campo da categoria vai pra Specification API real; o
+    resto continua caindo em `updateProductMetafields` (caminho do Shopify, no-op na VTEX).
+- `ShopifyClient` ganhou os dois métodos como no-op (Shopify já tem os próprios caminhos reais pra
+  isso — metafields).
+
+**Também corrigido nessa rodada**: os deltas do banner "Confiança de conteúdo" (RunDetail e
+`/impact`) mostravam "pp" (pontos percentuais) — tecnicamente correto pra diferença entre dois
+percentuais, mas o usuário reportou que os analistas do negócio não reconheciam a sigla. Trocado
+pra "%", priorizando familiaridade do público sobre precisão técnica, por pedido explícito.
+
+**Achado à parte, não é bug**: Evaluator e Content Enrichment em produção estão roteados pro
+**mesmo modelo exato** (`gemini-3.6-flash`) — o roteamento padrão do código já previa provedores
+diferentes pra evitar a IA julgar o próprio texto, mas com só o Gemini conectado hoje, os dois
+caíram no mesmo lugar. Métricas de "Confiança de conteúdo" desta fase devem ser lidas como
+indicativo otimista, não neutro, até um segundo provedor (Claude/OpenAI) ser conectado.
+
 ## Formação de equipes
 
 - 1 a 5 pessoas por equipe (pode ser solo)

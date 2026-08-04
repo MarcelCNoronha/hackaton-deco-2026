@@ -479,6 +479,15 @@ export class ShopifyClient implements CatalogClient {
     }
   }
 
+  /** No Shopify equivalent of VTEX's `KeyWords` field — Shopify's keywords proposal already
+   *  publishes through updateProductMetafields (the "catalogia" namespace), see
+   *  CatalogClient.updateProductKeywords's doc comment. */
+  async updateProductKeywords(): Promise<void> {}
+
+  /** No Shopify equivalent of VTEX's Specification module — attributes_patch/technical_specs
+   *  already have their own real path on Shopify via updateProductMetafields. */
+  async updateProductSpecificationValues(): Promise<void> {}
+
   /** `params.imageId` must be the MediaImage id returned by getProduct()'s `images[].id` —
    *  Shopify removed the old ProductImage/productImageUpdate mutation; media is now managed
    *  through the generic Files API (`fileUpdate`), even for images attached to a product. */

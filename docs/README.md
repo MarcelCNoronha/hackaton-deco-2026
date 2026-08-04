@@ -40,11 +40,16 @@ código morto tentou evitar). No app, tudo isso fica atrás da permissão de Int
 
 ### Riscos conhecidos (validar antes de escopo novo)
 
-1. **VTEX — parcialmente validada contra uma conta real (2026-08-04)** — category/tree/3 e
-   specification/field/listTreeByCategoryId foram testados ao vivo contra a Mundial Acabamentos; o
-   restante do client (PUT de produto, addProductImage) ainda não.
-2. **Escrita de atributos/metafields só funciona no Shopify** — o diferencial mais novo não
-   aparece com dado real na loja de verdade (VTEX) ainda.
+1. **VTEX — validada contra uma conta real (2026-08-04)** — category/tree/3,
+   specification/field/listTreeByCategoryId, o PUT de produto (Title/MetaTagDescription/KeyWords) e
+   a Specification API (`.../specificationvalue`, escrita real de "Características do Produto")
+   foram todos testados ao vivo contra a conta da Mundial Acabamentos, incluindo um bug real achado
+   e revertido no processo (escrever por FieldName duplicava a especificação — só FieldId é
+   seguro). `addProductImage` segue não testado ao vivo.
+2. **Escrita de atributos/technical_specs agora publica de verdade nas duas plataformas** —
+   Shopify via metafields (já existia); VTEX via `updateProductSpecificationValues` na
+   Specification API real (novo, 2026-08-04) — qualquer label que bata com um campo aceito da
+   categoria vai pra aba "Características do Produto" de verdade, não só pro HTML da descrição.
 3. **Casamento de GSC/GA4 é só por URL** — sem SKU, falha silenciosa se a URL não bater.
 4. **Score é auto-avaliado pela própria IA** — rotulado como "estimado", mas vale ter a resposta
    pronta pra "quem garante que a nota significa algo real".
