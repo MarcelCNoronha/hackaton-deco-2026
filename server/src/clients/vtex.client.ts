@@ -425,18 +425,47 @@ export class VtexClient implements CatalogClient {
     await this.updateProductFields(productId, { KeyWords: keywords });
   }
 
+  /** `GET /pvt/product/{id}/specification` — every specification value currently set on the
+   *  product, keyed by FieldId. Used by updateProductSpecificationValues to decide what's actually
+   *  missing; never throws (a lookup failure just means the safety filter below treats nothing as
+   *  "already set", same fail-safe direction as fetchProductSpecifications). */
+  private async fetchCurrentSpecificationValues(productId: string | number): Promise<Map<number, string>> {
+    try {
+      const res = await requestWithRetry({
+        provider: "vtex",
+        operation: "getProductSpecificationValues",
+        url: `${this.baseUrl}/pvt/product/${productId}/specification`,
+        init: { method: "GET", headers: this.headers() },
+        onAttempt: this.onAttempt,
+      });
+      const rows = ((await res.json()) as Array<{ FieldId: number; Text: string | null }>) ?? [];
+      return new Map(rows.map((r) => [r.FieldId, r.Text ?? ""]));
+    } catch (err) {
+      console.error(`VTEX getProductSpecificationValues failed for product ${productId} — treating all fields as unset`, err);
+      return new Map();
+    }
+  }
+
   /** `PUT /pvt/product/{id}/specificationvalue` with `{FieldId, FieldValues}` — validated live
    *  against a real account/product: correctly reuses the field's existing value row (no
    *  duplicate) when `FieldId` names the SAME field already on the product. One request per field
    *  — the endpoint takes exactly one FieldId per call, not a batch. Deliberately does NOT accept
    *  `FieldName` as an alternative key: tried live first, and it matched/created an unrelated field
    *  sharing the same display name in a different field group instead of updating the intended one,
-   *  duplicating the spec on the product — confirmed and reverted before ever trusting this path. */
+   *  duplicating the spec on the product — confirmed and reverted before ever trusting this path.
+   *
+   *  Only fills fields that are CURRENTLY EMPTY — explicit product requirement ("só permitir
+   *  aumentar, nunca diminuir o número de especificações"): never overwrites a value a merchant (or
+   *  a previous run) already set, so this can only grow the count of filled specs, never replace or
+   *  effectively erase one with a worse/different value. */
   async updateProductSpecificationValues(
     productId: string | number,
     values: Array<{ fieldId: string; value: string }>,
   ): Promise<void> {
-    for (const { fieldId, value } of values) {
+    const current = await this.fetchCurrentSpecificationValues(productId);
+    const toWrite = values.filter(({ fieldId }) => !current.get(Number(fieldId))?.trim());
+
+    for (const { fieldId, value } of toWrite) {
       await requestWithRetry({
         provider: "vtex",
         operation: "updateProductSpecificationValue",
