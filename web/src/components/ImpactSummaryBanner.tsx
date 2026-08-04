@@ -1,8 +1,8 @@
 import { StatTile } from "./StatTile";
 import type { ImpactSummary } from "../api/client";
 
-function formatDelta(pp: number): string {
-  return `${pp >= 0 ? "+" : ""}${pp}pp`;
+function formatDelta(deltaPct: number): string {
+  return `${deltaPct >= 0 ? "+" : ""}${deltaPct}%`;
 }
 
 /** "Confiança de conteúdo" banner — aggregate before/after deltas across every product with both an

@@ -182,7 +182,7 @@ export class VtexClient implements CatalogClient {
    *  in the free-text description (and brand stays unset), same as before this existed. */
   private async fetchProductSpecifications(
     productId: string | number,
-  ): Promise<{ attributes: Record<string, unknown>; brand: string | null; category: string | null }> {
+  ): Promise<{ attributes: Record<string, unknown>; brand: string | null; category: string | null; url: string | null }> {
     try {
       const res = await requestWithRetry({
         provider: "vtex",
@@ -197,10 +197,15 @@ export class VtexClient implements CatalogClient {
         attributes: item ? extractVtexSpecifications(item) : {},
         brand: item?.brand ?? null,
         category: formatVtexCategoryPath(item?.categories),
+        // Real public storefront URL (custom domain, e.g. mundialacabamentos.com.br) — same field
+        // listProducts already uses. `{account}.{environment}.com.br` (getProduct's own fallback
+        // below) is VTEX's raw hosted domain, not necessarily what the store's DNS actually points
+        // shoppers to, so it's wrong whenever a custom domain is configured (the normal case).
+        url: item?.link ?? (item?.linkText ? `https://${this.host}/${item.linkText}/p` : null),
       };
     } catch (err) {
       console.error(`VTEX getProductSpecifications failed for product ${productId} — continuing with empty attributes`, err);
-      return { attributes: {}, brand: null, category: null };
+      return { attributes: {}, brand: null, category: null, url: null };
     }
   }
 
@@ -210,7 +215,7 @@ export class VtexClient implements CatalogClient {
   async getProduct(externalId: string): Promise<CatalogProductDetail> {
     const product = await this.fetchProduct(externalId);
     const skuId = (product as { SkuIds?: number[] }).SkuIds?.[0];
-    const [sku, { attributes, brand, category }] = await Promise.all([
+    const [sku, { attributes, brand, category, url }] = await Promise.all([
       skuId ? this.fetchSku(skuId) : Promise.resolve(undefined),
       this.fetchProductSpecifications(externalId),
     ]);
@@ -230,7 +235,10 @@ export class VtexClient implements CatalogClient {
       // against a live account (no VTEX connection available to test against right now).
       collection: null,
       sku: sku?.RefId ?? null,
-      url: product.LinkId ? `https://${this.host}/${product.LinkId}/p` : null,
+      // Falls back to the raw VTEX-hosted domain only if the search-API lookup above failed
+      // entirely (see fetchProductSpecifications) — still better than no link at all, but wrong
+      // for any store using a custom domain, which is the common case.
+      url: url ?? (product.LinkId ? `https://${this.host}/${product.LinkId}/p` : null),
       imageUrl: images[0]?.ImageUrl ?? null,
       variantId: sku ? String(sku.Id) : "",
       images: images.map((img, i) => ({
