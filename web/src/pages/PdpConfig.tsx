@@ -1,12 +1,11 @@
 import { useEffect, useState } from "react";
 import {
   api,
-  DEFAULT_THRESHOLD_CATEGORY,
+  MAX_REFERENCE_LINKS,
   PDP_BLOCKS,
   type CatalogPlatform,
   type CategoryContentProfile,
   type CategoryReferenceLink,
-  type CategoryScoreThreshold,
   type CategorySpecFields,
   type CategoryTreeNode,
   type DescriptionRichness,
@@ -97,10 +96,6 @@ export function PdpConfig() {
   const [loading, setLoading] = useState(true);
   const [previewHtml, setPreviewHtml] = useState<string>("");
 
-  const [thresholdCategories, setThresholdCategories] = useState<string[]>([]);
-  const [thresholdInputs, setThresholdInputs] = useState<Record<string, { excellentMin: string; goodMin: string }>>({});
-  const [savingThreshold, setSavingThreshold] = useState<string | null>(null);
-
   const [categoryNodes, setCategoryNodes] = useState<CategoryTreeNode[]>([]);
   const [categorySpecFields, setCategorySpecFields] = useState<CategorySpecFields[]>([]);
   const [syncingCategories, setSyncingCategories] = useState(false);
@@ -108,7 +103,7 @@ export function PdpConfig() {
   const [dnaCategory, setDnaCategory] = useState<string>("");
   const [referenceLinks, setReferenceLinks] = useState<CategoryReferenceLink[]>([]);
   const [contentProfile, setContentProfile] = useState<CategoryContentProfile | null>(null);
-  const [newLinkUrl, setNewLinkUrl] = useState("");
+  const [newLinkUrls, setNewLinkUrls] = useState<string[]>(Array(MAX_REFERENCE_LINKS).fill(""));
   const [addingLink, setAddingLink] = useState(false);
   const [dnaMessage, setDnaMessage] = useState<string | null>(null);
   const [manualEdit, setManualEdit] = useState<{
@@ -133,19 +128,28 @@ export function PdpConfig() {
   useEffect(() => {
     setManualEdit(null);
     setDnaMessage(null);
+    setNewLinkUrls(Array(MAX_REFERENCE_LINKS).fill(""));
     loadDnaForCategory(dnaCategory);
   }, [dnaCategory]);
 
-  async function handleAddReferenceLink() {
-    if (!newLinkUrl.trim() || !dnaCategory) return;
+  const referenceSlotsLeft = MAX_REFERENCE_LINKS - referenceLinks.length;
+
+  /** Sends every filled-in url as one request (see category-profiles.routes.ts's batch handler) —
+   *  a url that fails to fetch/extract shows up in `errors` without losing the ones that worked. */
+  async function handleAddReferenceLinks() {
+    const urls = newLinkUrls.map((u) => u.trim()).filter(Boolean).slice(0, referenceSlotsLeft);
+    if (urls.length === 0 || !dnaCategory) return;
     setAddingLink(true);
     setDnaMessage(null);
     try {
-      const { profile } = await api.addCategoryReferenceLink({ category: dnaCategory, url: newLinkUrl.trim() });
-      setNewLinkUrl("");
+      const { errors, profile } = await api.addCategoryReferenceLinks({ category: dnaCategory, urls });
+      setNewLinkUrls(Array(MAX_REFERENCE_LINKS).fill(""));
       setContentProfile(profile);
       const { links } = await api.getCategoryReferenceLinks(dnaCategory);
       setReferenceLinks(links);
+      if (errors.length > 0) {
+        setDnaMessage(errors.map((e) => `${e.url}: ${e.error}`).join(" | "));
+      }
     } catch (err) {
       setDnaMessage(err instanceof Error ? err.message : String(err));
     } finally {
@@ -214,44 +218,8 @@ export function PdpConfig() {
       setBlocksByLevel(Object.fromEntries(templates.map((t) => [t.level, t.blocks])) as Record<DescriptionRichness, PdpBlock[]>);
       setLoading(false);
     });
-    api.getOptimizationThresholds().then(({ thresholds, categories }) => {
-      setThresholdCategories(categories);
-      applyThresholdInputs(thresholds, categories);
-    });
     loadCategoryFields();
   }, []);
-
-  function applyThresholdInputs(thresholds: CategoryScoreThreshold[], categories: string[]) {
-    const byCategory = new Map(thresholds.map((t) => [t.category, t]));
-    const allCategories = [DEFAULT_THRESHOLD_CATEGORY, ...categories];
-    setThresholdInputs(
-      Object.fromEntries(
-        allCategories.map((category) => {
-          const t = byCategory.get(category);
-          return [category, { excellentMin: String(t?.excellentMin ?? 85), goodMin: String(t?.goodMin ?? 60) }];
-        }),
-      ),
-    );
-  }
-
-  async function handleSaveThreshold(category: string) {
-    const input = thresholdInputs[category];
-    if (!input) return;
-    setSavingThreshold(category);
-    try {
-      await api.setOptimizationThreshold({
-        category,
-        excellentMin: Number(input.excellentMin) || 0,
-        goodMin: Number(input.goodMin) || 0,
-      });
-      const res = await api.getOptimizationThresholds();
-      setThresholdCategories(res.categories);
-      applyThresholdInputs(res.thresholds, res.categories);
-      setMessage(`Padrão de otimização salvo para ${category === DEFAULT_THRESHOLD_CATEGORY ? "todas as categorias" : category}.`);
-    } finally {
-      setSavingThreshold(null);
-    }
-  }
 
   useEffect(() => {
     if (loading) return;
@@ -318,149 +286,8 @@ export function PdpConfig() {
 
         {!loading && (
           <>
-            <div className="actions" style={{ justifyContent: "flex-start", marginBottom: "1rem" }}>
-              {LEVEL_ORDER.map((level) => (
-                <button
-                  key={level}
-                  type="button"
-                  className={level === activeLevel ? "" : "secondary"}
-                  onClick={() => setActiveLevel(level)}
-                >
-                  {LEVEL_LABELS[level]}
-                </button>
-              ))}
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: "1rem" }}>
-              <section className="card">
-                <div className="proposal-header">
-                  <h3 style={{ margin: 0 }}>{LEVEL_LABELS[activeLevel]}</h3>
-                  <button type="button" onClick={handleSave} disabled={saving === activeLevel}>
-                    {saving === activeLevel ? "Salvando…" : "Salvar"}
-                  </button>
-                </div>
-                <p className="muted" style={{ marginTop: 0, fontSize: "0.82rem" }}>{LEVEL_HINT[activeLevel]}</p>
-
-                <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", marginBottom: "0.75rem" }}>
-                  {blocks.map((block, i) => (
-                    <div
-                      key={block}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        gap: "0.5rem",
-                        padding: "0.5rem 0.75rem",
-                        background: "var(--surface-2)",
-                        borderRadius: "var(--radius-sm)",
-                      }}
-                    >
-                      <span>
-                        <span className="muted" style={{ fontFamily: "monospace", marginRight: "0.5rem" }}>
-                          {i + 1}
-                        </span>
-                        {BLOCK_LABELS[block]}
-                      </span>
-                      <div style={{ display: "flex", gap: "0.3rem" }}>
-                        <button type="button" className="secondary" onClick={() => moveBlock(i, -1)} disabled={i === 0}>
-                          ↑
-                        </button>
-                        <button type="button" className="secondary" onClick={() => moveBlock(i, 1)} disabled={i === blocks.length - 1}>
-                          ↓
-                        </button>
-                        <button type="button" className="secondary" onClick={() => toggleBlock(block)}>
-                          Remover
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  {blocks.length === 0 && <p className="muted" style={{ margin: 0 }}>Nenhum bloco incluído ainda.</p>}
-                </div>
-
-                {available.length > 0 && (
-                  <div className="actions" style={{ justifyContent: "flex-start", flexWrap: "wrap" }}>
-                    {available.map((block) => (
-                      <button key={block} type="button" className="secondary" onClick={() => toggleBlock(block)}>
-                        + {BLOCK_LABELS[block]}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </section>
-
-              <section className="card" style={{ padding: 0, overflow: "hidden" }}>
-                <div style={{ padding: "0.75rem 1rem", borderBottom: "1px solid var(--border)" }}>
-                  <h3 style={{ margin: 0 }}>Preview</h3>
-                  <p className="muted" style={{ margin: "0.2rem 0 0", fontSize: "0.78rem" }}>
-                    Conteúdo de exemplo — mostra só como os blocos ficariam montados.
-                  </p>
-                </div>
-                <iframe
-                  title="Preview da PDP"
-                  srcDoc={buildPreviewDoc(previewHtml, platform)}
-                  style={{ width: "100%", height: 520, border: "none" }}
-                />
-              </section>
-            </div>
-
-            <section className="card" style={{ marginTop: "1.5rem" }}>
-              <h2>Padrões de Otimização por Categoria</h2>
-              <p className="muted">
-                Faixas do score composto que classificam um produto como Ouro, Prata ou Bronze (badge exibido no
-                RunDetail — nomes deliberadamente diferentes do nível Médio/Bom/Excelente escolhido antes de gerar,
-                já que os dois podem discordar). Cada categoria pode ter seu próprio limite; "Padrão" vale para
-                qualquer categoria sem limite específico.
-              </p>
-
-              {[DEFAULT_THRESHOLD_CATEGORY, ...thresholdCategories].map((category) => {
-                const input = thresholdInputs[category] ?? { excellentMin: "85", goodMin: "60" };
-                return (
-                  <div key={category} className="card" style={{ background: "var(--surface-2)", marginBottom: "1rem" }}>
-                    <div className="proposal-header">
-                      <h3 style={{ margin: 0 }}>
-                        {category === DEFAULT_THRESHOLD_CATEGORY ? "Padrão (todas as categorias)" : category}
-                      </h3>
-                    </div>
-                    <div className="form-grid">
-                      <div style={{ flex: "1 1 180px" }}>
-                        <label className="muted" style={{ display: "block", marginBottom: "0.3rem" }}>
-                          Limite Ouro (score ≥)
-                        </label>
-                        <input
-                          type="number"
-                          min={0}
-                          max={100}
-                          value={input.excellentMin}
-                          onChange={(e) =>
-                            setThresholdInputs((prev) => ({ ...prev, [category]: { ...input, excellentMin: e.target.value } }))
-                          }
-                        />
-                      </div>
-                      <div style={{ flex: "1 1 180px" }}>
-                        <label className="muted" style={{ display: "block", marginBottom: "0.3rem" }}>
-                          Limite Prata (score ≥)
-                        </label>
-                        <input
-                          type="number"
-                          min={0}
-                          max={100}
-                          value={input.goodMin}
-                          onChange={(e) =>
-                            setThresholdInputs((prev) => ({ ...prev, [category]: { ...input, goodMin: e.target.value } }))
-                          }
-                        />
-                      </div>
-                      <button type="button" onClick={() => handleSaveThreshold(category)} disabled={savingThreshold === category}>
-                        {savingThreshold === category ? "Salvando…" : "Salvar"}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </section>
-
             {platform === "vtex" && (
-              <section className="card" style={{ marginTop: "1.5rem" }}>
+              <section className="card">
                 <div className="proposal-header">
                   <h2 style={{ margin: 0 }}>Campos aceitos pela VTEX por categoria</h2>
                   <button type="button" className="secondary" onClick={handleSyncCategories} disabled={syncingCategories}>
@@ -535,21 +362,41 @@ export function PdpConfig() {
                   <div className="card" style={{ background: "var(--surface-2)" }}>
                     <h3 style={{ marginTop: 0 }}>Links de referência</h3>
                     <p className="muted" style={{ fontSize: "0.82rem" }}>
-                      Cole 1 a 5 anúncios de referência dessa categoria (seus ou de mercado) — extraímos só a
-                      estrutura, nunca o texto.
+                      Cole até {MAX_REFERENCE_LINKS} anúncios de referência dessa categoria (seus ou de mercado) —
+                      extraímos só a estrutura, nunca o texto. Todos os campos preenchidos são processados numa única
+                      requisição; um link com problema (fora do ar, bloqueado, etc.) não impede os outros de entrar.
                     </p>
-                    <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.75rem" }}>
-                      <input
-                        type="url"
-                        placeholder="https://..."
-                        value={newLinkUrl}
-                        onChange={(e) => setNewLinkUrl(e.target.value)}
-                        style={{ flex: 1 }}
-                      />
-                      <button type="button" onClick={handleAddReferenceLink} disabled={addingLink || !newLinkUrl.trim()}>
-                        {addingLink ? "Analisando…" : "Adicionar"}
-                      </button>
-                    </div>
+                    {referenceSlotsLeft > 0 && (
+                      <>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", marginBottom: "0.5rem" }}>
+                          {newLinkUrls.slice(0, referenceSlotsLeft).map((url, i) => (
+                            <input
+                              key={i}
+                              type="url"
+                              placeholder="https://..."
+                              value={url}
+                              onChange={(e) =>
+                                setNewLinkUrls((prev) => prev.map((u, idx) => (idx === i ? e.target.value : u)))
+                              }
+                            />
+                          ))}
+                        </div>
+                        <div className="actions" style={{ justifyContent: "flex-start", marginBottom: "0.75rem" }}>
+                          <button
+                            type="button"
+                            onClick={handleAddReferenceLinks}
+                            disabled={addingLink || newLinkUrls.every((u) => !u.trim())}
+                          >
+                            {addingLink ? "Analisando…" : "Adicionar"}
+                          </button>
+                        </div>
+                      </>
+                    )}
+                    {referenceSlotsLeft <= 0 && (
+                      <p className="muted" style={{ fontSize: "0.82rem" }}>
+                        Já tem {MAX_REFERENCE_LINKS} links de referência — remova um abaixo antes de adicionar outro.
+                      </p>
+                    )}
                     {referenceLinks.length === 0 && <p className="muted">Nenhum link de referência ainda.</p>}
                     <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
                       {referenceLinks.map((link) => (
@@ -673,6 +520,91 @@ export function PdpConfig() {
                 </div>
               </section>
             )}
+
+            <div className="actions" style={{ justifyContent: "flex-start", marginTop: "1.5rem", marginBottom: "1rem" }}>
+              {LEVEL_ORDER.map((level) => (
+                <button
+                  key={level}
+                  type="button"
+                  className={level === activeLevel ? "" : "secondary"}
+                  onClick={() => setActiveLevel(level)}
+                >
+                  {LEVEL_LABELS[level]}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: "1rem" }}>
+              <section className="card">
+                <div className="proposal-header">
+                  <h3 style={{ margin: 0 }}>{LEVEL_LABELS[activeLevel]}</h3>
+                  <button type="button" onClick={handleSave} disabled={saving === activeLevel}>
+                    {saving === activeLevel ? "Salvando…" : "Salvar"}
+                  </button>
+                </div>
+                <p className="muted" style={{ marginTop: 0, fontSize: "0.82rem" }}>{LEVEL_HINT[activeLevel]}</p>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", marginBottom: "0.75rem" }}>
+                  {blocks.map((block, i) => (
+                    <div
+                      key={block}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: "0.5rem",
+                        padding: "0.5rem 0.75rem",
+                        background: "var(--surface-2)",
+                        borderRadius: "var(--radius-sm)",
+                      }}
+                    >
+                      <span>
+                        <span className="muted" style={{ fontFamily: "monospace", marginRight: "0.5rem" }}>
+                          {i + 1}
+                        </span>
+                        {BLOCK_LABELS[block]}
+                      </span>
+                      <div style={{ display: "flex", gap: "0.3rem" }}>
+                        <button type="button" className="secondary" onClick={() => moveBlock(i, -1)} disabled={i === 0}>
+                          ↑
+                        </button>
+                        <button type="button" className="secondary" onClick={() => moveBlock(i, 1)} disabled={i === blocks.length - 1}>
+                          ↓
+                        </button>
+                        <button type="button" className="secondary" onClick={() => toggleBlock(block)}>
+                          Remover
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  {blocks.length === 0 && <p className="muted" style={{ margin: 0 }}>Nenhum bloco incluído ainda.</p>}
+                </div>
+
+                {available.length > 0 && (
+                  <div className="actions" style={{ justifyContent: "flex-start", flexWrap: "wrap" }}>
+                    {available.map((block) => (
+                      <button key={block} type="button" className="secondary" onClick={() => toggleBlock(block)}>
+                        + {BLOCK_LABELS[block]}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section className="card" style={{ padding: 0, overflow: "hidden" }}>
+                <div style={{ padding: "0.75rem 1rem", borderBottom: "1px solid var(--border)" }}>
+                  <h3 style={{ margin: 0 }}>Preview</h3>
+                  <p className="muted" style={{ margin: "0.2rem 0 0", fontSize: "0.78rem" }}>
+                    Conteúdo de exemplo — mostra só como os blocos ficariam montados.
+                  </p>
+                </div>
+                <iframe
+                  title="Preview da PDP"
+                  srcDoc={buildPreviewDoc(previewHtml, platform)}
+                  style={{ width: "100%", height: 520, border: "none" }}
+                />
+              </section>
+            </div>
           </>
         )}
       </div>

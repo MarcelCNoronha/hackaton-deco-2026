@@ -12,12 +12,17 @@ import {
   listReferenceLinks,
   recomputeReferenceProfile,
   removeReferenceLink,
+  MAX_REFERENCE_LINKS,
+  type CategoryReferenceLink,
 } from "../../repositories/category-reference-links.repo.js";
 import { extractReferenceStructure } from "../../agents/reference-structure.agent.js";
 import { requireSection } from "../../auth/guards.js";
 
 const categoryQuery = z.object({ category: z.string().min(1) });
-const referenceLinkBody = z.object({ category: z.string().min(1), url: z.string().url() });
+const referenceLinkBody = z.object({
+  category: z.string().min(1),
+  urls: z.array(z.string().url()).min(1).max(MAX_REFERENCE_LINKS),
+});
 const manualProfileBody = z.object({
   category: z.string().min(1),
   wordCountMin: z.number().int().positive().nullable(),
@@ -34,8 +39,11 @@ const manualProfileBody = z.object({
  *  POST /api/connections/vtex/sync-categories, not a route here.
  *
  *  Also owns the Fase 2 category content-profile / reference-link CRUD — extracting structure from
- *  a pasted URL happens synchronously in the POST handler below (one fetch + one LLM call, cheap
- *  enough not to need a queue job unlike the Fase 1 category-wide sync). */
+ *  up to MAX_REFERENCE_LINKS pasted URLs happens synchronously in the POST handler below, one
+ *  request for the whole batch (still cheap enough not to need a queue job unlike the Fase 1
+ *  category-wide sync). Each URL's fetch+extraction is isolated (Promise.allSettled) so one bad
+ *  link (unreachable site, blocked by the target's bot protection, etc.) never fails the others in
+ *  the same request. */
 export async function categoryProfilesRoutes(app: FastifyInstance) {
   app.addHook("preHandler", requireSection("connections"));
 
@@ -79,24 +87,48 @@ export async function categoryProfilesRoutes(app: FastifyInstance) {
     const body = referenceLinkBody.parse(req.body);
     const platform = await getCatalogPlatform();
 
-    let extracted: Awaited<ReturnType<typeof extractReferenceStructure>>;
-    try {
-      extracted = await extractReferenceStructure(body.url);
-    } catch (err) {
-      return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+    const existing = await listReferenceLinks(platform, body.category);
+    const slotsLeft = MAX_REFERENCE_LINKS - existing.length;
+    if (slotsLeft <= 0) {
+      return reply.status(400).send({
+        error: `Esta categoria já tem o máximo de ${MAX_REFERENCE_LINKS} links de referência — remova um antes de adicionar outro.`,
+      });
     }
 
-    const link = await addReferenceLink({
-      platform,
-      category: body.category,
-      url: body.url,
-      extractedSignals: extracted.signals,
-      warning: extracted.warning,
+    // Only the first slotsLeft URLs get processed — the frontend already caps the form at
+    // MAX_REFERENCE_LINKS total, this is the server-side backstop against a stale/tampered request.
+    const urlsToProcess = body.urls.slice(0, slotsLeft);
+    const results = await Promise.allSettled(
+      urlsToProcess.map(async (url): Promise<CategoryReferenceLink> => {
+        const extracted = await extractReferenceStructure(url);
+        return addReferenceLink({
+          platform,
+          category: body.category,
+          url,
+          extractedSignals: extracted.signals,
+          warning: extracted.warning,
+        });
+      }),
+    );
+
+    const links: CategoryReferenceLink[] = [];
+    const errors: Array<{ url: string; error: string }> = [];
+    results.forEach((result, i) => {
+      if (result.status === "fulfilled") {
+        links.push(result.value);
+      } else {
+        const reason = result.reason;
+        errors.push({ url: urlsToProcess[i], error: reason instanceof Error ? reason.message : String(reason) });
+      }
     });
-    await recomputeReferenceProfile(platform, body.category);
+
+    // Recompute once for the whole batch, not per link — same end state, one fifth the DB writes
+    // when all 3 succeed.
+    if (links.length > 0) await recomputeReferenceProfile(platform, body.category);
 
     return reply.send({
-      link,
+      links,
+      errors,
       profile: await getContentProfile(platform, body.category),
     });
   });

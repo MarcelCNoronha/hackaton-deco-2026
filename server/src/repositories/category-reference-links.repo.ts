@@ -59,6 +59,10 @@ export async function listReferenceLinks(platform: CatalogPlatform, category: st
   }));
 }
 
+/** Enforced in category-profiles.routes.ts before ever calling addReferenceLink — kept here too
+ *  since it's the number the consensus math below was actually tuned/labeled around. */
+export const MAX_REFERENCE_LINKS = 3;
+
 const CONSENSUS_THRESHOLD = 0.6;
 
 function median(values: number[]): number {
@@ -68,7 +72,7 @@ function median(values: number[]): number {
 }
 
 /** Consensus across every reference link pasted for a category — never inherits a single vendor's
- *  style (see the Fase 2 plan's "3 to 5 references, consensus not one-off" rule): a boolean signal
+ *  style (see the Fase 2 plan's "consensus, not one-off" rule, now capped at MAX_REFERENCE_LINKS): a boolean signal
  *  only counts as part of the pattern when ≥60% of references show it; numeric targets use the
  *  median. Called after every add/remove so category_content_profiles always reflects the current
  *  set of links, not a stale computation. */

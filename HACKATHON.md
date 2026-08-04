@@ -764,6 +764,39 @@ fabricante por produto em `Runs.tsx`.
 regressão, e as 4 migrations novas aplicadas com sucesso contra um Postgres+pgvector isolado
 (container descartável, não a base de produção).
 
+### Reorganização da Configuração de PDP + lote de 3 links de referência (2026-08-04, décima rodada)
+
+Pedido do usuário depois de usar a tela em produção pela primeira vez: reordenar as seções (campos
+aceitos pela VTEX e DNA de conteúdo primeiro, já que são o contexto que alimenta a geração; a
+estrutura de blocos/preview do PDP depois) e remover "Padrões de Otimização por Categoria" da
+página (o usuário não viu mais sentido em customizar os limites Ouro/Prata/Bronze por categoria).
+Removida só a seção/estado dessa tela (`PdpConfig.tsx`) — as rotas `/api/optimization-thresholds`,
+a tabela `category_score_thresholds` e `classifyScore` continuam existindo e sendo usados (badge de
+classificação no RunDetail), só não há mais UI própria pra editar os limites por categoria.
+
+**Bug real reportado pelo usuário no mesmo teste**: adicionar um link de referência voltava
+"Internal Server Error" sem detalhe. Causa raiz dupla:
+1. O front-end (`web/src/api/client.ts`'s `request()`) sempre lia `body.error` como a mensagem de
+   erro — funciona para os erros que as próprias rotas tratam (`reply.status(400).send({ error:
+   "mensagem real" })`), mas o handler padrão do Fastify para uma exceção não tratada manda
+   `{ statusCode: 500, error: "Internal Server Error", message: "<motivo real>" }` — `error` ali é
+   só a frase padrão do status HTTP, o motivo de verdade fica em `message`. Corrigido pra preferir
+   `body.message ?? body.error`, então qualquer 500 futuro (nesta rota ou qualquer outra) mostra o
+   motivo real em vez do texto genérico.
+2. Como consequência, não dá mais pra confirmar qual exceção não tratada causou aquele 500
+   específico (o log real ficou só no `docker logs` da VPS, não capturado aqui) — mas o motivo
+   também deixou de importar: a rota inteira foi reescrita para nunca mais deixar a falha de UM
+   link derrubar a requisição (ver abaixo).
+
+**Mudança de UX pedida junto**: em vez de adicionar um link por vez (um `POST` por URL, uma tela
+que trava se um link falhar no meio), agora até `MAX_REFERENCE_LINKS` (3, reduzido do "1 a 5"
+original) URLs são coladas de uma vez e processadas numa única requisição
+(`POST /api/category-reference-links` agora recebe `urls: string[]`, não mais `url: string`) — cada
+URL busca+extrai isolada via `Promise.allSettled`, então uma falha (site fora do ar, bloqueio de
+bot, etc.) aparece no array `errors` da resposta sem derrubar as outras nem gerar 500. O total de
+links por categoria é limitado a `MAX_REFERENCE_LINKS` no servidor (`category-reference-links.repo.ts`),
+não só no formulário. `docs/README.md`/`pipeline-flow.ts` atualizados de "1-5" para "até 3, em lote".
+
 ## Formação de equipes
 
 - 1 a 5 pessoas por equipe (pode ser solo)

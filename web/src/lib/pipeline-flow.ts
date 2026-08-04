@@ -22,9 +22,10 @@ export const PIPELINE_FLOW: FlowStage[] = [
         "consultado antes de gerar, pra nunca propor um atributo que a plataforma não tem onde salvar; re-sincronizável " +
         "a qualquer momento pelo botão 'Sincronizar categorias agora'.",
       "DNA de conteúdo por categoria (Configuração de PDP): alvo estrutural (faixa de palavras, nº de bullets, presença " +
-        "de FAQ/tabela de specs/garantia) — vem de um valor definido manualmente, ou do consenso entre 1-5 links de " +
-        "anúncios de referência colados pelo usuário (extrai só estrutura, nunca copia texto), ou, na ausência dos " +
-        "dois, calculado a partir dos próprios produtos já bem avaliados (Ouro/Prata) da categoria.",
+        "de FAQ/tabela de specs/garantia) — vem de um valor definido manualmente, ou do consenso entre até 3 links de " +
+        "anúncios de referência colados pelo usuário, processados numa única requisição (extrai só estrutura, nunca " +
+        "copia texto; um link com problema não impede os outros), ou, na ausência dos dois, calculado a partir dos " +
+        "próprios produtos já bem avaliados (Ouro/Prata) da categoria.",
     ],
   },
   {

@@ -17,7 +17,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new ApiError(body.error ?? `Request to ${path} failed with ${res.status}`, res.status);
+    // Routes that catch their own errors send `{ error: "<real reason>" }`. Fastify's own handler
+    // for an uncaught exception sends `{ error: "Internal Server Error", message: "<real reason>" }`
+    // instead — `error` there is just the generic HTTP reason phrase, not the actual cause, so
+    // `message` (when present) always wins.
+    throw new ApiError(body.message ?? body.error ?? `Request to ${path} failed with ${res.status}`, res.status);
   }
   if (res.status === 204) return undefined as T;
   return res.json();
@@ -190,6 +194,10 @@ export interface LevelCostEstimate {
 /** Every block that can be merged into the description HTML, in the order a merchant picks — see
  *  server/src/repositories/pdp-templates.repo.ts (single source of truth). */
 export const PDP_BLOCKS = ["description", "benefit_bullets", "technical_specs", "featured_image", "faq", "cta"] as const;
+
+/** Mirrors the server's MAX_REFERENCE_LINKS (category-reference-links.repo.ts) — kept as a literal
+ *  here too since the two projects don't share imports across the client/server boundary. */
+export const MAX_REFERENCE_LINKS = 3;
 export type PdpBlock = (typeof PDP_BLOCKS)[number];
 
 export interface PdpTemplate {
@@ -500,11 +508,13 @@ export const api = {
     request<{ profile: CategoryContentProfile | null }>("/category-content-profile", { method: "PUT", body: JSON.stringify(body) }),
   getCategoryReferenceLinks: (category: string) =>
     request<{ links: CategoryReferenceLink[] }>(`/category-reference-links?category=${encodeURIComponent(category)}`),
-  addCategoryReferenceLink: (body: { category: string; url: string }) =>
-    request<{ link: CategoryReferenceLink; profile: CategoryContentProfile | null }>("/category-reference-links", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
+  /** Up to MAX_REFERENCE_LINKS urls, one request for the whole batch — a url that fails to fetch/
+   *  extract shows up in `errors` without blocking the others in the same call. */
+  addCategoryReferenceLinks: (body: { category: string; urls: string[] }) =>
+    request<{ links: CategoryReferenceLink[]; errors: Array<{ url: string; error: string }>; profile: CategoryContentProfile | null }>(
+      "/category-reference-links",
+      { method: "POST", body: JSON.stringify(body) },
+    ),
   removeCategoryReferenceLink: (id: number, category: string) =>
     request<{ profile: CategoryContentProfile | null }>(
       `/category-reference-links/${id}?category=${encodeURIComponent(category)}`,
