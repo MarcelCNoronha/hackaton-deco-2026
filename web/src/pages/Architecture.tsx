@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ARCHITECTURE_DIAGRAM, ARCHITECTURE_NOTES } from "../lib/architecture-diagram";
 import { API_REFERENCE, type ApiOperationKind } from "../lib/api-reference";
+import { PIPELINE_FLOW, KNOWN_RISKS } from "../lib/pipeline-flow";
 
 const KIND_LABEL: Record<ApiOperationKind, string> = { read: "Leitura", write: "Escrita" };
 const KIND_COLOR: Record<ApiOperationKind, string> = { read: "var(--accent)", write: "var(--status-good)" };
@@ -74,6 +75,28 @@ export function Architecture() {
 
         <div className="page-header" style={{ marginTop: "0.5rem" }}>
           <div>
+            <h1 style={{ fontSize: "1.3rem" }}>Fluxo atual</h1>
+            <p className="muted">
+              O passo a passo ponta a ponta — ver <code>web/src/lib/pipeline-flow.ts</code>.
+            </p>
+          </div>
+        </div>
+
+        {PIPELINE_FLOW.map((stage) => (
+          <section className="card" key={stage.title}>
+            <h3 style={{ marginTop: 0 }}>{stage.title}</h3>
+            <ul style={{ margin: 0, paddingLeft: "1.2rem" }}>
+              {stage.steps.map((step, i) => (
+                <li key={i} style={{ marginBottom: "0.3rem" }}>
+                  {step}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
+
+        <div className="page-header" style={{ marginTop: "0.5rem" }}>
+          <div>
             <h1 style={{ fontSize: "1.3rem" }}>Referência de APIs</h1>
             <p className="muted">
               Toda operação externa que o pipeline realmente chama, campo a campo — ver{" "}
@@ -134,6 +157,25 @@ export function Architecture() {
                 </tbody>
               </table>
             </div>
+          </section>
+        ))}
+
+        <div className="page-header" style={{ marginTop: "0.5rem" }}>
+          <div>
+            <h1 style={{ fontSize: "1.3rem" }}>Riscos conhecidos</h1>
+            <p className="muted">
+              O que precisa ser validado/endurecido antes da submissão — priorizado sobre escopo novo. Ver{" "}
+              <code>web/src/lib/pipeline-flow.ts</code>.
+            </p>
+          </div>
+        </div>
+
+        {KNOWN_RISKS.map((risk) => (
+          <section className="card" key={risk.title} style={{ borderLeft: "3px solid var(--status-warning)" }}>
+            <h3 style={{ marginTop: 0 }}>⚠ {risk.title}</h3>
+            <p className="muted" style={{ margin: 0 }}>
+              {risk.body}
+            </p>
           </section>
         ))}
       </div>
