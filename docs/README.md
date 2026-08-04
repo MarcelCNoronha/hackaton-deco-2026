@@ -23,7 +23,9 @@ código morto tentou evitar). No app, tudo isso fica atrás da permissão de Int
    já aprovado (RAG); Image Alt-Text roda separado; geração de imagem por IA (se marcada) passa
    por um gate de integridade (até 2 tentativas, nunca aprova produto "parecido").
 4. **Revisão humana** (RunDetail) — aprovar/editar/rejeitar cada proposta; score antes→depois,
-   badge de nível, banner de Impacto Estimado, aviso de integridade nas fotos geradas.
+   badge de classificação (Ouro/Prata/Bronze — vocabulário deliberadamente diferente do nível
+   Médio/Bom/Excelente escolhido antes de gerar), banner de Impacto Estimado, aviso de
+   integridade nas fotos geradas.
 5. **Publicar** — o Publisher busca o template de PDP certo (plataforma+categoria+nível) e monta
    a descrição final na ordem configurada (texto corrido no Médio, HTML real no Bom/Excelente);
    SEO title/meta, tags (Shopify), dados estruturados/keywords (Shopify Metafields), atributos

@@ -97,7 +97,12 @@ export interface ModelRoutingRow {
   model: string;
 }
 
-export type ScoreTier = "excelente" | "bom" | "medio";
+/** Deliberately NOT excelente/bom/medio — those already name the GENERATION level chosen before a
+ *  run (DescriptionRichness, controls HTML structure). This is a different axis computed AFTER
+ *  generation from the composite score, and the two can disagree (a "Médio"-level plain-text
+ *  product can still score "Ouro" on SEO/conversion/completude) — sharing the same 3 words would
+ *  read as a contradiction in the UI instead of two independent signals. */
+export type ScoreTier = "ouro" | "prata" | "bronze";
 
 export interface CategoryScoreThreshold {
   category: string;
@@ -111,10 +116,10 @@ export const DEFAULT_THRESHOLD_CATEGORY = "*";
 export function classifyScore(thresholds: CategoryScoreThreshold[], category: string | null, overallScore: number): ScoreTier {
   const byCategory = new Map(thresholds.map((t) => [t.category, t]));
   const threshold = (category ? byCategory.get(category) : undefined) ?? byCategory.get(DEFAULT_THRESHOLD_CATEGORY);
-  if (!threshold) return "medio";
-  if (overallScore >= threshold.excellentMin) return "excelente";
-  if (overallScore >= threshold.goodMin) return "bom";
-  return "medio";
+  if (!threshold) return "bronze";
+  if (overallScore >= threshold.excellentMin) return "ouro";
+  if (overallScore >= threshold.goodMin) return "prata";
+  return "bronze";
 }
 
 export interface EnrichmentRun {

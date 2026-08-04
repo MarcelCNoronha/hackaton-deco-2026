@@ -22,9 +22,15 @@ interface VtexImage {
 /** Below this score, or without at least this much improvement over the original, the draft
  *  is considered not good enough to hand to a human — the agent retries with specific feedback
  *  instead of forwarding mediocre content. Tuned to be reachable in 1-2 attempts for genuinely
- *  poor originals, not a bar that always burns all 3 attempts. */
+ *  poor originals, not a bar that always burns all 3 attempts.
+ *
+ *  MIN_IMPROVEMENT is checked as `original + MIN_IMPROVEMENT`, which exceeds 100 (impossible to
+ *  reach) once the original already scores above 80 — without NEAR_PERFECT_SCORE as an escape
+ *  hatch, every product with genuinely good existing content would silently burn all
+ *  MAX_ATTEMPTS every single run, tripling its LLM cost for no reason. */
 const QUALITY_THRESHOLD = 75;
 const MIN_IMPROVEMENT = 20;
+const NEAR_PERFECT_SCORE = 95;
 const MAX_ATTEMPTS = 3;
 
 /** The LLM is instructed not to invent price/offers/name/brand/sku, but nothing stops it from
@@ -253,6 +259,11 @@ export async function proposeContentEnrichment(params: {
     attributes: product.attributes,
   });
 
+  // Deliberate: the donor/reuse branch below computes a score but never checks it against
+  // QUALITY_THRESHOLD/MIN_IMPROVEMENT — accepted unconditionally, one call instead of up to
+  // MAX_ATTEMPTS. The whole point of this path is the cost saving from NOT retrying; adding the
+  // same gate here would defeat that, and the donor was itself already a human-approved product,
+  // so its adaptation starts from a much stronger baseline than a from-scratch draft.
   const donor = params.embedding ? await findReuseDonor(product.id, params.embedding) : null;
 
   if (donor) {
@@ -337,7 +348,8 @@ export async function proposeContentEnrichment(params: {
     }
 
     const clearsBar =
-      score.overallScore >= QUALITY_THRESHOLD && score.overallScore - originalScore.overallScore >= MIN_IMPROVEMENT;
+      score.overallScore >= QUALITY_THRESHOLD &&
+      (score.overallScore - originalScore.overallScore >= MIN_IMPROVEMENT || score.overallScore >= NEAR_PERFECT_SCORE);
     if (clearsBar) break;
 
     feedback = { buyerUnanswered: score.buyerUnanswered, unsupportedClaims: score.unsupportedClaims };

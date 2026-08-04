@@ -520,9 +520,10 @@ export function Connections() {
         <section className="card">
           <h2>Padrões de Otimização por Categoria</h2>
           <p className="muted">
-            Faixas do score composto que classificam um produto como Excelente, Bom ou Médio (badge exibido no
-            RunDetail). Cada categoria pode ter seu próprio limite; "Padrão" vale para qualquer categoria sem
-            limite específico.
+            Faixas do score composto que classificam um produto como Ouro, Prata ou Bronze (badge exibido no
+            RunDetail — nomes deliberadamente diferentes do nível Médio/Bom/Excelente escolhido antes de gerar,
+            já que os dois podem discordar). Cada categoria pode ter seu próprio limite; "Padrão" vale para
+            qualquer categoria sem limite específico.
           </p>
 
           {[DEFAULT_THRESHOLD_CATEGORY, ...thresholdCategories].map((category) => {
@@ -537,7 +538,7 @@ export function Connections() {
                 <div className="form-grid">
                   <div style={{ flex: "1 1 180px" }}>
                     <label className="muted" style={{ display: "block", marginBottom: "0.3rem" }}>
-                      Limite Excelente (score ≥)
+                      Limite Ouro (score ≥)
                     </label>
                     <input
                       type="number"
@@ -551,7 +552,7 @@ export function Connections() {
                   </div>
                   <div style={{ flex: "1 1 180px" }}>
                     <label className="muted" style={{ display: "block", marginBottom: "0.3rem" }}>
-                      Limite Bom (score ≥)
+                      Limite Prata (score ≥)
                     </label>
                     <input
                       type="number"

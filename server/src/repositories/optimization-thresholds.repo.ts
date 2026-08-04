@@ -12,7 +12,12 @@ export interface CategoryScoreThreshold {
 
 const DEFAULT_THRESHOLD: CategoryScoreThreshold = { category: DEFAULT_CATEGORY, excellentMin: 85, goodMin: 60 };
 
-export type ScoreTier = "excelente" | "bom" | "medio";
+/** Deliberately NOT named excelente/bom/medio — those already mean the GENERATION level chosen
+ *  before a run (DescriptionRichness, controls HTML structure). This is a DIFFERENT axis computed
+ *  AFTER generation from the composite score, and the two can disagree (a "Médio"-level plain-text
+ *  product can still score "Ouro" on SEO/conversion/completude, and vice versa) — sharing the same
+ *  3 words would read as a contradiction in the UI instead of two independent signals. */
+export type ScoreTier = "ouro" | "prata" | "bronze";
 
 /** Every configured threshold, always including a `'*'` row (the built-in default when none was
  *  ever saved for it) — mirrors model-routing.repo.ts's DEFAULT_ROUTING fallback pattern. */
@@ -32,14 +37,14 @@ export async function setThreshold(category: string, values: { excellentMin: num
     });
 }
 
-/** Classifies one product's composite `overallScore` into Excelente/Bom/Médio using its
- *  category's threshold, falling back to the catalog-wide `'*'` default when the category has no
- *  override (or the product has no category at all). */
+/** Classifies one product's composite `overallScore` into Ouro/Prata/Bronze using its category's
+ *  threshold, falling back to the catalog-wide `'*'` default when the category has no override (or
+ *  the product has no category at all). */
 export async function classifyScore(category: string | null, overallScore: number): Promise<ScoreTier> {
   const rows = await getThresholds();
   const byCategory = new Map(rows.map((r) => [r.category, r]));
   const threshold = (category ? byCategory.get(category) : undefined) ?? byCategory.get(DEFAULT_CATEGORY) ?? DEFAULT_THRESHOLD;
-  if (overallScore >= threshold.excellentMin) return "excelente";
-  if (overallScore >= threshold.goodMin) return "bom";
-  return "medio";
+  if (overallScore >= threshold.excellentMin) return "ouro";
+  if (overallScore >= threshold.goodMin) return "prata";
+  return "bronze";
 }

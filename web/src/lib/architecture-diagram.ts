@@ -25,7 +25,7 @@ export const ARCHITECTURE_DIAGRAM = `flowchart TB
   subgraph saida["Publicação e medição"]
     tpl["Configuração de PDP — blocos e ordem por plataforma/nível"]
     pub["Publisher — monta o HTML final a partir do template"]
-    thr["Classificação por categoria — Excelente / Bom / Médio"]
+    thr["Classificação por categoria — Ouro / Prata / Bronze"]
     imp["Impacto Estimado — SEO, GEO, conversão, completude, tempo economizado"]
   end
 
@@ -73,7 +73,7 @@ export const ARCHITECTURE_NOTES: Array<{ title: string; body: string }> = [
   {
     title: "Evaluator → Classificação + Impacto",
     body:
-      "O mesmo score composto alimenta tanto o badge Excelente/Bom/Médio (limites configuráveis por " +
+      "O mesmo score composto alimenta tanto o badge Ouro/Prata/Bronze (limites configuráveis por " +
       "categoria) quanto o banner de Impacto Estimado (deltas antes/depois agregados por run ou pra conta " +
       "toda).",
   },

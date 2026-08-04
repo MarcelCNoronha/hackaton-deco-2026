@@ -14,7 +14,8 @@ export const PIPELINE_FLOW: FlowStage[] = [
     steps: [
       "Conecta VTEX ou Shopify (só uma plataforma ativa por vez), Google (GSC+GA4), e um ou mais provedores de IA (Claude/OpenAI/Gemini).",
       "Roteamento de modelos: escolhe qual provedor/modelo roda cada tarefa (Enriquecimento, Alt-text, Evaluator).",
-      "Padrões de Otimização: limites de score que classificam um produto como Excelente/Bom/Médio, por categoria.",
+      "Padrões de Otimização: limites de score que classificam um produto como Ouro/Prata/Bronze, por categoria " +
+        "(vocabulário deliberadamente diferente do nível Médio/Bom/Excelente escolhido antes de gerar — os dois podem discordar).",
       "Configuração de PDP: quais blocos (bullets, specs, FAQ, CTA, foto de destaque) entram na descrição e em que ordem, por nível.",
     ],
   },
@@ -43,7 +44,7 @@ export const PIPELINE_FLOW: FlowStage[] = [
     title: "4. Revisão humana (RunDetail)",
     steps: [
       "Cada campo gerado é uma proposta separada (aprovar/editar/rejeitar).",
-      "Score antes→depois nos 8 sub-scores + score geral, badge de nível, banner de Impacto Estimado, fotos geradas (com aviso se a integridade não foi confirmada).",
+      "Score antes→depois nos 8 sub-scores + score geral, badge de classificação (Ouro/Prata/Bronze), banner de Impacto Estimado, fotos geradas (com aviso se a integridade não foi confirmada).",
     ],
   },
   {

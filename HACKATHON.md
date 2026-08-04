@@ -549,6 +549,34 @@ Ajustes de UX pedidos pelo usuário depois de revisar a navegação:
   exemplo genérico — inspirado no mockup do porcelanato, mas dinâmico em vez de estático. Nova
   rota `POST /api/pdp-templates/preview`.
 
+### Revisão de lógica de negócio (2026-08-05, continuação)
+
+Pedido do usuário: "analise toda a lógica que estamos desenvolvendo" — indo além de bugs de
+código pra questionar se as regras de negócio fazem sentido. 3 achados corrigidos:
+
+- **Conflito de nomenclatura resolvido**: a classificação por score (badge no RunDetail, limites
+  em Connections.tsx) deixou de se chamar Excelente/Bom/Médio e passou a ser **Ouro/Prata/Bronze**
+  (`ScoreTier` em `optimization-thresholds.repo.ts` e `web/src/api/client.ts`). Motivo: esse
+  vocabulário já era usado pro **nível de geração** (`DescriptionRichness`, escolhido antes de
+  rodar, controla estrutura HTML) — e os dois podiam discordar (um produto gerado no nível Médio,
+  texto corrido, podia classificar como "Excelente" pelo score se SEO/conversão/completude
+  fossem altos por outros motivos). Zero sobreposição de palavras agora entre os dois conceitos.
+- **Gate de qualidade corrigido pra não ser matematicamente impossível**: a regra exigia `score ≥
+  75 E score - original ≥ 20` — para qualquer produto cujo conteúdo original já pontuasse acima
+  de 80, a exigência de melhoria passava de 100 (inatingível), fazendo o loop **sempre** esgotar
+  as 3 tentativas (triplicando o custo de IA) mesmo quando a 1ª tentativa já era ótima. Corrigido
+  com uma válvula de escape: um score final ≥ 95 (`NEAR_PERFECT_SCORE`) passa mesmo sem bater a
+  melhoria completa de +20 (`content-enrichment.agent.ts`).
+- **Caminho de reaproveitamento (RAG) continua pulando o gate de qualidade — decisão consciente,
+  agora documentada em código**: o ganho de custo do RAG depende de não repetir tentativas, e o
+  produto "doador" já passou por aprovação humana antes, então parte de uma base mais forte que
+  uma geração do zero.
+- Achado, mas deixado como limitação documentada (não corrigido): "Completude do catálogo" usa
+  como denominador a união de chaves entre atributos originais e o que a própria IA propôs
+  (`attributesPatch`) — não é um alvo fixo por categoria, então o mesmo agente medido também
+  define o que está sendo medido. Sem correção fácil sem um catálogo de atributos esperados por
+  categoria (feature maior, fora do escopo do prazo restante).
+
 ## Formação de equipes
 
 - 1 a 5 pessoas por equipe (pode ser solo)

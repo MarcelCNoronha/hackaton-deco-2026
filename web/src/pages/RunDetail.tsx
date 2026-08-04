@@ -139,10 +139,13 @@ const PLATFORM_LABELS: Record<CatalogPlatform, string> = {
   shopify: "Shopify",
 };
 
-const TIER_LABELS: Record<"excelente" | "bom" | "medio", string> = {
-  excelente: "Excelente",
-  bom: "Bom",
-  medio: "Médio",
+// Named Ouro/Prata/Bronze, not Excelente/Bom/Médio — that vocabulary is already used for the
+// GENERATION level (chosen before the run, controls HTML structure) and the two can disagree, so
+// sharing words here would read as a contradiction instead of two independent signals.
+const TIER_LABELS: Record<"ouro" | "prata" | "bronze", string> = {
+  ouro: "Ouro",
+  prata: "Prata",
+  bronze: "Bronze",
 };
 
 function percent(numerator: number, denominator: number): number {
@@ -394,7 +397,7 @@ export function RunDetail() {
                     <h3 style={{ margin: 0 }}>Score de qualidade de conteúdo (antes → depois)</h3>
                     <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
                       <span className="pill">
-                        Nível: {TIER_LABELS[classifyScore(thresholds, currentProduct?.category ?? null, proposed.overallScore)]}
+                        Classificação: {TIER_LABELS[classifyScore(thresholds, currentProduct?.category ?? null, proposed.overallScore)]}
                       </span>
                       {proposed.attempts > 1 && (
                         <span className="pill">
