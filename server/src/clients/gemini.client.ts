@@ -97,6 +97,48 @@ function isTransientContentError(message: string): boolean {
   return message.includes("returned invalid JSON") || message.includes("did not return output_text");
 }
 
+/** Gemini's `response_format: {mime_type: "application/json"}` is a strong hint, not a hard
+ *  guarantee — for long free-text fields (a full product description, a 6-10 item FAQ) it
+ *  occasionally emits a literal newline/tab/carriage-return INSIDE a JSON string value instead of
+ *  the escaped \n/\t/\r sequence. That's invalid per the JSON spec (control characters U+0000-
+ *  U+001F must be escaped inside a string) and breaks `JSON.parse` even though the content itself
+ *  is otherwise perfectly good — confirmed live: real production failures had well-formed,
+ *  correctly-accented Portuguese text right up to the parse error, with substantial output-token
+ *  counts (nowhere near maxOutputTokens), ruling out truncation as the cause. Only touches bytes
+ *  that are ALREADY invalid raw JSON inside a string literal, so this can never change what valid
+ *  JSON would have parsed to — it only repairs exactly the class of break this causes. */
+function repairUnescapedControlChars(text: string): string {
+  let result = "";
+  let inString = false;
+  let escaped = false;
+  for (const char of text) {
+    if (!inString) {
+      result += char;
+      if (char === '"') inString = true;
+      continue;
+    }
+    if (escaped) {
+      result += char;
+      escaped = false;
+    } else if (char === "\\") {
+      result += char;
+      escaped = true;
+    } else if (char === '"') {
+      result += char;
+      inString = false;
+    } else if (char === "\n") {
+      result += "\\n";
+    } else if (char === "\r") {
+      result += "\\r";
+    } else if (char === "\t") {
+      result += "\\t";
+    } else {
+      result += char;
+    }
+  }
+  return result;
+}
+
 interface GeminiInteraction {
   output_text?: string;
   output_image?: { data?: string; mime_type?: string; uri?: string };
@@ -218,10 +260,19 @@ export class GeminiClient implements LlmClient {
         }
         try {
           return JSON.parse(interaction.output_text) as T;
-        } catch {
-          throw new Error(
-            `Gemini returned invalid JSON for ${params.operation}: ${interaction.output_text.slice(0, 200)}`,
-          );
+        } catch (firstErr) {
+          try {
+            return JSON.parse(repairUnescapedControlChars(interaction.output_text)) as T;
+          } catch {
+            // Real JSON.parse reason (e.g. "Bad control character in string literal at position
+            // 412") was previously discarded in favor of a generic message — kept here, plus a
+            // longer preview, since this is exactly the diagnostic that was missing when this
+            // class of failure was last investigated live in production.
+            const reason = firstErr instanceof Error ? firstErr.message : String(firstErr);
+            throw new Error(
+              `Gemini returned invalid JSON for ${params.operation} (${reason}): ${interaction.output_text.slice(0, 1000)}`,
+            );
+          }
         }
       },
     });
