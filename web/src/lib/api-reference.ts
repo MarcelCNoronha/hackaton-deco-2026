@@ -134,7 +134,7 @@ export const API_REFERENCE: ApiSystem[] = [
       {
         name: "testConnection",
         method: "GET",
-        endpoint: "/pvt/category/1",
+        endpoint: "/api/catalog_system/pvt/brand/list",
         kind: "read",
         fields: "—",
         purpose: "Valida a credencial VTEX salva no painel de Integrações.",

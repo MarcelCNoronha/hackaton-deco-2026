@@ -1,4 +1,4 @@
-import { requestWithRetry, type RequestLogEntry } from "./http.js";
+import { requestWithRetry, NonRetryableHttpError, type RequestLogEntry } from "./http.js";
 import type {
   CatalogClient,
   CatalogFilterOptions,
@@ -384,19 +384,30 @@ export class VtexClient implements CatalogClient {
     });
   }
 
-  async testConnection(): Promise<boolean> {
+  /** `catalog_system/pvt/brand/list` (unlike `catalog/pvt/category/1`) doesn't depend on any
+   *  specific ID existing in the account's catalog — it 200s with an array (empty or not) for any
+   *  valid credential pair, so it can't false-negative just because the store never had a category
+   *  numbered 1. Private `brand/list` lives under `catalog_system`, not `catalog` (that's a 404). */
+  async testConnection(): Promise<{ ok: boolean; error?: string }> {
     try {
-      const res = await requestWithRetry({
+      await requestWithRetry({
         provider: "vtex",
         operation: "testConnection",
-        url: `${this.baseUrl}/pvt/category/1`,
+        url: `https://${this.host}/api/catalog_system/pvt/brand/list`,
         init: { method: "GET", headers: this.headers() },
         retry: { maxAttempts: 1 },
         onAttempt: this.onAttempt,
       });
-      return res.ok;
-    } catch {
-      return false;
+      return { ok: true };
+    } catch (err) {
+      if (err instanceof NonRetryableHttpError) {
+        const reason =
+          err.statusCode === 401 || err.statusCode === 403
+            ? "AppKey/AppToken inválidos ou sem permissão para o recurso Catálogo."
+            : `HTTP ${err.statusCode}`;
+        return { ok: false, error: reason };
+      }
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 }

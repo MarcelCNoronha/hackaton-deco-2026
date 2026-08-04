@@ -54,7 +54,7 @@ export interface CatalogListResult {
  *  reader, publisher, catalog browsing routes) work without knowing which platform is active. */
 export interface CatalogClient {
   readonly platform: CatalogPlatform;
-  testConnection(): Promise<boolean>;
+  testConnection(): Promise<{ ok: boolean; error?: string }>;
   listFilterOptions(): Promise<CatalogFilterOptions>;
   listProducts(params: CatalogListParams): Promise<CatalogListResult>;
   getProduct(externalId: string): Promise<CatalogProductDetail>;

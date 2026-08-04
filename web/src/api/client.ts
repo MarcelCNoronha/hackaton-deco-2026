@@ -396,9 +396,9 @@ export const api = {
       provider ? `/models?provider=${provider}` : "/models",
     ),
   connectVtex: (body: { displayName: string; account: string; environment: string; appKey: string; appToken: string }) =>
-    request<{ ok: boolean }>("/connections/vtex", { method: "POST", body: JSON.stringify(body) }),
+    request<{ ok: boolean; error?: string }>("/connections/vtex", { method: "POST", body: JSON.stringify(body) }),
   connectShopify: (body: { displayName: string; shopDomain: string; accessToken: string }) =>
-    request<{ ok: boolean }>("/connections/shopify", { method: "POST", body: JSON.stringify(body) }),
+    request<{ ok: boolean; error?: string }>("/connections/shopify", { method: "POST", body: JSON.stringify(body) }),
   connectAnthropic: (body: { displayName: string; apiKey: string }) =>
     request<{ ok: boolean; error?: string }>("/connections/anthropic", { method: "POST", body: JSON.stringify(body) }),
   connectOpenAi: (body: { displayName: string; apiKey: string }) =>

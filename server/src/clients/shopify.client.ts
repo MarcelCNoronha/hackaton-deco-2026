@@ -93,12 +93,12 @@ export class ShopifyClient implements CatalogClient {
     return body.data as T;
   }
 
-  async testConnection(): Promise<boolean> {
+  async testConnection(): Promise<{ ok: boolean; error?: string }> {
     try {
       await this.graphql("testConnection", `query { shop { name } }`);
-      return true;
-    } catch {
-      return false;
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 

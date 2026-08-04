@@ -161,15 +161,15 @@ export function Connections() {
 
   async function handleVtexSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const { ok } = await api.connectVtex(vtex);
-    setMessage(ok ? "VTEX conectado com sucesso." : "Falha ao conectar com a VTEX — confira as credenciais.");
+    const { ok, error } = await api.connectVtex(vtex);
+    setMessage(ok ? "VTEX conectado com sucesso." : `Falha ao conectar com a VTEX${error ? `: ${error}` : " — confira as credenciais."}`);
     refresh();
   }
 
   async function handleShopifySubmit(e: React.FormEvent) {
     e.preventDefault();
-    const { ok } = await api.connectShopify(shopify);
-    setMessage(ok ? "Shopify conectado com sucesso." : "Falha ao conectar com a Shopify — confira o domínio/token.");
+    const { ok, error } = await api.connectShopify(shopify);
+    setMessage(ok ? "Shopify conectado com sucesso." : `Falha ao conectar com a Shopify${error ? `: ${error}` : " — confira o domínio/token."}`);
     refresh();
   }
 

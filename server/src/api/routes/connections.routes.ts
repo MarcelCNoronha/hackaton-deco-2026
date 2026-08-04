@@ -23,6 +23,7 @@ import { Ga4Client } from "../../clients/ga4.client.js";
 import { buildGoogleAuthUrl, exchangeGoogleAuthCode } from "../../clients/google-auth.js";
 import { RECOMMENDATIONS, resolveModel } from "../../clients/model-recommendations.js";
 import { requireSection } from "../../auth/guards.js";
+import { makeRequestLogger } from "../../repositories/logs.repo.js";
 
 // Both fields end up interpolated straight into a request URL (see vtex.client.ts's constructor)
 // alongside the account's AppKey/AppToken — an unvalidated value like "evil.com/" would send those
@@ -78,9 +79,9 @@ export async function connectionsRoutes(app: FastifyInstance) {
     const { displayName, ...credentials } = body;
     await upsertConnection("vtex", displayName, credentials);
 
-    const ok = await new VtexClient(credentials).testConnection();
+    const { ok, error } = await new VtexClient(credentials, makeRequestLogger()).testConnection();
     await setConnectionStatus("vtex", ok ? "connected" : "error");
-    return reply.send({ ok });
+    return reply.send({ ok, error });
   });
 
   app.post("/api/connections/shopify", async (req, reply) => {
@@ -88,9 +89,9 @@ export async function connectionsRoutes(app: FastifyInstance) {
     const { displayName, ...credentials } = body;
     await upsertConnection("shopify", displayName, credentials);
 
-    const ok = await new ShopifyClient(credentials).testConnection();
+    const { ok, error } = await new ShopifyClient(credentials, makeRequestLogger()).testConnection();
     await setConnectionStatus("shopify", ok ? "connected" : "error");
-    return reply.send({ ok });
+    return reply.send({ ok, error });
   });
 
   app.get<{ Querystring: { provider?: string } }>("/api/models", async (req) => {
@@ -154,11 +155,11 @@ export async function connectionsRoutes(app: FastifyInstance) {
       if (provider === "vtex") {
         const credentials = await getConnectionCredentials<"vtex">("vtex");
         if (!credentials) return reply.status(404).send({ error: "Connection not configured" });
-        ok = await new VtexClient(credentials as VtexCredentials).testConnection();
+        ({ ok, error } = await new VtexClient(credentials as VtexCredentials, makeRequestLogger()).testConnection());
       } else if (provider === "shopify") {
         const credentials = await getConnectionCredentials<"shopify">("shopify");
         if (!credentials) return reply.status(404).send({ error: "Connection not configured" });
-        ok = await new ShopifyClient(credentials as ShopifyCredentials).testConnection();
+        ({ ok, error } = await new ShopifyClient(credentials as ShopifyCredentials, makeRequestLogger()).testConnection());
       } else if (provider === "anthropic" || provider === "openai" || provider === "gemini") {
         const credentials = await getConnectionCredentials<"anthropic" | "openai" | "gemini">(provider);
         if (!credentials) return reply.status(404).send({ error: "Connection not configured" });
