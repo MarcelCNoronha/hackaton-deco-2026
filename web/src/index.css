@@ -950,7 +950,8 @@ tbody tr:last-child td {
   margin-top: 0.75rem;
 }
 
-.auth-form input {
+.auth-form input,
+.auth-form .password-input-wrap {
   width: 100%;
   flex: none;
 }
