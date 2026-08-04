@@ -49,12 +49,13 @@ const SAMPLE_DATA = {
 export async function pdpTemplatesRoutes(app: FastifyInstance) {
   app.addHook("preHandler", requireSection("connections"));
 
-  /** Templates for the currently active platform — the "Estrutura da PDP" section in
-   *  Connections.tsx only ever edits the active platform's structure, since only one platform runs
-   *  the pipeline at a time (see catalog_settings). */
-  app.get("/api/pdp-templates", async () => {
+  /** Templates for the currently active platform, resolved for one category at a time (query param,
+   *  defaults to the catalog-wide `'*'`) — see PdpConfig.tsx's single category selector, shared with
+   *  the VTEX-fields/content-DNA sections above it on that page. */
+  app.get<{ Querystring: { category?: string } }>("/api/pdp-templates", async (req) => {
     const platform = await getCatalogPlatform();
-    return { platform, templates: await getPdpTemplates(platform) };
+    const category = req.query.category?.trim() || DEFAULT_PDP_CATEGORY;
+    return { platform, category, templates: await getPdpTemplates(platform, category) };
   });
 
   /** Renders a live preview with placeholder content — using the EXACT same renderPdpHtml as the
@@ -73,7 +74,8 @@ export async function pdpTemplatesRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: "O bloco 'description' é obrigatório em qualquer estrutura de PDP." });
     }
     const platform = await getCatalogPlatform();
-    await setPdpTemplate({ platform, category: body.category ?? DEFAULT_PDP_CATEGORY, level: body.level, blocks: body.blocks });
-    return { platform, templates: await getPdpTemplates(platform) };
+    const category = body.category ?? DEFAULT_PDP_CATEGORY;
+    await setPdpTemplate({ platform, category, level: body.level, blocks: body.blocks });
+    return { platform, category, templates: await getPdpTemplates(platform, category) };
   });
 }

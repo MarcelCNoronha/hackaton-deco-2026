@@ -123,8 +123,17 @@ export async function categoryProfilesRoutes(app: FastifyInstance) {
     });
 
     // Recompute once for the whole batch, not per link — same end state, one fifth the DB writes
-    // when all 3 succeed.
-    if (links.length > 0) await recomputeReferenceProfile(platform, body.category);
+    // when all 3 succeed. Guarded on its own: the links above are already safely persisted, so a
+    // recompute failure (unexpected — signals are sanitized before ever reaching here, see
+    // reference-structure.agent.ts) should never turn an otherwise-successful add into a 500 that
+    // hides the fact the links actually saved.
+    if (links.length > 0) {
+      try {
+        await recomputeReferenceProfile(platform, body.category);
+      } catch (err) {
+        errors.push({ url: "(recalcular perfil)", error: err instanceof Error ? err.message : String(err) });
+      }
+    }
 
     return reply.send({
       links,

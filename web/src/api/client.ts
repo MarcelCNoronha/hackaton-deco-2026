@@ -200,11 +200,19 @@ export const PDP_BLOCKS = ["description", "benefit_bullets", "technical_specs", 
 export const MAX_REFERENCE_LINKS = 3;
 export type PdpBlock = (typeof PDP_BLOCKS)[number];
 
+/** Mirrors the server's `'*'` catalog-wide default category (pdp-templates.repo.ts's
+ *  DEFAULT_PDP_CATEGORY) — kept as its own constant (even though it's the same literal as
+ *  DEFAULT_THRESHOLD_CATEGORY) since the two are conceptually unrelated defaults. */
+export const DEFAULT_PDP_CATEGORY = "*";
+
 export interface PdpTemplate {
   platform: CatalogPlatform;
   category: string;
   level: DescriptionRichness;
   blocks: PdpBlock[];
+  /** "specific" — this category has its own saved structure for this level. "default" — inherited
+   *  from the catalog-wide `'*'` template (or the factory default if that isn't set either). */
+  source: "specific" | "default";
 }
 
 /** One node of the catalog platform's category tree — `isLeaf` is where products actually get
@@ -491,9 +499,15 @@ export const api = {
   setOptimizationThreshold: (threshold: CategoryScoreThreshold) =>
     request<{ ok: boolean }>("/optimization-thresholds", { method: "PUT", body: JSON.stringify(threshold) }),
 
-  getPdpTemplates: () => request<{ platform: CatalogPlatform; templates: PdpTemplate[] }>("/pdp-templates"),
-  setPdpTemplate: (body: { level: DescriptionRichness; blocks: PdpBlock[] }) =>
-    request<{ platform: CatalogPlatform; templates: PdpTemplate[] }>("/pdp-templates", { method: "PUT", body: JSON.stringify(body) }),
+  getPdpTemplates: (category?: string) =>
+    request<{ platform: CatalogPlatform; category: string; templates: PdpTemplate[] }>(
+      `/pdp-templates${category ? `?category=${encodeURIComponent(category)}` : ""}`,
+    ),
+  setPdpTemplate: (body: { level: DescriptionRichness; blocks: PdpBlock[]; category?: string }) =>
+    request<{ platform: CatalogPlatform; category: string; templates: PdpTemplate[] }>("/pdp-templates", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
   previewPdpTemplate: (body: { level: DescriptionRichness; blocks: PdpBlock[] }) =>
     request<{ html: string }>("/pdp-templates/preview", { method: "POST", body: JSON.stringify(body) }),
 

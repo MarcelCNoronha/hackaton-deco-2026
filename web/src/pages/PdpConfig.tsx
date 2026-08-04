@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   api,
+  DEFAULT_PDP_CATEGORY,
   MAX_REFERENCE_LINKS,
   PDP_BLOCKS,
   type CatalogPlatform,
@@ -10,6 +11,7 @@ import {
   type CategoryTreeNode,
   type DescriptionRichness,
   type PdpBlock,
+  type PdpTemplate,
 } from "../api/client";
 
 const PROFILE_SOURCE_LABELS: Record<CategoryContentProfile["source"], string> = {
@@ -85,10 +87,24 @@ function buildPreviewDoc(innerHtml: string, platform: CatalogPlatform): string {
 
 export function PdpConfig() {
   const [platform, setPlatform] = useState<CatalogPlatform>("vtex");
+  const [categoryNodes, setCategoryNodes] = useState<CategoryTreeNode[]>([]);
+  const [categorySpecFields, setCategorySpecFields] = useState<CategorySpecFields[]>([]);
+  const [syncingCategories, setSyncingCategories] = useState(false);
+
+  // Single selection driving every section below — the catalog-wide "*" default, or one leaf
+  // category (subcategory, or category itself when it has no subcategory — see CategoryTreeNode's
+  // isLeaf doc comment).
+  const [selectedCategory, setSelectedCategory] = useState<string>(DEFAULT_PDP_CATEGORY);
+
   const [blocksByLevel, setBlocksByLevel] = useState<Record<DescriptionRichness, PdpBlock[]>>({
     plain: [],
     structured: [],
     structured_with_image: [],
+  });
+  const [templateSource, setTemplateSource] = useState<Record<DescriptionRichness, PdpTemplate["source"]>>({
+    plain: "default",
+    structured: "default",
+    structured_with_image: "default",
   });
   const [activeLevel, setActiveLevel] = useState<DescriptionRichness>("plain");
   const [saving, setSaving] = useState<DescriptionRichness | null>(null);
@@ -96,11 +112,6 @@ export function PdpConfig() {
   const [loading, setLoading] = useState(true);
   const [previewHtml, setPreviewHtml] = useState<string>("");
 
-  const [categoryNodes, setCategoryNodes] = useState<CategoryTreeNode[]>([]);
-  const [categorySpecFields, setCategorySpecFields] = useState<CategorySpecFields[]>([]);
-  const [syncingCategories, setSyncingCategories] = useState(false);
-
-  const [dnaCategory, setDnaCategory] = useState<string>("");
   const [referenceLinks, setReferenceLinks] = useState<CategoryReferenceLink[]>([]);
   const [contentProfile, setContentProfile] = useState<CategoryContentProfile | null>(null);
   const [newLinkUrls, setNewLinkUrls] = useState<string[]>(Array(MAX_REFERENCE_LINKS).fill(""));
@@ -115,8 +126,16 @@ export function PdpConfig() {
     hasWarrantySection: boolean;
   } | null>(null);
 
+  const leafNodes = categoryNodes.filter((n) => n.isLeaf);
+  const isSpecificCategory = selectedCategory !== DEFAULT_PDP_CATEGORY;
+
+  function loadCategoryFields() {
+    api.getCategoryNodes().then(({ nodes }) => setCategoryNodes(nodes));
+    api.getCategorySpecFields().then(({ categories }) => setCategorySpecFields(categories));
+  }
+
   function loadDnaForCategory(category: string) {
-    if (!category) {
+    if (category === DEFAULT_PDP_CATEGORY) {
       setReferenceLinks([]);
       setContentProfile(null);
       return;
@@ -125,12 +144,27 @@ export function PdpConfig() {
     api.getCategoryContentProfile(category).then(({ profile }) => setContentProfile(profile));
   }
 
+  function loadTemplatesForCategory(category: string) {
+    api.getPdpTemplates(category).then(({ platform, templates }) => {
+      setPlatform(platform);
+      setBlocksByLevel(Object.fromEntries(templates.map((t) => [t.level, t.blocks])) as Record<DescriptionRichness, PdpBlock[]>);
+      setTemplateSource(Object.fromEntries(templates.map((t) => [t.level, t.source])) as Record<DescriptionRichness, PdpTemplate["source"]>);
+      setLoading(false);
+    });
+  }
+
+  useEffect(() => {
+    loadCategoryFields();
+  }, []);
+
   useEffect(() => {
     setManualEdit(null);
     setDnaMessage(null);
+    setMessage(null);
     setNewLinkUrls(Array(MAX_REFERENCE_LINKS).fill(""));
-    loadDnaForCategory(dnaCategory);
-  }, [dnaCategory]);
+    loadDnaForCategory(selectedCategory);
+    loadTemplatesForCategory(selectedCategory);
+  }, [selectedCategory]);
 
   const referenceSlotsLeft = MAX_REFERENCE_LINKS - referenceLinks.length;
 
@@ -138,14 +172,14 @@ export function PdpConfig() {
    *  a url that fails to fetch/extract shows up in `errors` without losing the ones that worked. */
   async function handleAddReferenceLinks() {
     const urls = newLinkUrls.map((u) => u.trim()).filter(Boolean).slice(0, referenceSlotsLeft);
-    if (urls.length === 0 || !dnaCategory) return;
+    if (urls.length === 0 || !isSpecificCategory) return;
     setAddingLink(true);
     setDnaMessage(null);
     try {
-      const { errors, profile } = await api.addCategoryReferenceLinks({ category: dnaCategory, urls });
+      const { errors, profile } = await api.addCategoryReferenceLinks({ category: selectedCategory, urls });
       setNewLinkUrls(Array(MAX_REFERENCE_LINKS).fill(""));
       setContentProfile(profile);
-      const { links } = await api.getCategoryReferenceLinks(dnaCategory);
+      const { links } = await api.getCategoryReferenceLinks(selectedCategory);
       setReferenceLinks(links);
       if (errors.length > 0) {
         setDnaMessage(errors.map((e) => `${e.url}: ${e.error}`).join(" | "));
@@ -158,9 +192,9 @@ export function PdpConfig() {
   }
 
   async function handleRemoveReferenceLink(id: number) {
-    const { profile } = await api.removeCategoryReferenceLink(id, dnaCategory);
+    const { profile } = await api.removeCategoryReferenceLink(id, selectedCategory);
     setContentProfile(profile);
-    const { links } = await api.getCategoryReferenceLinks(dnaCategory);
+    const { links } = await api.getCategoryReferenceLinks(selectedCategory);
     setReferenceLinks(links);
   }
 
@@ -176,9 +210,9 @@ export function PdpConfig() {
   }
 
   async function handleSaveManualProfile() {
-    if (!manualEdit || !dnaCategory) return;
+    if (!manualEdit || !isSpecificCategory) return;
     const { profile } = await api.setCategoryContentProfile({
-      category: dnaCategory,
+      category: selectedCategory,
       wordCountMin: manualEdit.wordCountMin ? Number(manualEdit.wordCountMin) : null,
       wordCountMax: manualEdit.wordCountMax ? Number(manualEdit.wordCountMax) : null,
       bulletCount: manualEdit.bulletCount ? Number(manualEdit.bulletCount) : null,
@@ -190,36 +224,18 @@ export function PdpConfig() {
     setManualEdit(null);
   }
 
-  function loadCategoryFields() {
-    api.getCategoryNodes().then(({ nodes }) => {
-      setCategoryNodes(nodes);
-      const leaves = nodes.filter((n) => n.isLeaf);
-      if (leaves.length > 0) setDnaCategory((prev) => prev || leaves[0].path);
-    });
-    api.getCategorySpecFields().then(({ categories }) => setCategorySpecFields(categories));
-  }
-
   async function handleSyncCategories() {
     setSyncingCategories(true);
     setMessage(null);
     try {
       await api.syncVtexCategories();
       setMessage(
-        "Sincronização de categorias iniciada em segundo plano — os campos abaixo atualizam em alguns instantes, recarregue a página se não vir a mudança.",
+        "Sincronização de categorias iniciada em segundo plano — a lista abaixo atualiza em alguns instantes, recarregue a página se não vir a mudança.",
       );
     } finally {
       setSyncingCategories(false);
     }
   }
-
-  useEffect(() => {
-    api.getPdpTemplates().then(({ platform, templates }) => {
-      setPlatform(platform);
-      setBlocksByLevel(Object.fromEntries(templates.map((t) => [t.level, t.blocks])) as Record<DescriptionRichness, PdpBlock[]>);
-      setLoading(false);
-    });
-    loadCategoryFields();
-  }, []);
 
   useEffect(() => {
     if (loading) return;
@@ -254,9 +270,18 @@ export function PdpConfig() {
     setSaving(activeLevel);
     setMessage(null);
     try {
-      const { templates } = await api.setPdpTemplate({ level: activeLevel, blocks: blocksByLevel[activeLevel] });
+      const { templates } = await api.setPdpTemplate({
+        level: activeLevel,
+        blocks: blocksByLevel[activeLevel],
+        category: selectedCategory,
+      });
       setBlocksByLevel(Object.fromEntries(templates.map((t) => [t.level, t.blocks])) as Record<DescriptionRichness, PdpBlock[]>);
-      setMessage(`Estrutura do nível ${LEVEL_LABELS[activeLevel]} salva.`);
+      setTemplateSource(Object.fromEntries(templates.map((t) => [t.level, t.source])) as Record<DescriptionRichness, PdpTemplate["source"]>);
+      setMessage(
+        `Estrutura do nível ${LEVEL_LABELS[activeLevel]} salva para ${
+          isSpecificCategory ? selectedCategory : "todas as categorias (padrão)"
+        }.`,
+      );
     } catch (err) {
       setMessage(err instanceof Error ? err.message : String(err));
     } finally {
@@ -266,6 +291,7 @@ export function PdpConfig() {
 
   const blocks = blocksByLevel[activeLevel];
   const available = PDP_BLOCKS.filter((b) => !blocks.includes(b));
+  const selectedSpecFields = categorySpecFields.find((c) => c.categoryPath === selectedCategory);
 
   return (
     <>
@@ -273,8 +299,9 @@ export function PdpConfig() {
         <div>
           <h1>Configuração de PDP</h1>
           <p className="muted">
-            Define exatamente quais blocos entram na descrição e em que ordem, por nível — a IA só gera dados por
-            campo, nunca decide estrutura; isso aqui é o que decide. Vale pra plataforma ativa hoje:{" "}
+            Escolha uma subcategoria (ou categoria, quando ela não tem subcategoria) e defina, só pra ela, os campos
+            aceitos, o DNA de conteúdo e a estrutura do anúncio nos 3 níveis — Médio, Bom e Excelente (a única coisa
+            que muda entre eles é o formato da descrição). Vale pra plataforma ativa hoje:{" "}
             <strong>{platform === "vtex" ? "VTEX" : "Shopify"}</strong>.
           </p>
         </div>
@@ -282,245 +309,237 @@ export function PdpConfig() {
 
       <div className="page-content">
         {message && <div className="banner">{message}</div>}
-        {loading && <p className="muted">Carregando…</p>}
+
+        <section className="card">
+          <div className="proposal-header">
+            <h2 style={{ margin: 0 }}>Grupo de produtos</h2>
+            {platform === "vtex" && (
+              <button type="button" className="secondary" onClick={handleSyncCategories} disabled={syncingCategories}>
+                {syncingCategories ? "Sincronizando…" : "Sincronizar categorias agora"}
+              </button>
+            )}
+          </div>
+          <p className="muted" style={{ marginTop: 0 }}>
+            Tudo abaixo (campos aceitos, DNA de conteúdo, estrutura do anúncio) é configurado pra esta seleção.
+            "Todas as categorias (padrão)" vale pra qualquer subcategoria sem configuração própria.
+          </p>
+          <select value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)}>
+            <option value={DEFAULT_PDP_CATEGORY}>Todas as categorias (padrão)</option>
+            {leafNodes.map((n) => (
+              <option key={n.path} value={n.path}>
+                {n.path}
+              </option>
+            ))}
+          </select>
+          {platform === "vtex" && leafNodes.length === 0 && (
+            <p className="muted" style={{ marginTop: "0.75rem" }}>
+              Nenhuma subcategoria sincronizada ainda — clique em "Sincronizar categorias agora" ou reconecte a loja
+              VTEX pra poder configurar por categoria.
+            </p>
+          )}
+        </section>
+
+        {platform === "vtex" && (
+          <section className="card" style={{ marginTop: "1.5rem" }}>
+            <h2>Campos aceitos pela VTEX</h2>
+            {!isSpecificCategory && (
+              <p className="muted">
+                Este bloco é por subcategoria — selecione uma acima pra ver quais especificações a VTEX aceita nela.
+              </p>
+            )}
+            {isSpecificCategory && (
+              <>
+                <p className="muted">
+                  Especificações de produto que a VTEX aceita em <strong>{selectedCategory}</strong> — a IA usa essa
+                  lista como referência do que pode ser preenchido, nunca inventando um campo fora dela.
+                </p>
+                <div style={{ padding: "0.6rem 0.85rem", background: "var(--surface-2)", borderRadius: "var(--radius-sm)" }}>
+                  {selectedSpecFields && selectedSpecFields.fields.length > 0
+                    ? selectedSpecFields.fields.map((f) => f.name).join(", ")
+                    : "Nenhum campo de especificação configurado nesta categoria no admin da VTEX."}
+                </div>
+              </>
+            )}
+          </section>
+        )}
+
+        {platform === "vtex" && isSpecificCategory && (
+          <section className="card" style={{ marginTop: "1.5rem" }}>
+            <h2>DNA de conteúdo</h2>
+            <p className="muted">
+              Alvo estrutural (tamanho de descrição, bullets, FAQ, tabela de specs, garantia) usado como referência de
+              qualidade na geração pra <strong>{selectedCategory}</strong> — nunca copia texto de terceiros, só a
+              estrutura. Prioridade: valor definido manualmente &gt; consenso dos links de referência &gt; calculado a
+              partir dos seus próprios produtos bem avaliados.
+            </p>
+
+            {dnaMessage && <div className="banner">{dnaMessage}</div>}
+
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: "1rem" }}>
+              <div className="card" style={{ background: "var(--surface-2)" }}>
+                <h3 style={{ marginTop: 0 }}>Links de referência</h3>
+                <p className="muted" style={{ fontSize: "0.82rem" }}>
+                  Cole até {MAX_REFERENCE_LINKS} anúncios de referência dessa categoria (seus ou de mercado) —
+                  extraímos só a estrutura, nunca o texto. Todos os campos preenchidos são processados numa única
+                  requisição; um link com problema (fora do ar, bloqueado, etc.) não impede os outros de entrar.
+                </p>
+                {referenceSlotsLeft > 0 && (
+                  <>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", marginBottom: "0.5rem" }}>
+                      {newLinkUrls.slice(0, referenceSlotsLeft).map((url, i) => (
+                        <input
+                          key={i}
+                          type="url"
+                          placeholder="https://..."
+                          value={url}
+                          onChange={(e) => setNewLinkUrls((prev) => prev.map((u, idx) => (idx === i ? e.target.value : u)))}
+                        />
+                      ))}
+                    </div>
+                    <div className="actions" style={{ justifyContent: "flex-start", marginBottom: "0.75rem" }}>
+                      <button
+                        type="button"
+                        onClick={handleAddReferenceLinks}
+                        disabled={addingLink || newLinkUrls.every((u) => !u.trim())}
+                      >
+                        {addingLink ? "Analisando…" : "Adicionar"}
+                      </button>
+                    </div>
+                  </>
+                )}
+                {referenceSlotsLeft <= 0 && (
+                  <p className="muted" style={{ fontSize: "0.82rem" }}>
+                    Já tem {MAX_REFERENCE_LINKS} links de referência — remova um abaixo antes de adicionar outro.
+                  </p>
+                )}
+                {referenceLinks.length === 0 && <p className="muted">Nenhum link de referência ainda.</p>}
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                  {referenceLinks.map((link) => (
+                    <div
+                      key={link.id}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "flex-start",
+                        gap: "0.5rem",
+                        padding: "0.4rem 0.6rem",
+                        background: "var(--surface)",
+                        borderRadius: "var(--radius-sm)",
+                      }}
+                    >
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: "0.8rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {link.url}
+                        </div>
+                        {link.warning && (
+                          <div className="muted" style={{ fontSize: "0.72rem" }}>
+                            ⚠ {link.warning}
+                          </div>
+                        )}
+                      </div>
+                      <button type="button" className="secondary" onClick={() => handleRemoveReferenceLink(link.id)}>
+                        Remover
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="card" style={{ background: "var(--surface-2)" }}>
+                <div className="proposal-header">
+                  <h3 style={{ margin: 0 }}>Perfil calculado</h3>
+                  {!manualEdit && (
+                    <button type="button" className="secondary" onClick={startManualEdit}>
+                      Editar manualmente
+                    </button>
+                  )}
+                </div>
+
+                {!manualEdit && (
+                  <>
+                    {!contentProfile && <p className="muted">Nenhum perfil calculado ainda para esta categoria.</p>}
+                    {contentProfile && (
+                      <>
+                        <p className="muted" style={{ fontSize: "0.78rem" }}>{PROFILE_SOURCE_LABELS[contentProfile.source]}</p>
+                        <ul style={{ margin: 0, paddingLeft: "1.2rem", fontSize: "0.85rem" }}>
+                          <li>
+                            Palavras: {contentProfile.wordCountMin ?? "?"}–{contentProfile.wordCountMax ?? "?"}
+                          </li>
+                          <li>Bullets: {contentProfile.bulletCount ?? "?"}</li>
+                          <li>FAQ: {contentProfile.hasFaq ? "Sim" : "Não"}</li>
+                          <li>Tabela de especificações: {contentProfile.hasSpecTable ? "Sim" : "Não"}</li>
+                          <li>Seção de garantia: {contentProfile.hasWarrantySection ? "Sim" : "Não"}</li>
+                        </ul>
+                      </>
+                    )}
+                  </>
+                )}
+
+                {manualEdit && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                    <div style={{ display: "flex", gap: "0.5rem" }}>
+                      <input
+                        type="number"
+                        placeholder="Mín. palavras"
+                        value={manualEdit.wordCountMin}
+                        onChange={(e) => setManualEdit({ ...manualEdit, wordCountMin: e.target.value })}
+                      />
+                      <input
+                        type="number"
+                        placeholder="Máx. palavras"
+                        value={manualEdit.wordCountMax}
+                        onChange={(e) => setManualEdit({ ...manualEdit, wordCountMax: e.target.value })}
+                      />
+                    </div>
+                    <input
+                      type="number"
+                      placeholder="Nº de bullets"
+                      value={manualEdit.bulletCount}
+                      onChange={(e) => setManualEdit({ ...manualEdit, bulletCount: e.target.value })}
+                    />
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={manualEdit.hasFaq}
+                        onChange={(e) => setManualEdit({ ...manualEdit, hasFaq: e.target.checked })}
+                      />{" "}
+                      Incluir FAQ
+                    </label>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={manualEdit.hasSpecTable}
+                        onChange={(e) => setManualEdit({ ...manualEdit, hasSpecTable: e.target.checked })}
+                      />{" "}
+                      Incluir tabela de especificações
+                    </label>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={manualEdit.hasWarrantySection}
+                        onChange={(e) => setManualEdit({ ...manualEdit, hasWarrantySection: e.target.checked })}
+                      />{" "}
+                      Incluir seção de garantia
+                    </label>
+                    <div className="actions" style={{ justifyContent: "flex-start" }}>
+                      <button type="button" onClick={handleSaveManualProfile}>
+                        Salvar
+                      </button>
+                      <button type="button" className="secondary" onClick={() => setManualEdit(null)}>
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {loading && <p className="muted" style={{ marginTop: "1.5rem" }}>Carregando estrutura do anúncio…</p>}
 
         {!loading && (
           <>
-            {platform === "vtex" && (
-              <section className="card">
-                <div className="proposal-header">
-                  <h2 style={{ margin: 0 }}>Campos aceitos pela VTEX por categoria</h2>
-                  <button type="button" className="secondary" onClick={handleSyncCategories} disabled={syncingCategories}>
-                    {syncingCategories ? "Sincronizando…" : "Sincronizar categorias agora"}
-                  </button>
-                </div>
-                <p className="muted">
-                  Especificações de produto que a VTEX aceita em cada subcategoria (ou categoria, quando não há
-                  subcategoria) — a IA usa essa lista como referência do que pode ser preenchido, nunca inventando um
-                  campo fora dela. Sincronizado automaticamente ao conectar a loja; some categorias podem
-                  legitimamente não ter nenhum campo configurado no admin da VTEX.
-                </p>
-
-                {categoryNodes.length === 0 && (
-                  <p className="muted">
-                    Nenhuma categoria sincronizada ainda — clique em "Sincronizar categorias agora" ou reconecte a
-                    loja VTEX.
-                  </p>
-                )}
-
-                <div style={{ maxHeight: 420, overflowY: "auto", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-                  {categoryNodes
-                    .filter((node) => node.isLeaf)
-                    .map((node) => {
-                      const spec = categorySpecFields.find((c) => c.categoryPath === node.path);
-                      return (
-                        <div
-                          key={node.path}
-                          style={{ padding: "0.5rem 0.75rem", background: "var(--surface-2)", borderRadius: "var(--radius-sm)" }}
-                        >
-                          <div style={{ fontSize: "0.82rem" }}>{node.path}</div>
-                          <div className="muted" style={{ fontSize: "0.8rem", marginTop: "0.2rem" }}>
-                            {spec && spec.fields.length > 0
-                              ? spec.fields.map((f) => f.name).join(", ")
-                              : "Nenhum campo de especificação configurado nesta categoria."}
-                          </div>
-                        </div>
-                      );
-                    })}
-                </div>
-              </section>
-            )}
-
-            {platform === "vtex" && categoryNodes.some((n) => n.isLeaf) && (
-              <section className="card" style={{ marginTop: "1.5rem" }}>
-                <h2>DNA de conteúdo por categoria</h2>
-                <p className="muted">
-                  Alvo estrutural (tamanho de descrição, bullets, FAQ, tabela de specs, garantia) usado como referência
-                  de qualidade na geração — nunca copia texto de terceiros, só a estrutura. Prioridade: valor definido
-                  manualmente &gt; consenso dos links de referência &gt; calculado a partir dos seus próprios produtos
-                  bem avaliados.
-                </p>
-
-                <div style={{ marginBottom: "1rem" }}>
-                  <label className="muted" style={{ display: "block", marginBottom: "0.3rem" }}>
-                    Categoria
-                  </label>
-                  <select value={dnaCategory} onChange={(e) => setDnaCategory(e.target.value)}>
-                    {categoryNodes
-                      .filter((n) => n.isLeaf)
-                      .map((n) => (
-                        <option key={n.path} value={n.path}>
-                          {n.path}
-                        </option>
-                      ))}
-                  </select>
-                </div>
-
-                {dnaMessage && <div className="banner">{dnaMessage}</div>}
-
-                <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: "1rem" }}>
-                  <div className="card" style={{ background: "var(--surface-2)" }}>
-                    <h3 style={{ marginTop: 0 }}>Links de referência</h3>
-                    <p className="muted" style={{ fontSize: "0.82rem" }}>
-                      Cole até {MAX_REFERENCE_LINKS} anúncios de referência dessa categoria (seus ou de mercado) —
-                      extraímos só a estrutura, nunca o texto. Todos os campos preenchidos são processados numa única
-                      requisição; um link com problema (fora do ar, bloqueado, etc.) não impede os outros de entrar.
-                    </p>
-                    {referenceSlotsLeft > 0 && (
-                      <>
-                        <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", marginBottom: "0.5rem" }}>
-                          {newLinkUrls.slice(0, referenceSlotsLeft).map((url, i) => (
-                            <input
-                              key={i}
-                              type="url"
-                              placeholder="https://..."
-                              value={url}
-                              onChange={(e) =>
-                                setNewLinkUrls((prev) => prev.map((u, idx) => (idx === i ? e.target.value : u)))
-                              }
-                            />
-                          ))}
-                        </div>
-                        <div className="actions" style={{ justifyContent: "flex-start", marginBottom: "0.75rem" }}>
-                          <button
-                            type="button"
-                            onClick={handleAddReferenceLinks}
-                            disabled={addingLink || newLinkUrls.every((u) => !u.trim())}
-                          >
-                            {addingLink ? "Analisando…" : "Adicionar"}
-                          </button>
-                        </div>
-                      </>
-                    )}
-                    {referenceSlotsLeft <= 0 && (
-                      <p className="muted" style={{ fontSize: "0.82rem" }}>
-                        Já tem {MAX_REFERENCE_LINKS} links de referência — remova um abaixo antes de adicionar outro.
-                      </p>
-                    )}
-                    {referenceLinks.length === 0 && <p className="muted">Nenhum link de referência ainda.</p>}
-                    <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
-                      {referenceLinks.map((link) => (
-                        <div
-                          key={link.id}
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "flex-start",
-                            gap: "0.5rem",
-                            padding: "0.4rem 0.6rem",
-                            background: "var(--surface)",
-                            borderRadius: "var(--radius-sm)",
-                          }}
-                        >
-                          <div style={{ minWidth: 0 }}>
-                            <div style={{ fontSize: "0.8rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                              {link.url}
-                            </div>
-                            {link.warning && (
-                              <div className="muted" style={{ fontSize: "0.72rem" }}>
-                                ⚠ {link.warning}
-                              </div>
-                            )}
-                          </div>
-                          <button type="button" className="secondary" onClick={() => handleRemoveReferenceLink(link.id)}>
-                            Remover
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="card" style={{ background: "var(--surface-2)" }}>
-                    <div className="proposal-header">
-                      <h3 style={{ margin: 0 }}>Perfil calculado</h3>
-                      {!manualEdit && (
-                        <button type="button" className="secondary" onClick={startManualEdit}>
-                          Editar manualmente
-                        </button>
-                      )}
-                    </div>
-
-                    {!manualEdit && (
-                      <>
-                        {!contentProfile && <p className="muted">Nenhum perfil calculado ainda para esta categoria.</p>}
-                        {contentProfile && (
-                          <>
-                            <p className="muted" style={{ fontSize: "0.78rem" }}>{PROFILE_SOURCE_LABELS[contentProfile.source]}</p>
-                            <ul style={{ margin: 0, paddingLeft: "1.2rem", fontSize: "0.85rem" }}>
-                              <li>
-                                Palavras: {contentProfile.wordCountMin ?? "?"}–{contentProfile.wordCountMax ?? "?"}
-                              </li>
-                              <li>Bullets: {contentProfile.bulletCount ?? "?"}</li>
-                              <li>FAQ: {contentProfile.hasFaq ? "Sim" : "Não"}</li>
-                              <li>Tabela de especificações: {contentProfile.hasSpecTable ? "Sim" : "Não"}</li>
-                              <li>Seção de garantia: {contentProfile.hasWarrantySection ? "Sim" : "Não"}</li>
-                            </ul>
-                          </>
-                        )}
-                      </>
-                    )}
-
-                    {manualEdit && (
-                      <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-                        <div style={{ display: "flex", gap: "0.5rem" }}>
-                          <input
-                            type="number"
-                            placeholder="Mín. palavras"
-                            value={manualEdit.wordCountMin}
-                            onChange={(e) => setManualEdit({ ...manualEdit, wordCountMin: e.target.value })}
-                          />
-                          <input
-                            type="number"
-                            placeholder="Máx. palavras"
-                            value={manualEdit.wordCountMax}
-                            onChange={(e) => setManualEdit({ ...manualEdit, wordCountMax: e.target.value })}
-                          />
-                        </div>
-                        <input
-                          type="number"
-                          placeholder="Nº de bullets"
-                          value={manualEdit.bulletCount}
-                          onChange={(e) => setManualEdit({ ...manualEdit, bulletCount: e.target.value })}
-                        />
-                        <label>
-                          <input
-                            type="checkbox"
-                            checked={manualEdit.hasFaq}
-                            onChange={(e) => setManualEdit({ ...manualEdit, hasFaq: e.target.checked })}
-                          />{" "}
-                          Incluir FAQ
-                        </label>
-                        <label>
-                          <input
-                            type="checkbox"
-                            checked={manualEdit.hasSpecTable}
-                            onChange={(e) => setManualEdit({ ...manualEdit, hasSpecTable: e.target.checked })}
-                          />{" "}
-                          Incluir tabela de especificações
-                        </label>
-                        <label>
-                          <input
-                            type="checkbox"
-                            checked={manualEdit.hasWarrantySection}
-                            onChange={(e) => setManualEdit({ ...manualEdit, hasWarrantySection: e.target.checked })}
-                          />{" "}
-                          Incluir seção de garantia
-                        </label>
-                        <div className="actions" style={{ justifyContent: "flex-start" }}>
-                          <button type="button" onClick={handleSaveManualProfile}>
-                            Salvar
-                          </button>
-                          <button type="button" className="secondary" onClick={() => setManualEdit(null)}>
-                            Cancelar
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </section>
-            )}
-
             <div className="actions" style={{ justifyContent: "flex-start", marginTop: "1.5rem", marginBottom: "1rem" }}>
               {LEVEL_ORDER.map((level) => (
                 <button
@@ -543,6 +562,13 @@ export function PdpConfig() {
                   </button>
                 </div>
                 <p className="muted" style={{ marginTop: 0, fontSize: "0.82rem" }}>{LEVEL_HINT[activeLevel]}</p>
+                <p className="muted" style={{ marginTop: 0, fontSize: "0.78rem" }}>
+                  {templateSource[activeLevel] === "specific"
+                    ? `Estrutura própria de ${isSpecificCategory ? selectedCategory : "todas as categorias (padrão)"}.`
+                    : isSpecificCategory
+                      ? "Ainda sem estrutura própria — herdando o padrão geral. Salvar cria uma estrutura só pra esta categoria."
+                      : "Estrutura de fábrica — ainda não personalizada."}
+                </p>
 
                 <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", marginBottom: "0.75rem" }}>
                   {blocks.map((block, i) => (

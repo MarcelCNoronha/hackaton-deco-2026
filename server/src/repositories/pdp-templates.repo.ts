@@ -17,6 +17,12 @@ export interface PdpTemplate {
   category: string;
   level: DescriptionRichness;
   blocks: PdpBlock[];
+  /** "specific" — this exact category has its own saved row for this level. "default" — no
+   *  category-specific row exists, so `blocks` is inherited from the catalog-wide `'*'` row (or the
+   *  hardcoded factory default if even that doesn't exist yet). Only meaningful for the admin
+   *  editor (PdpConfig.tsx) — resolvePdpTemplate (the publish-time path) doesn't need to know which
+   *  case it hit, just the final blocks. */
+  source: "specific" | "default";
 }
 
 /** Same order the pipeline has always merged these in (see HACKATHON.md) — used whenever no
@@ -30,17 +36,28 @@ function defaultBlocksFor(level: DescriptionRichness): PdpBlock[] {
   return ["description", "featured_image", "benefit_bullets", "technical_specs", "faq", "cta"];
 }
 
-export async function getPdpTemplates(platform: CatalogPlatform): Promise<PdpTemplate[]> {
+/** Resolves the effective template PER LEVEL for one specific category (or the catalog-wide `'*'`
+ *  default when `category` is omitted/`'*'` itself) — used by the "Configuração de PDP" admin
+ *  editor, one category at a time (see PdpConfig.tsx). Distinct from the old blind
+ *  "byLevel = Map(rows...)" this replaced: that assumed only ONE row per level ever existed (true
+ *  only while every template was still the `'*'` default) and would have silently picked an
+ *  arbitrary row once a second category got its own override. */
+export async function getPdpTemplates(platform: CatalogPlatform, category: string = DEFAULT_PDP_CATEGORY): Promise<PdpTemplate[]> {
   const rows = await db.query.pdpTemplates.findMany({ where: eq(pdpTemplates.platform, platform) });
-  const byLevel = new Map(rows.map((r) => [r.level, r]));
   const levels: DescriptionRichness[] = ["plain", "structured", "structured_with_image"];
   return levels.map((level) => {
-    const row = byLevel.get(level);
+    const specificRow = rows.find((r) => r.level === level && r.category === category);
+    if (specificRow) {
+      return { platform, category, level, blocks: specificRow.blocks as PdpBlock[], source: "specific" as const };
+    }
+    const fallbackRow =
+      category !== DEFAULT_PDP_CATEGORY ? rows.find((r) => r.level === level && r.category === DEFAULT_PDP_CATEGORY) : undefined;
     return {
       platform,
-      category: DEFAULT_PDP_CATEGORY,
+      category,
       level,
-      blocks: (row?.blocks as PdpBlock[] | undefined) ?? defaultBlocksFor(level),
+      blocks: (fallbackRow?.blocks as PdpBlock[] | undefined) ?? defaultBlocksFor(level),
+      source: "default" as const,
     };
   });
 }

@@ -797,6 +797,44 @@ bot, etc.) aparece no array `errors` da resposta sem derrubar as outras nem gera
 links por categoria é limitado a `MAX_REFERENCE_LINKS` no servidor (`category-reference-links.repo.ts`),
 não só no formulário. `docs/README.md`/`pipeline-flow.ts` atualizados de "1-5" para "até 3, em lote".
 
+### Segundo bug real de NaN + unificação da Configuração de PDP por categoria (2026-08-04, décima primeira rodada)
+
+Testando a rodada anterior contra um link real (padovani.com.br), surgiu um segundo bug de
+robustez: "invalid input syntax for type integer: NaN" ao adicionar o link. Causa: a extração por
+IA (`reference-structure.agent.ts`) não garantia que `wordCount`/`bulletCount` viessem como número
+de verdade — um campo ausente ou não numérico virava `NaN` na consolidação (`median()` em
+`category-reference-links.repo.ts`), que o Postgres rejeita ao gravar numa coluna `integer`.
+Corrigido em duas camadas: (1) `reference-structure.agent.ts` agora sanitiza a resposta da IA
+(`sanitizeSignals`/`toSafeCount`) antes mesmo dela sair do módulo — nunca mais confia que o schema
+JSON foi de fato respeitado pelo provedor; (2) `recomputeReferenceProfile` também filtra pra número
+finito antes do cálculo, defesa em profundidade contra qualquer linha antiga já salva com valor
+ruim. `recomputeReferenceProfile` também passou a rodar dentro de try/catch na rota — uma falha ali
+não derruba mais os links que já foram salvos com sucesso na mesma requisição.
+
+Pedido do usuário depois de usar a tela em produção: unificar a Configuração de PDP em torno de UM
+seletor de categoria só. Hoje a tela tinha 3 escopos diferentes emendados (lista de todas as
+categorias pros campos VTEX, um seletor próprio pro DNA de conteúdo, e uma estrutura Médio/Bom/
+Excelente sempre catálogo-inteiro) — o usuário queria: seleciona a subcategoria (ou categoria, se
+não houver subcategoria) uma vez, e define ali mesmo os campos aceitos, o DNA de conteúdo, e a
+estrutura dos 3 níveis pra ESSA categoria especificamente.
+
+- **Achado ao implementar**: `pdp_templates` (tabela) e `resolvePdpTemplate` (caminho de
+  publicação) já suportavam override por categoria desde a rodada de Configuração de PDP original —
+  só a rota/UI administrativa (`GET/PUT /api/pdp-templates`) nunca expunham isso, sempre lendo/
+  escrevendo só a categoria `'*'` (catálogo inteiro). Pior: o `getPdpTemplates` antigo assumia "uma
+  linha por nível" sem filtrar por categoria — se uma segunda categoria algum dia tivesse ganhado
+  linha própria, essa função already pegaria a linha errada silenciosamente. Reescrito pra resolver
+  por (plataforma, categoria, nível) com a mesma prioridade do publish-time (específica da categoria
+  > `'*'` > padrão de fábrica), retornando também `source: "specific" | "default"` pra a tela avisar
+  se aquele nível já foi customizado ali ou está herdando o padrão geral.
+- **Decisão confirmada com o usuário**: manter a opção "Todas as categorias (padrão)" no seletor —
+  categorias ainda não configuradas continuam herdando esse padrão, em vez de cair direto no valor
+  de fábrica do sistema sem contexto nenhum.
+- **UI**: um card "Grupo de produtos" no topo (seletor + botão de sincronizar) substitui os 3
+  escopos separados. "Campos aceitos pela VTEX" e "DNA de conteúdo" só aparecem quando uma categoria
+  específica está selecionada (não fazem sentido pro catálogo inteiro); a estrutura Médio/Bom/
+  Excelente aparece sempre, com o aviso de herança/customização acima descrito.
+
 ## Formação de equipes
 
 - 1 a 5 pessoas por equipe (pode ser solo)

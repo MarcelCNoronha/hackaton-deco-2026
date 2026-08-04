@@ -37,6 +37,30 @@ export interface ExtractedReferenceStructure {
   warning: string | null;
 }
 
+/** The JSON schema sent to the model is advisory, not enforced by every provider — a field can
+ *  come back missing, as a string ("cerca de 500"), or otherwise non-numeric. Coercing here, at the
+ *  boundary where untrusted LLM output enters the system, means every StructureSignals this module
+ *  ever returns is guaranteed a real finite integer — callers (category-reference-links.repo.ts's
+ *  median/consensus math, eventually written to `integer` columns) never have to defend against
+ *  NaN themselves. Seen live: an ungrounded field crashed a Postgres write with "invalid input
+ *  syntax for type integer: NaN" before this existed. */
+function toSafeCount(value: unknown): number {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0;
+}
+
+function sanitizeSignals(raw: StructureSignals): StructureSignals {
+  return {
+    wordCount: toSafeCount(raw.wordCount),
+    bulletCount: toSafeCount(raw.bulletCount),
+    headingCount: toSafeCount(raw.headingCount),
+    hasFaq: Boolean(raw.hasFaq),
+    hasSpecTable: Boolean(raw.hasSpecTable),
+    hasWarrantySection: Boolean(raw.hasWarrantySection),
+    mentionsInstallation: Boolean(raw.mentionsInstallation),
+  };
+}
+
 /** Fetches a merchant-pasted market-reference URL for a category and extracts only its structural
  *  shape — see StructureSignals. Throws only on a real fetch failure (bad URL, network error, non-
  *  2xx); a "page loaded but had little text" outcome is returned as a warning, not an exception. */
@@ -49,5 +73,5 @@ export async function extractReferenceStructure(url: string): Promise<ExtractedR
     text: page.text,
     schema: STRUCTURE_SCHEMA,
   });
-  return { signals, warning: page.warning };
+  return { signals: sanitizeSignals(signals), warning: page.warning };
 }

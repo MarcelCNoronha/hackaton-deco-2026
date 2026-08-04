@@ -82,16 +82,21 @@ export async function recomputeReferenceProfile(platform: CatalogPlatform, categ
 
   if (signals.length === 0) return;
 
-  const wordCounts = signals.map((s) => s.wordCount);
-  const bulletCounts = signals.map((s) => s.bulletCount);
+  // The LLM extraction is untrusted input — a provider omitting a field or returning a non-numeric
+  // value (seen live: a real reference link crashed this with "invalid input syntax for type
+  // integer: NaN") must never reach an `integer` column. Filtering to finite numbers here means a
+  // single bad signal degrades that one field to "not enough data" instead of poisoning the whole
+  // profile with NaN.
+  const wordCounts = signals.map((s) => s.wordCount).filter((n) => Number.isFinite(n));
+  const bulletCounts = signals.map((s) => s.bulletCount).filter((n) => Number.isFinite(n));
   const consensus = (values: boolean[]) => values.filter(Boolean).length / values.length >= CONSENSUS_THRESHOLD;
 
   await upsertContentProfile({
     platform,
     category,
-    wordCountMin: Math.round(median(wordCounts) * 0.85),
-    wordCountMax: Math.round(median(wordCounts) * 1.15),
-    bulletCount: median(bulletCounts),
+    wordCountMin: wordCounts.length > 0 ? Math.round(median(wordCounts) * 0.85) : null,
+    wordCountMax: wordCounts.length > 0 ? Math.round(median(wordCounts) * 1.15) : null,
+    bulletCount: bulletCounts.length > 0 ? median(bulletCounts) : null,
     hasFaq: consensus(signals.map((s) => s.hasFaq)),
     hasSpecTable: consensus(signals.map((s) => s.hasSpecTable)),
     hasWarrantySection: consensus(signals.map((s) => s.hasWarrantySection)),
