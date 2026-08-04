@@ -183,11 +183,14 @@ código necessária; resolve sozinho re-rodando o workflow depois do bloqueio ex
 - **Senha root da VPS ainda ativa** — o deploy automático já usa só chave SSH, mas a senha root
   (que passou por esta conversa de texto) continua funcionando pra login. Trocar ou desativar
   autenticação por senha no SSH (`PasswordAuthentication no` no sshd_config), deixando só chave.
-- **CORS da API permissivo** (`origin: true` em `server/src/api/server.ts`, aceita qualquer
-  origem) — funciona, mas é mais aberto que o necessário agora que existe um domínio de produção
-  fixo. Trocar por uma lista fixa (`localhost:5173` em dev + o domínio de produção).
+  **Não verificado de novo desde que foi escrito** — só o usuário, com acesso à VPS, pode
+  confirmar se já foi feito.
+- ~~**CORS da API permissivo** (`origin: true`)~~ — **corrigido**: `server/src/api/server.ts`
+  hoje usa uma allowlist real (`allowedOrigins`), não mais `origin: true`. Nota mantida como
+  registro de que já foi resolvido, não como pendência.
 - Recadastrar as conexões (VTEX/Shopify, Anthropic/OpenAI/Gemini, Google) pela tela de
-  Integrações em produção — o banco novo não herda nada do ambiente local.
+  Integrações em produção — o banco novo não herda nada do ambiente local. **Não verificado daqui**
+  — só o usuário sabe se já reconectou tudo em produção.
 
 ### Gate de qualidade com auto-correção (2026-08-01, quarta rodada)
 
@@ -273,6 +276,9 @@ specs, FAQ, dados estruturados) + alt-text de imagem, sem opção de escolher. A
 
 - **Geração de vídeo curto** — adiado para 2026-08-04 ("vamos fazer amanhã"). Ainda não
   pesquisado; a geração de imagem (ver abaixo) já dá o padrão de client/agent/rota a seguir.
+  Especificação confirmada pelo usuário: o vídeo gerado deve ter **entre 15 e 30 segundos** — não
+  confundir com a duração do vídeo de demo do hackathon (5 minutos, ver "Entregáveis
+  obrigatórios"), são coisas completamente diferentes.
 
 - ~~**Descrição em HTML rico de verdade (padrão gsuplementos)**~~ — **implementado em
   2026-08-03/04** como os níveis Bom/Excelente (`DescriptionRichness`), ver seção "Score
@@ -714,7 +720,7 @@ maior risco de regressão silenciosa, não cobertura ampla.
 
 1. Repositório público no GitHub com o código
 2. Vídeo demonstrando o agente em ação
-   - ⚠️ **Divergência entre páginas do evento**: aba "Intro & Regras" diz até 5 min, aba "Trilhas" diz até 3 min. **Confirmar com organização** — assumir 3 min por segurança até esclarecer.
+   - **Confirmado pelo usuário: 5 minutos.** (Página do evento era ambígua — "Intro & Regras" dizia até 5 min, "Trilhas" dizia até 3 min — 5 min é o valor correto, resolve a divergência.)
 3. Descrição do problema atacado, o que o agente faz, e impacto esperado (venda a mais / custo a menos)
 
 ## Critérios de avaliação
@@ -761,6 +767,6 @@ plataformas/parceiros de tecnologia, pessoas de marca/operação de loja com per
 
 ## Pendências / a confirmar
 
-- [ ] Confirmar limite real de duração do vídeo (3 min vs 5 min)
+- [x] Confirmar limite real de duração do vídeo (3 min vs 5 min) — **5 minutos**, confirmado pelo usuário.
 - [ ] Conteúdo da aba "Docs & Mídia" (provável: APIs/recursos técnicos da Deco relevantes pro build)
 - [ ] Conteúdo das abas "Equipes" e "Submissões" (provavelmente listas dinâmicas de participantes — baixa prioridade)
