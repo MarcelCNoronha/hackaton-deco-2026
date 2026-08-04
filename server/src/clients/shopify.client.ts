@@ -16,6 +16,20 @@ export interface ShopifyCredentials {
 
 const API_VERSION = "2026-01";
 
+/** Metafield types we're confident writing blind — plain scalars. Reference/list types (e.g. the
+ *  standard "Color"/"Material" category metafields, typically `list.metaobject_reference`) need
+ *  resolving a value to a taxonomy entry's GID first, not attempted here — skipped rather than
+ *  guessed, since a wrong write there is more damaging than not writing at all. */
+const SAFE_METAFIELD_TYPES = new Set([
+  "single_line_text_field",
+  "multi_line_text_field",
+  "number_integer",
+  "number_decimal",
+  "boolean",
+  "url",
+  "json",
+]);
+
 interface GraphQlResponse<T> {
   data?: T;
   errors?: Array<{ message: string }>;
@@ -48,6 +62,15 @@ export class ShopifyClient implements CatalogClient {
     private readonly onAttempt?: (entry: RequestLogEntry) => void | Promise<void>,
   ) {
     this.endpoint = `https://${credentials.shopDomain}/admin/api/${API_VERSION}/graphql.json`;
+  }
+
+  /** Links to the Admin product page (works whether or not the storefront is even published yet —
+   *  a guessed `/products/{handle}` link 404s or bounces to a shopifypreview.com theme-preview URL
+   *  on a store that hasn't gone live, which is common mid-build). Always resolves for anyone
+   *  logged into this shop's admin, unlike a public storefront link. */
+  private adminProductUrl(productGid: string): string {
+    const numericId = productGid.split("/").pop();
+    return `https://${this.credentials.shopDomain}/admin/products/${numericId}`;
   }
 
   private async graphql<T>(operation: string, query: string, variables?: Record<string, unknown>): Promise<T> {
@@ -133,7 +156,7 @@ export class ShopifyClient implements CatalogClient {
         brand: p.vendor || null,
         collection: p.collections.nodes.length ? p.collections.nodes.map((c) => c.title).join(", ") : null,
         sku: p.variants.nodes[0]?.sku || null,
-        url: `https://${this.credentials.shopDomain}/products/${p.handle}`,
+        url: this.adminProductUrl(p.id),
       })),
       hasMore: data.products.pageInfo.hasNextPage,
     };
@@ -216,7 +239,7 @@ export class ShopifyClient implements CatalogClient {
       brand: data.product.vendor || null,
       collection: data.product.collections.nodes.length ? data.product.collections.nodes.map((c) => c.title).join(", ") : null,
       sku: data.product.variants.nodes[0]?.sku || null,
-      url: `https://${this.credentials.shopDomain}/products/${data.product.handle}`,
+      url: this.adminProductUrl(data.product.id),
       imageUrl: images[0]?.image?.url ?? null,
       variantId: data.product.variants.nodes[0]?.id ?? "",
       images: images.map((m) => ({ id: m.id, url: m.image!.url, altText: m.alt })),
@@ -258,6 +281,167 @@ export class ShopifyClient implements CatalogClient {
     );
     if (data.productUpdate.userErrors.length > 0) {
       throw new Error(`Shopify productUpdate userError: ${data.productUpdate.userErrors[0].message}`);
+    }
+  }
+
+  /** Fetches the merchant's own registered PRODUCT metafield definitions (both the standard
+   *  category ones enabled for this shop's taxonomy, like "Color"/"Material", and any custom ones
+   *  like "pieces_per_box") — filtered to types safe to write blind. Used both to guide generation
+   *  (see content-enrichment.agent.ts) and, self-contained, inside `updateProductMetafields` to
+   *  resolve a key's real namespace/type before writing. */
+  private async fetchSafeMetafieldDefinitions(): Promise<Array<{ namespace: string; key: string; name: string; type: string }>> {
+    type Resp = {
+      metafieldDefinitions: { nodes: Array<{ namespace: string; key: string; name: string; type: { name: string } }> };
+    };
+    const data = await this.graphql<Resp>(
+      "listMetafieldDefinitions",
+      `query ListMetafieldDefinitions {
+        metafieldDefinitions(ownerType: PRODUCT, first: 100) {
+          nodes { namespace key name type { name } }
+        }
+      }`,
+    );
+    return data.metafieldDefinitions.nodes
+      .filter((d) => SAFE_METAFIELD_TYPES.has(d.type.name))
+      .map((d) => ({ namespace: d.namespace, key: d.key, name: d.name, type: d.type.name }));
+  }
+
+  async getKnownAttributeFields(): Promise<Array<{ key: string; name: string }>> {
+    const defs = await this.fetchSafeMetafieldDefinitions();
+    return defs.map((d) => ({ key: d.key, name: d.name }));
+  }
+
+  /** ASCII-safe, underscore-separated key derived from a free-form label (e.g. "Cor do rejunte" ->
+   *  "cor_do_rejunte") — Shopify metafield keys must be lowercase alphanumeric/underscore, capped
+   *  well under its 64-char limit. */
+  private slugifyMetafieldKey(label: string): string {
+    return label
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 40);
+  }
+
+  private normalizeForMatch(s: string): string {
+    return s
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "");
+  }
+
+  /** "Se já existe um campo pra esse conceito, usar a mesma terminologia" — before creating
+   *  anything new, checks whether an existing definition's name/key already matches (exact, or one
+   *  containing the other for labels long enough to not false-positive on short substrings). */
+  private findMatchingDefinition(
+    label: string,
+    defs: Array<{ namespace: string; key: string; name: string; type: string }>,
+  ): { namespace: string; key: string; type: string } | null {
+    const target = this.normalizeForMatch(label);
+    for (const def of defs) {
+      const name = this.normalizeForMatch(def.name);
+      const key = this.normalizeForMatch(def.key);
+      const matches =
+        target === name ||
+        target === key ||
+        (target.length >= 4 && (name.includes(target) || target.includes(name) || key.includes(target) || target.includes(key)));
+      if (matches) return { namespace: def.namespace, key: def.key, type: def.type };
+    }
+    return null;
+  }
+
+  /** Creates a new PRODUCT metafield definition — only reached when no existing field matches the
+   *  concept (see findMatchingDefinition), so this never duplicates a field the merchant already
+   *  has. Reuses an existing custom definition's namespace when one exists (keeps new fields
+   *  grouped alongside the merchant's own), falling back to Shopify's own UI default ("custom"). */
+  private async createAttributeField(
+    label: string,
+    existingDefs: Array<{ namespace: string; key: string; name: string; type: string }>,
+  ): Promise<{ namespace: string; key: string; type: string }> {
+    const namespace = existingDefs.find((d) => d.namespace !== "shopify")?.namespace ?? "custom";
+    const key = this.slugifyMetafieldKey(label) || `field_${Date.now()}`;
+    const type = "single_line_text_field";
+
+    type Resp = {
+      metafieldDefinitionCreate: {
+        createdDefinition: { namespace: string; key: string } | null;
+        userErrors: Array<{ field: string[]; message: string; code: string }>;
+      };
+    };
+    const data = await this.graphql<Resp>(
+      "createAttributeField",
+      `mutation CreateDefinition($definition: MetafieldDefinitionInput!) {
+        metafieldDefinitionCreate(definition: $definition) {
+          createdDefinition { namespace key }
+          userErrors { field message code }
+        }
+      }`,
+      { definition: { name: label, namespace, key, type, ownerType: "PRODUCT" } },
+    );
+
+    const errors = data.metafieldDefinitionCreate.userErrors;
+    if (errors.length > 0 && !errors.some((e) => e.code === "TAKEN")) {
+      throw new Error(`Shopify metafieldDefinitionCreate userError: ${errors[0].message}`);
+    }
+    // TAKEN (a concurrent run/request created the same key first) is fine — the field exists
+    // either way, which is all this call needs to guarantee.
+    return { namespace, key, type };
+  }
+
+  async updateProductMetafields(
+    externalId: string,
+    values: Array<{ key: string; value: string; type?: string; namespace?: string }>,
+  ): Promise<void> {
+    const withExplicitNamespace = values.filter((v) => v.namespace);
+    const needingResolution = values.filter((v) => !v.namespace);
+
+    const resolved: Array<{ namespace: string; key: string; type: string; value: string }> = withExplicitNamespace.map((v) => ({
+      namespace: v.namespace!,
+      key: v.key,
+      type: v.type ?? "single_line_text_field",
+      value: v.value,
+    }));
+
+    if (needingResolution.length > 0) {
+      const defs = await this.fetchSafeMetafieldDefinitions();
+      for (const v of needingResolution) {
+        const existing = this.findMatchingDefinition(v.key, defs);
+        const target = existing ?? (await this.createAttributeField(v.key, defs));
+        resolved.push({ namespace: target.namespace, key: target.key, type: target.type, value: v.value });
+      }
+    }
+
+    if (resolved.length === 0) return;
+
+    type Resp = { metafieldsSet: { userErrors: Array<{ field: string[]; message: string }> } };
+    const data = await this.graphql<Resp>(
+      "updateProductMetafields",
+      `mutation SetMetafields($metafields: [MetafieldsSetInput!]!) {
+        metafieldsSet(metafields: $metafields) { userErrors { field message } }
+      }`,
+      { metafields: resolved.map((r) => ({ ownerId: externalId, namespace: r.namespace, key: r.key, type: r.type, value: r.value })) },
+    );
+    if (data.metafieldsSet.userErrors.length > 0) {
+      throw new Error(`Shopify metafieldsSet userError: ${data.metafieldsSet.userErrors[0].message}`);
+    }
+  }
+
+  async addProductImage(params: { externalId: string; variantId: string; imageUrl: string; altText?: string }): Promise<void> {
+    type Resp = { productCreateMedia: { mediaUserErrors: Array<{ field: string[]; message: string }> } };
+    const data = await this.graphql<Resp>(
+      "addProductImage",
+      `mutation CreateMedia($productId: ID!, $media: [CreateMediaInput!]!) {
+        productCreateMedia(productId: $productId, media: $media) { mediaUserErrors { field message } }
+      }`,
+      {
+        productId: params.externalId,
+        media: [{ originalSource: params.imageUrl, alt: params.altText ?? "", mediaContentType: "IMAGE" }],
+      },
+    );
+    if (data.productCreateMedia.mediaUserErrors.length > 0) {
+      throw new Error(`Shopify productCreateMedia userError: ${data.productCreateMedia.mediaUserErrors[0].message}`);
     }
   }
 

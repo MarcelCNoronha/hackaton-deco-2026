@@ -1,0 +1,409 @@
+<title>PDP nível Excelente — exemplo CatalogIA</title>
+<style>
+  :root {
+    --bg: #f2f1ed;
+    --surface: #ffffff;
+    --surface-2: #eae8e1;
+    --ink: #23262b;
+    --muted: #6b7078;
+    --line: #dcdad3;
+    --accent: #cb7c1c;
+    --accent-ink: #5c3a0a;
+    --accent-soft: #f6e2c2;
+    --good: #3f7a4f;
+  }
+  :root[data-theme="dark"] {
+    --bg: #15171a;
+    --surface: #1d2024;
+    --surface-2: #24272c;
+    --ink: #ece9e2;
+    --muted: #9aa0a8;
+    --line: #2c2f34;
+    --accent: #f2b84d;
+    --accent-ink: #2a1c05;
+    --accent-soft: #3a2c10;
+    --good: #7fbf8f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #15171a;
+      --surface: #1d2024;
+      --surface-2: #24272c;
+      --ink: #ece9e2;
+      --muted: #9aa0a8;
+      --line: #2c2f34;
+      --accent: #f2b84d;
+      --accent-ink: #2a1c05;
+      --accent-soft: #3a2c10;
+      --good: #7fbf8f;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Segoe UI", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    line-height: 1.5;
+  }
+  .display {
+    font-family: "Arial Narrow", "Segoe UI Semibold", ui-sans-serif, system-ui, sans-serif;
+    font-weight: 800;
+    letter-spacing: 0.01em;
+    text-wrap: balance;
+  }
+  .eyebrow {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .field-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35em;
+    font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--accent-ink);
+    background: var(--accent-soft);
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    border-radius: 4px;
+    padding: 0.15em 0.55em;
+  }
+  .field-tag::before { content: "◆"; font-size: 0.6em; }
+
+  header.topbar {
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+  }
+  .topbar-inner {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 0.9rem 1.5rem;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+  .brand { font-size: 1.05rem; font-weight: 800; letter-spacing: 0.02em; }
+  .brand span { color: var(--accent); }
+  .breadcrumb { font-size: 0.8rem; color: var(--muted); }
+  .breadcrumb a { color: var(--muted); text-decoration: none; }
+  .breadcrumb a:hover { text-decoration: underline; }
+
+  main { max-width: 1080px; margin: 0 auto; padding: 1.75rem 1.5rem 4rem; }
+
+  .meta-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+    margin-bottom: 1.5rem;
+    font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace;
+    font-size: 0.78rem;
+  }
+  .meta-preview .row { display: flex; gap: 0.6rem; }
+  .meta-preview .k { color: var(--muted); flex: 0 0 auto; }
+  .meta-preview .v { color: var(--ink); }
+  .meta-preview .v.title-preview { color: #1a5aa8; }
+  :root[data-theme="dark"] .meta-preview .v.title-preview { color: #6fa8dc; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .meta-preview .v.title-preview { color: #6fa8dc; }
+  }
+
+  .pdp-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.7fr);
+    gap: 2.25rem;
+    align-items: start;
+  }
+  @media (max-width: 760px) { .pdp-grid { grid-template-columns: 1fr; } }
+
+  .gallery { display: flex; flex-direction: column; gap: 0.6rem; }
+  .gallery-main {
+    aspect-ratio: 1 / 1;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background:
+      linear-gradient(135deg, rgba(0,0,0,0.05) 0 2px, transparent 2px 100%) 0 0/48px 48px,
+      linear-gradient(45deg, rgba(0,0,0,0.05) 0 2px, transparent 2px 100%) 0 0/48px 48px,
+      linear-gradient(160deg, #cfcac0, #b7b0a2 55%, #8f8879);
+    position: relative;
+    overflow: hidden;
+  }
+  :root[data-theme="dark"] .gallery-main {
+    background:
+      linear-gradient(135deg, rgba(255,255,255,0.04) 0 2px, transparent 2px 100%) 0 0/48px 48px,
+      linear-gradient(45deg, rgba(255,255,255,0.04) 0 2px, transparent 2px 100%) 0 0/48px 48px,
+      linear-gradient(160deg, #565349, #43413a 55%, #302e29);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .gallery-main { background:
+      linear-gradient(135deg, rgba(255,255,255,0.04) 0 2px, transparent 2px 100%) 0 0/48px 48px,
+      linear-gradient(45deg, rgba(255,255,255,0.04) 0 2px, transparent 2px 100%) 0 0/48px 48px,
+      linear-gradient(160deg, #565349, #43413a 55%, #302e29); }
+  }
+  .gallery-main .caption {
+    position: absolute; left: 0.75rem; bottom: 0.75rem; right: 0.75rem;
+    background: rgba(20,18,14,0.72);
+    color: #f4efe6;
+    font-size: 0.74rem;
+    padding: 0.5rem 0.65rem;
+    border-radius: 6px;
+    backdrop-filter: blur(2px);
+  }
+  .thumbs { display: flex; gap: 0.5rem; }
+  .thumbs div {
+    width: 56px; height: 56px; border-radius: 6px; border: 1px solid var(--line);
+    background: linear-gradient(160deg, #cfcac0, #a39c8d);
+  }
+  :root[data-theme="dark"] .thumbs div { background: linear-gradient(160deg, #565349, #3a3831); }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .thumbs div { background: linear-gradient(160deg, #565349, #3a3831); }
+  }
+
+  .buybox { display: flex; flex-direction: column; gap: 0.9rem; }
+  h1.product-title { font-size: 1.7rem; margin: 0; line-height: 1.15; }
+  .rating { font-size: 0.82rem; color: var(--muted); }
+  .price-row { display: flex; align-items: baseline; gap: 0.6rem; }
+  .price { font-size: 1.9rem; font-weight: 800; }
+  .price-was { font-size: 0.9rem; color: var(--muted); text-decoration: line-through; }
+  .cta-btn {
+    display: block; width: 100%; text-align: center;
+    background: var(--accent); color: var(--accent-ink);
+    font-weight: 800; font-size: 0.95rem; letter-spacing: 0.01em;
+    padding: 0.85rem 1rem; border-radius: 8px; border: none;
+    cursor: default;
+  }
+  .cta-sub { font-size: 0.74rem; color: var(--muted); text-align: center; }
+  ul.bullets { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+  ul.bullets li { display: flex; gap: 0.55rem; font-size: 0.9rem; }
+  ul.bullets li::before { content: "✓"; color: var(--good); font-weight: 800; flex: none; }
+
+  .section { margin-top: 2.75rem; }
+  .section-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 0.9rem; flex-wrap: wrap; }
+  h2.section-title { font-size: 1.15rem; margin: 0; }
+  .prose { font-size: 0.95rem; }
+  .prose h3 { font-size: 1rem; margin: 1.4rem 0 0.5rem; }
+  .prose p { margin: 0 0 0.85rem; max-width: 68ch; }
+
+  .highlight-block {
+    display: grid; grid-template-columns: 220px 1fr; gap: 1.1rem;
+    background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px;
+    padding: 1rem; margin: 1.2rem 0;
+  }
+  @media (max-width: 620px) { .highlight-block { grid-template-columns: 1fr; } }
+  .highlight-img {
+    border-radius: 8px; min-height: 140px;
+    background: repeating-linear-gradient(100deg, #b8c8bc 0 6px, #9fb3a4 6px 12px);
+  }
+  :root[data-theme="dark"] .highlight-img { background: repeating-linear-gradient(100deg, #3c4a40 0 6px, #2e3a32 6px 12px); }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .highlight-img { background: repeating-linear-gradient(100deg, #3c4a40 0 6px, #2e3a32 6px 12px); }
+  }
+  .highlight-text strong { display: block; margin-bottom: 0.3rem; }
+  .highlight-text p { margin: 0; font-size: 0.88rem; color: var(--muted); }
+
+  table.specs { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  table.specs th { display: none; }
+  table.specs td { padding: 0.55rem 0.7rem; border-bottom: 1px solid var(--line); }
+  table.specs tr td:first-child { color: var(--muted); width: 42%; }
+  table.specs tr td:last-child { font-weight: 600; }
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
+
+  .faq-item { border-bottom: 1px solid var(--line); padding: 0.9rem 0; }
+  .faq-item:first-child { border-top: 1px solid var(--line); }
+  .faq-q { font-weight: 700; font-size: 0.92rem; margin: 0 0 0.35rem; }
+  .faq-a { margin: 0; font-size: 0.88rem; color: var(--muted); max-width: 68ch; }
+
+  .chip-row { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  .chip {
+    font-size: 0.78rem; padding: 0.3rem 0.7rem; border-radius: 999px;
+    background: var(--surface-2); border: 1px solid var(--line); color: var(--muted);
+  }
+
+  .jsonld {
+    font-family: ui-monospace, "Cascadia Mono", "Consolas", monospace;
+    font-size: 0.78rem; background: var(--surface-2); border: 1px solid var(--line);
+    border-radius: 8px; padding: 1rem; overflow-x: auto; white-space: pre; margin: 0;
+    color: var(--muted);
+  }
+  .jsonld .k { color: var(--ink); }
+
+  .legend {
+    margin-top: 3rem; padding-top: 1.5rem; border-top: 1px dashed var(--line);
+    font-size: 0.82rem; color: var(--muted);
+  }
+  .legend .field-tag { margin-right: 0.4rem; }
+</style>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand display">MUNDIAL<span>ACABAMENTOS</span></div>
+    <nav class="breadcrumb"><a href="#">Início</a> / <a href="#">Revestimentos</a> / <a href="#">Porcelanatos</a> / Acetinado Cinza Grafite</nav>
+  </div>
+</header>
+
+<main>
+  <div class="meta-preview">
+    <div class="row"><span class="k">&lt;title&gt;</span><span class="v title-preview">Porcelanato Acetinado Cinza Grafite 84x84cm | Mundial Acabamentos</span> <span class="field-tag">seo_title</span></div>
+    <div class="row"><span class="k">meta&nbsp;description</span><span class="v">Porcelanato acetinado 84x84 cinza grafite, antiderrapante PEI5, ideal para salas e áreas externas cobertas. Entrega para todo o Brasil.</span> <span class="field-tag">meta_description</span></div>
+  </div>
+
+  <div class="pdp-grid">
+    <div class="gallery">
+      <div class="gallery-main">
+        <div class="caption">Foto real do produto — ambiente de sala de estar</div>
+      </div>
+      <div class="thumbs">
+        <div></div><div></div><div></div><div></div>
+      </div>
+    </div>
+
+    <div class="buybox">
+      <div class="eyebrow">Porcelanatos · Linha Acetinado</div>
+      <h1 class="product-title display">Porcelanato Acetinado Cinza Grafite 84x84cm</h1>
+      <div class="rating">★★★★★ 4.8 · 212 avaliações</div>
+      <div class="price-row">
+        <span class="price">R$ 89,90</span>
+        <span class="price-was">R$ 119,90</span>
+        <span class="eyebrow" style="color:var(--good)">/m²</span>
+      </div>
+      <button class="cta-btn">Calcular m² e adicionar ao carrinho</button>
+      <div class="cta-sub">Chamada gerada especificamente pro produto <span class="field-tag">cta</span></div>
+      <ul class="bullets">
+        <li>Antiderrapante (PEI 5) — seguro para áreas molhadas e de alto tráfego</li>
+        <li>Retificado nas quatro bordas — rejunte de até 1,5mm, acabamento contínuo</li>
+        <li>Resistente a manchas de gordura e produtos de limpeza ácidos</li>
+        <li>Baixa absorção de água (BIa) — indicado também para áreas externas cobertas</li>
+      </ul>
+      <div><span class="field-tag">benefit_bullets</span></div>
+    </div>
+  </div>
+
+  <section class="section">
+    <div class="section-head">
+      <h2 class="section-title">Descrição</h2>
+      <span class="field-tag">description · structured_with_image</span>
+    </div>
+    <div class="prose">
+      <p>O Porcelanato Acetinado Cinza Grafite 84x84cm foi desenvolvido para quem busca um piso
+      contemporâneo, fácil de manter e resistente ao tráfego intenso do dia a dia. Seu acabamento
+      acetinado equilibra o brilho do polido com a segurança do fosco, resultando numa superfície
+      elegante e antiderrapante ao mesmo tempo.</p>
+
+      <h3>Onde usar</h3>
+      <p>Indicado para salas, corredores, varandas e áreas externas cobertas. A baixa absorção de
+      água (classificação BIa) permite uso em ambientes com contato ocasional com umidade, como
+      lavanderias e áreas de piscina cobertas.</p>
+
+      <div class="highlight-block">
+        <div class="highlight-img"></div>
+        <div class="highlight-text">
+          <strong>Destaque: resistência a manchas</strong>
+          <p>Foto real do produto escolhida pelo modelo (visão multimodal) para ilustrar o ponto
+          extraído do texto/atributos existentes — aqui, a resistência a manchas de gordura e
+          produtos de limpeza ácidos, citada na ficha técnica original.</p>
+          <div style="margin-top:0.5rem"><span class="field-tag">featuredImageUrl + imageCaption</span></div>
+        </div>
+      </div>
+
+      <h3>Instalação e rejunte</h3>
+      <p>Por ser retificado, permite rejunte reduzido (0,8mm a 1,5mm), resultando num piso com
+      aparência mais uniforme e contínua. Recomenda-se argamassa AC-III e rejunte epóxi em áreas
+      de grande circulação.</p>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-head">
+      <h2 class="section-title">Especificações técnicas</h2>
+      <span class="field-tag">technical_specs</span>
+    </div>
+    <div class="table-wrap">
+      <table class="specs">
+        <tr><td>Dimensões</td><td>84 x 84 cm</td></tr>
+        <tr><td>Acabamento</td><td>Acetinado</td></tr>
+        <tr><td>Cor</td><td>Cinza grafite</td></tr>
+        <tr><td>Resistência ao escorregamento (PEI)</td><td>PEI 5</td></tr>
+        <tr><td>Absorção de água</td><td>BIa (≤ 0,5%)</td></tr>
+        <tr><td>Retificado</td><td>Sim, nas 4 bordas</td></tr>
+        <tr><td>Caixa</td><td>2 peças (1,41 m²)</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-head">
+      <h2 class="section-title">Perguntas frequentes</h2>
+      <span class="field-tag">faq</span>
+    </div>
+    <div class="faq-item">
+      <p class="faq-q">Pode ser usado em área externa coberta?</p>
+      <p class="faq-a">Sim — a absorção de água BIa e o PEI 5 tornam esse porcelanato seguro para
+      varandas e áreas de piscina cobertas, desde que protegidas de sol e chuva diretos.</p>
+    </div>
+    <div class="faq-item">
+      <p class="faq-q">Como ele se compara ao acabamento polido?</p>
+      <p class="faq-a">O acetinado tem menos brilho que o polido, mas oferece mais segurança
+      antiderrapante — melhor equilíbrio para quem tem crianças ou idosos em casa.</p>
+    </div>
+    <div class="faq-item">
+      <p class="faq-q">Qual argamassa e rejunte usar?</p>
+      <p class="faq-a">Argamassa AC-III para peças grandes formato e rejunte epóxi em áreas de
+      alto tráfego, garantindo melhor vedação e resistência a manchas nas juntas.</p>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-head">
+      <h2 class="section-title">Palavras-chave & tags</h2>
+      <span class="field-tag">keywords + tags</span>
+    </div>
+    <div class="chip-row">
+      <span class="chip">porcelanato 84x84</span>
+      <span class="chip">porcelanato acetinado</span>
+      <span class="chip">piso cinza grafite</span>
+      <span class="chip">porcelanato antiderrapante</span>
+      <span class="chip">porcelanato para sala</span>
+      <span class="chip">retificado</span>
+      <span class="chip">PEI 5</span>
+      <span class="chip">área externa coberta</span>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-head">
+      <h2 class="section-title">Dados estruturados (schema.org)</h2>
+      <span class="field-tag">structured_data</span>
+    </div>
+    <pre class="jsonld"><span class="k">{</span>
+  <span class="k">"@context"</span>: "https://schema.org",
+  <span class="k">"@type"</span>: "Product",
+  <span class="k">"name"</span>: "Porcelanato Acetinado Cinza Grafite 84x84cm",
+  <span class="k">"category"</span>: "Revestimentos &gt; Porcelanatos",
+  <span class="k">"additionalProperty"</span>: [
+    { <span class="k">"name"</span>: "Resistência ao escorregamento (PEI)", <span class="k">"value"</span>: "PEI 5" },
+    { <span class="k">"name"</span>: "Absorção de água", <span class="k">"value"</span>: "BIa" }
+  ]
+<span class="k">}</span></pre>
+  </section>
+
+  <div class="legend">
+    <strong style="color:var(--ink)">Como ler este exemplo:</strong> cada bloco leva uma etiqueta
+    <span class="field-tag">campo</span> indicando qual saída do CatalogIA o preencheu. Este PDP
+    inteiro corresponde ao nível <strong style="color:var(--ink)">Excelente</strong> — mesma
+    combinação de campos do nível Bom, mas com <code>descriptionRichness = structured_with_image</code>:
+    HTML estruturado (títulos, tabela) mais uma foto real do produto embutida, escolhida por visão
+    multimodal para ilustrar o ponto de destaque extraído do texto/atributos existentes. No nível
+    Bom, o bloco de destaque com foto simplesmente não existe (resto idêntico); no nível Médio, a
+    seção "Descrição" volta a ser texto corrido, sem os <code>&lt;h3&gt;</code>/tabela.
+  </div>
+</main>

@@ -1,0 +1,1 @@
+ALTER TYPE "public"."proposal_field" ADD VALUE 'featured_image';

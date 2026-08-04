@@ -191,20 +191,36 @@ export function buildEnrichmentSchema(
   return { properties, required: fields.map((field) => FIELD_SPECS[field].property) };
 }
 
+/** Appended only when the caller consulted the platform's already-registered parameter slots
+ *  (Shopify Category/Product metafields) before generating — steers `attributesPatch` to reuse
+ *  those exact keys instead of inventing arbitrary labels, so the value can publish straight into
+ *  a real platform field. Empty string when there's nothing to align to (VTEX, or no fields). */
+export function buildKnownAttributeFieldsSuffix(fields?: Array<{ key: string; name: string }>): string {
+  if (!fields || fields.length === 0) return "";
+  const list = fields.map((f) => `${f.key} (${f.name})`).join(", ");
+  return (
+    ` Este produto tem os seguintes parâmetros já cadastrados na plataforma, disponíveis pra preenchimento: ` +
+    `${list}. Sempre que 'attributesPatch' tiver uma informação real e atualizada pra um desses parâmetros ` +
+    `(baseada em 'attributes'/'currentDescription', nunca inventada), use EXATAMENTE a chave indicada acima ` +
+    `(antes do parênteses) em vez de um rótulo livre.`
+  );
+}
+
 /** Extra instruction appended when "description" should be more than flowing text — see
  *  `DescriptionRichness`. Returns "" for "plain" so existing prompts are byte-identical to before. */
 export function buildDescriptionRichnessSuffix(richness: DescriptionRichness): string {
-  if (richness === "plain") return "";
-  const structured =
-    " A 'description' deve ser HTML estruturado de verdade (não apenas texto corrido): use <h2>/<h3> para " +
-    "seções, <p> para parágrafos, e uma <table> para especificações técnicas quando fizer sentido.";
-  if (richness === "structured") return structured;
+  // "description" is ALWAYS plain narrative paragraphs — how it (and benefit_bullets/
+  // technical_specs/faq/cta around it) actually turns into HTML is entirely the PDP template's
+  // job (see pdp-templates.repo.ts / publisher.agent.ts's renderPdpHtml), never the model's. This
+  // keeps every draft's structure 100% predictable and lets a merchant reorder/restyle blocks
+  // without touching the prompt at all. "plain"/"structured" are therefore identical here — the
+  // only richness that changes what's asked of the model is "structured_with_image".
+  if (richness !== "structured_with_image") return "";
   return (
-    structured +
-    " Além disso, identifique o principal ponto de destaque do produto usando SOMENTE o texto/atributos já " +
-    "existentes (nunca invente um diferencial não mencionado), escolha entre as fotos fornecidas a que melhor " +
-    "ilustra esse ponto, preencha 'featuredImageUrl' com a URL exata de uma delas e 'imageCaption' com uma " +
-    "legenda curta, e embuta essa mesma imagem dentro do HTML da description (uma tag <img src=\"...\"> próxima " +
-    "à seção que fala desse destaque)."
+    " Identifique o principal ponto de destaque do produto usando SOMENTE o texto/atributos já existentes " +
+    "(nunca invente um diferencial não mencionado), e escolha entre as fotos fornecidas a que melhor ilustra " +
+    "esse ponto: preencha 'featuredImageUrl' com a URL EXATA de uma delas (nunca invente uma URL) e " +
+    "'imageCaption' com uma legenda curta desse destaque — a própria página, não você, decide onde essa " +
+    "imagem entra na estrutura final."
   );
 }

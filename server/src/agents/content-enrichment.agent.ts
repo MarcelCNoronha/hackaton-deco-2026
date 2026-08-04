@@ -19,18 +19,6 @@ interface VtexImage {
   Id?: string | number;
 }
 
-/** Embeds the featured image the model chose (structured_with_image only) into the description
- *  HTML, right before its closing tag if one is detectable, otherwise appended — the model is
- *  instructed to already place an <img> itself, but this guarantees the image shows up even if it
- *  forgets, without ever inventing a URL not present in `imageUrls`. */
-function ensureFeaturedImageEmbedded(description: string, featuredImageUrl: string, imageCaption?: string): string {
-  if (description.includes(featuredImageUrl)) return description;
-  const figure = `<figure class="catalogia-featured-image"><img src="${featuredImageUrl}" alt="${
-    imageCaption ?? ""
-  }" />${imageCaption ? `<figcaption>${imageCaption}</figcaption>` : ""}</figure>`;
-  return `${description}\n${figure}`;
-}
-
 /** Below this score, or without at least this much improvement over the original, the draft
  *  is considered not good enough to hand to a human — the agent retries with specific feedback
  *  instead of forwarding mediocre content. Tuned to be reachable in 1-2 attempts for genuinely
@@ -73,17 +61,31 @@ function buildProposalRows(params: {
   const rows: (typeof enrichmentProposals.$inferInsert)[] = [];
 
   if (selected.has("description")) {
-    const description =
-      enriched.featuredImageUrl
-        ? ensureFeaturedImageEmbedded(enriched.description, enriched.featuredImageUrl, enriched.imageCaption)
-        : enriched.description;
+    // Always plain narrative text — where this and the other blocks (bullets/specs/faq/cta/
+    // featured image) end up in the final HTML is the PDP template's job, not the model's or this
+    // function's (see publisher.agent.ts's renderPdpHtml).
     rows.push({
       runId,
       productId: product.id,
       field: "description",
       agent: "content",
       originalValue: product.description,
-      proposedValue: description,
+      proposedValue: enriched.description,
+      ...reuseFields,
+    });
+  }
+  // Not gated by field selection — there's no checkbox for it; it only exists when the
+  // structured_with_image call actually found a matching photo. A real proposal row (rather than
+  // baking it into `description`) so it goes through the same human review as everything else,
+  // and so the PDP template controls its position instead of it being pre-embedded.
+  if (enriched.featuredImageUrl) {
+    rows.push({
+      runId,
+      productId: product.id,
+      field: "featured_image",
+      agent: "content",
+      originalValue: null,
+      proposedValue: JSON.stringify({ url: enriched.featuredImageUrl, caption: enriched.imageCaption ?? "" }),
       ...reuseFields,
     });
   }
@@ -222,6 +224,10 @@ export async function proposeContentEnrichment(params: {
   fields?: EnrichmentField[];
   descriptionRichness?: DescriptionRichness;
   communicationTone?: CommunicationTone;
+  /** Parameter slots already registered on the catalog platform (see CatalogClient.
+   *  getKnownAttributeFields, fetched once per run in the orchestrator) — steers attributesPatch
+   *  to reuse these exact keys. Empty/omitted on VTEX. */
+  knownAttributeFields?: Array<{ key: string; name: string }>;
 }): Promise<{ attempts: number; finalScore: number; reused: boolean }> {
   const { contentLlm, evaluatorLlm, runId, product } = params;
   const fields = params.fields ?? ALL_ENRICHMENT_FIELDS;
@@ -261,6 +267,7 @@ export async function proposeContentEnrichment(params: {
       descriptionRichness,
       communicationTone: params.communicationTone,
       imageUrls,
+      knownAttributeFields: params.knownAttributeFields,
     });
 
     const score = await computeContentScore({
@@ -309,6 +316,7 @@ export async function proposeContentEnrichment(params: {
       descriptionRichness,
       communicationTone: params.communicationTone,
       imageUrls,
+      knownAttributeFields: params.knownAttributeFields,
     });
 
     const score = await computeContentScore({

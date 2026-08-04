@@ -9,6 +9,7 @@ import {
   numeric,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   vector,
@@ -33,6 +34,7 @@ export const proposalFieldEnum = pgEnum("proposal_field", [
   "tags",
   "cta",
   "attributes_patch",
+  "featured_image",
 ]);
 export const proposalAgentEnum = pgEnum("proposal_agent", ["content", "image"]);
 export const proposalStatusEnum = pgEnum("proposal_status", [
@@ -109,6 +111,10 @@ export const generatedImages = pgTable("generated_images", {
   // still the same product (no shape/color/label/material drift) before it's ever shown/published.
   integrityVerified: boolean("integrity_verified").notNull().default(false),
   integrityNotes: text("integrity_notes"),
+  // Set once this image has actually been uploaded to the active catalog platform as a real
+  // product photo (see products.routes.ts's publish route) — null means it only ever existed
+  // inside CatalogIA.
+  publishedAt: timestamp("published_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
   productIdIdx: index("generated_images_product_id_idx").on(table.productId),
@@ -229,6 +235,28 @@ export const categoryScoreThresholds = pgTable("category_score_thresholds", {
   goodMin: integer("good_min").notNull().default(60),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/** Matches DescriptionRichness ("plain"/"structured"/"structured_with_image" — Médio/Bom/
+ *  Excelente) — kept as its own enum name since this table is about PDP structure, not content
+ *  generation, even though the values line up 1:1. */
+export const pdpTemplateLevelEnum = pgEnum("pdp_template_level", ["plain", "structured", "structured_with_image"]);
+
+/** Which blocks merge into the description HTML, in what order, per (platform, category, level) —
+ *  `category = '*'` is the catalog-wide default, same fallback pattern as
+ *  categoryScoreThresholds. Keyed by platform too because VTEX/Shopify differ in what's safe/
+ *  sane to embed (e.g. Shopify metafields vs. VTEX's stricter description sanitization). Content
+ *  generation itself no longer improvises HTML structure — the LLM only ever outputs structured
+ *  data per field; this template is what turns that data into the final HTML, deterministically
+ *  (see publisher.agent.ts's renderPdpHtml). */
+export const pdpTemplates = pgTable("pdp_templates", {
+  platform: catalogPlatformEnum("platform").notNull(),
+  category: text("category").notNull(),
+  level: pdpTemplateLevelEnum("level").notNull(),
+  blocks: jsonb("blocks").notNull().default(sql`'[]'::jsonb`),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.platform, table.category, table.level] }),
+}));
 
 /** Fine-grained log of every external API call — proves retry/error handling actually works. */
 export const agentRequestLogs = pgTable("agent_request_logs", {

@@ -238,6 +238,10 @@ export async function executeEnrichmentRun(runId: number, params: StartEnrichmen
     }
 
     const embeddingByProductId = await embedTargetProducts(embeddings, targetProducts);
+    // Consulted once per run (not per product — the set of registered fields is a catalog-wide,
+    // not per-product, concept) so attributesPatch can target real platform fields instead of
+    // inventing labels. Always [] on VTEX (no metafield concept there).
+    const knownAttributeFields = await catalog.getKnownAttributeFields();
 
     // `fields: []` is an explicit "skip content generation entirely" (an alt-text-only run) —
     // distinct from `undefined`, which keeps the pre-existing "all 5 fields" default.
@@ -258,6 +262,7 @@ export async function executeEnrichmentRun(runId: number, params: StartEnrichmen
                 fields: params.fields,
                 descriptionRichness: params.descriptionRichness,
                 communicationTone: params.communicationTone,
+                knownAttributeFields,
               }),
             ),
           )

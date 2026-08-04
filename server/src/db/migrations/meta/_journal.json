@@ -127,6 +127,27 @@
       "when": 1785796277729,
       "tag": "0017_pretty_kulan_gath",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1785800065390,
+      "tag": "0018_rich_virginia_dare",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1785802703393,
+      "tag": "0019_boring_bullseye",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1785803039013,
+      "tag": "0020_clear_big_bertha",
+      "breakpoints": true
     }
   ]
 }

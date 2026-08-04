@@ -11,6 +11,7 @@ import { getConnectionCredentials } from "../../repositories/connections.repo.js
 import { makeRequestLogger } from "../../repositories/logs.repo.js";
 import { GeminiClient } from "../../clients/gemini.client.js";
 import { IMAGE_GENERATION_MODEL } from "../../clients/model-recommendations.js";
+import { env } from "../../config/env.js";
 
 const generateImageBody = z.object({
   kind: z.enum(["lifestyle", "feature_callout"]),
@@ -94,4 +95,39 @@ export async function productsRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
     }
   });
+
+  /** Uploads an already-generated image as a real product photo on the active catalog platform —
+   *  distinct from generating it (above), which only ever saves it inside CatalogIA. Requires
+   *  APP_BASE_URL to be set to a publicly reachable origin (VTEX/Shopify's own servers fetch the
+   *  image bytes from `/api/generated-images/:id/raw`, not from the caller's browser). */
+  app.post<{ Params: { id: string; imageId: string } }>(
+    "/api/products/:id/generated-images/:imageId/publish",
+    async (req, reply) => {
+      const product = await db.query.products.findFirst({ where: eq(products.id, Number(req.params.id)) });
+      if (!product) return reply.status(404).send({ error: "Produto não encontrado" });
+      const image = await db.query.generatedImages.findFirst({ where: eq(generatedImages.id, Number(req.params.imageId)) });
+      if (!image || image.productId !== product.id) return reply.status(404).send({ error: "Imagem não encontrada" });
+      if (!env.APP_BASE_URL) {
+        return reply.status(400).send({ error: "APP_BASE_URL não configurado — necessário pra plataforma buscar a imagem." });
+      }
+
+      try {
+        const catalog = await requireActiveCatalogClient();
+        await catalog.addProductImage({
+          externalId: product.vtexProductId,
+          variantId: product.vtexSkuId,
+          imageUrl: `${env.APP_BASE_URL}/api/generated-images/${image.id}/raw`,
+          altText: `${product.title} — ${image.kind === "lifestyle" ? "foto ambientada" : "foto de destaque"}`,
+        });
+        const [updated] = await db
+          .update(generatedImages)
+          .set({ publishedAt: new Date() })
+          .where(eq(generatedImages.id, image.id))
+          .returning();
+        return updated;
+      } catch (err) {
+        return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
 }

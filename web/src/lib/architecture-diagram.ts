@@ -23,7 +23,8 @@ export const ARCHITECTURE_DIAGRAM = `flowchart TB
   end
 
   subgraph saida["Publicação e medição"]
-    pub["Publisher"]
+    tpl["Configuração de PDP — blocos e ordem por plataforma/nível"]
+    pub["Publisher — monta o HTML final a partir do template"]
     thr["Classificação por categoria — Excelente / Bom / Médio"]
     imp["Impacto Estimado — SEO, GEO, conversão, completude, tempo economizado"]
   end
@@ -46,6 +47,7 @@ export const ARCHITECTURE_DIAGRAM = `flowchart TB
   alt --> rev
 
   rev -- "aprovado" --> pub
+  tpl -- "ordem dos blocos" --> pub
   pub --> vtex
 
   ev --> thr
@@ -74,5 +76,14 @@ export const ARCHITECTURE_NOTES: Array<{ title: string; body: string }> = [
       "O mesmo score composto alimenta tanto o badge Excelente/Bom/Médio (limites configuráveis por " +
       "categoria) quanto o banner de Impacto Estimado (deltas antes/depois agregados por run ou pra conta " +
       "toda).",
+  },
+  {
+    title: "Configuração de PDP → Publisher",
+    body:
+      "A IA nunca decide estrutura HTML — só gera dados por campo (texto, lista de bullets, tabela de specs, " +
+      "FAQ, CTA, foto de destaque). Quem decide quais desses blocos aparecem, em que ordem, e por " +
+      "plataforma/nível (Médio renderiza tudo como texto corrido; Bom/Excelente usam HTML semântico real) é " +
+      "o template configurado em 'Configuração de PDP' — o Publisher só executa esse template no momento da " +
+      "publicação, nunca improvisa.",
   },
 ];

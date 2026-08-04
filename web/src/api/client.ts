@@ -178,6 +178,18 @@ export interface LevelCostEstimate {
   estimatedCostUsd: number;
 }
 
+/** Every block that can be merged into the description HTML, in the order a merchant picks — see
+ *  server/src/repositories/pdp-templates.repo.ts (single source of truth). */
+export const PDP_BLOCKS = ["description", "benefit_bullets", "technical_specs", "featured_image", "faq", "cta"] as const;
+export type PdpBlock = (typeof PDP_BLOCKS)[number];
+
+export interface PdpTemplate {
+  platform: CatalogPlatform;
+  category: string;
+  level: DescriptionRichness;
+  blocks: PdpBlock[];
+}
+
 export interface EnrichmentProposal {
   id: number;
   runId: number;
@@ -194,7 +206,8 @@ export interface EnrichmentProposal {
     | "keywords"
     | "tags"
     | "cta"
-    | "attributes_patch";
+    | "attributes_patch"
+    | "featured_image";
   agent: "content" | "image";
   originalValue: string | null;
   proposedValue: string;
@@ -238,6 +251,9 @@ export interface GeneratedImage {
    *  warning rather than silently trusted or discarded. */
   integrityVerified: boolean;
   integrityNotes: string | null;
+  /** Set once this image was actually uploaded to the active catalog platform as a real product
+   *  photo — null means it only ever existed inside CatalogIA. */
+  publishedAt: string | null;
   createdAt: string;
 }
 
@@ -380,6 +396,10 @@ export const api = {
   setOptimizationThreshold: (threshold: CategoryScoreThreshold) =>
     request<{ ok: boolean }>("/optimization-thresholds", { method: "PUT", body: JSON.stringify(threshold) }),
 
+  getPdpTemplates: () => request<{ platform: CatalogPlatform; templates: PdpTemplate[] }>("/pdp-templates"),
+  setPdpTemplate: (body: { level: DescriptionRichness; blocks: PdpBlock[] }) =>
+    request<{ platform: CatalogPlatform; templates: PdpTemplate[] }>("/pdp-templates", { method: "PUT", body: JSON.stringify(body) }),
+
   getCatalogPlatform: () => request<{ platform: CatalogPlatform }>("/catalog/platform"),
   setCatalogPlatform: (platform: CatalogPlatform) =>
     request<{ platform: CatalogPlatform }>("/catalog/platform", { method: "PUT", body: JSON.stringify({ platform }) }),
@@ -435,6 +455,8 @@ export const api = {
   listGeneratedImages: (productId: number) => request<GeneratedImage[]>(`/products/${productId}/generated-images`),
   generateImage: (productId: number, body: { kind: "lifestyle" | "feature_callout"; note?: string }) =>
     request<GeneratedImage>(`/products/${productId}/generated-images`, { method: "POST", body: JSON.stringify(body) }),
+  publishGeneratedImage: (productId: number, imageId: number) =>
+    request<GeneratedImage>(`/products/${productId}/generated-images/${imageId}/publish`, { method: "POST" }),
   productMetrics: (id: number) => request<ProductMetric[]>(`/products/${id}/metrics`),
   optimizedProductCount: () => request<{ count: number }>("/products/optimized-count"),
   pendingReviewCount: () => request<{ count: number }>("/products/pending-review-count"),

@@ -1,0 +1,1 @@
+ALTER TABLE "generated_images" ADD COLUMN "published_at" timestamp with time zone;

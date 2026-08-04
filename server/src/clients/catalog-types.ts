@@ -74,4 +74,25 @@ export interface CatalogClient {
    *  touching its category tree, so its implementation is a no-op and `tags` proposals stay
    *  in-app only there (see publisher.agent.ts). */
   updateProductTags(externalId: string, tags: string[]): Promise<void>;
+  /** The category/product metafield slots already registered on the platform (e.g. Shopify's
+   *  "Category metafields"/"Product metafields" panel) that are SAFE to write blind — scalar types
+   *  only (text/number/boolean), never a reference/list type (those need resolving a value to a
+   *  taxonomy entry's GID, not attempted here). Consulted BEFORE generation so `attributes_patch`
+   *  can target these exact keys instead of inventing arbitrary labels. VTEX has no metafield
+   *  concept, so its implementation always returns `[]`. */
+  getKnownAttributeFields(): Promise<Array<{ key: string; name: string }>>;
+  /** Writes metafield values. Two modes: omit `namespace` to target an ALREADY-REGISTERED
+   *  merchant field (only ones `getKnownAttributeFields` returned — resolved by key against the
+   *  platform's own definitions, silently skipped if not found/not a safe scalar type; this is
+   *  how `attributes_patch` reaches real "Product metafields" slots). Pass `namespace: "catalogia"`
+   *  to write our own synthesized data (structured_data, keywords) that has no pre-existing
+   *  merchant field, using whatever `key`/`type` we choose. VTEX no-ops either way. */
+  updateProductMetafields(
+    externalId: string,
+    values: Array<{ key: string; value: string; type?: string; namespace?: string }>,
+  ): Promise<void>;
+  /** Uploads an AI-generated image as a real product photo — `imageUrl` must be a publicly
+   *  fetchable URL (both platforms fetch the bytes server-side rather than accepting a direct
+   *  upload here), see the `/api/generated-images/:id/raw` route. */
+  addProductImage(params: { externalId: string; variantId: string; imageUrl: string; altText?: string }): Promise<void>;
 }

@@ -308,42 +308,67 @@ export class VtexClient implements CatalogClient {
     await this.updateSkuImageAltText(params.variantId, params.imageId, params.altText);
   }
 
-  async updateProductDescription(productId: string | number, description: string): Promise<void> {
+  /** `PUT /pvt/product/{id}` is NOT a partial update — VTEX does not merge, it replaces. Fields
+   *  omitted from the body can come back blank (Title, LinkId, MetaTagDescription, etc.), a
+   *  well-known footgun on this endpoint. So every write here fetches the CURRENT full product
+   *  first and PUTs it back merged with only the intended change, instead of a bare partial body —
+   *  load-bearing on a real production catalog, not just tidiness. */
+  private async updateProductFields(productId: string | number, patch: Partial<VtexProduct>): Promise<void> {
+    const current = await this.fetchProduct(productId);
     await requestWithRetry({
       provider: "vtex",
-      operation: "updateProductDescription",
+      operation: "updateProductFields",
       url: `${this.baseUrl}/pvt/product/${productId}`,
       init: {
         method: "PUT",
         headers: this.headers(),
-        body: JSON.stringify({ Description: description }),
+        body: JSON.stringify({ ...current, ...patch }),
       },
       onAttempt: this.onAttempt,
     });
   }
 
-  async updateProductSeo(productId: string | number, seo: { title?: string; metaDescription?: string }): Promise<void> {
-    const body: Record<string, string> = {};
-    if (seo.title) body.Title = seo.title;
-    if (seo.metaDescription) body.MetaTagDescription = seo.metaDescription;
-    if (Object.keys(body).length === 0) return;
+  async updateProductDescription(productId: string | number, description: string): Promise<void> {
+    await this.updateProductFields(productId, { Description: description });
+  }
 
-    await requestWithRetry({
-      provider: "vtex",
-      operation: "updateProductSeo",
-      url: `${this.baseUrl}/pvt/product/${productId}`,
-      init: {
-        method: "PUT",
-        headers: this.headers(),
-        body: JSON.stringify(body),
-      },
-      onAttempt: this.onAttempt,
-    });
+  async updateProductSeo(productId: string | number, seo: { title?: string; metaDescription?: string }): Promise<void> {
+    const patch: Partial<VtexProduct> = {};
+    if (seo.title) patch.Title = seo.title;
+    if (seo.metaDescription) patch.MetaTagDescription = seo.metaDescription;
+    if (Object.keys(patch).length === 0) return;
+
+    await this.updateProductFields(productId, patch);
   }
 
   /** VTEX has no clean native "tags" field without touching its category tree — tags proposals
    *  stay in-app only on this platform, see CatalogClient's doc comment. */
   async updateProductTags(): Promise<void> {}
+
+  /** VTEX has no metafield concept — attribute normalization / structured_data / keywords stay
+   *  in-app only on this platform. */
+  async getKnownAttributeFields(): Promise<Array<{ key: string; name: string }>> {
+    return [];
+  }
+
+  async updateProductMetafields(): Promise<void> {}
+
+  /** Attaches a new SKU image by URL (VTEX fetches the bytes itself from `Url` — no direct binary
+   *  upload here, same as the Shopify implementation). Unlike `updateSkuImageAltText` (PUT, edits
+   *  an existing image), this is a POST — VTEX creates a new file entry. */
+  async addProductImage(params: { externalId: string; variantId: string; imageUrl: string; altText?: string }): Promise<void> {
+    await requestWithRetry({
+      provider: "vtex",
+      operation: "addProductImage",
+      url: `${this.baseUrl}/pvt/stockkeepingunit/${params.variantId}/file`,
+      init: {
+        method: "POST",
+        headers: this.headers(),
+        body: JSON.stringify({ IsMain: false, Label: params.altText ?? "", Text: params.altText ?? "", Url: params.imageUrl }),
+      },
+      onAttempt: this.onAttempt,
+    });
+  }
 
   async updateSkuImageAltText(skuId: string | number, imageId: string, altText: string): Promise<void> {
     await requestWithRetry({

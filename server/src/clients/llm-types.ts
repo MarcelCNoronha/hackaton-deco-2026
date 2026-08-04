@@ -148,6 +148,12 @@ export interface LlmClient {
      *  "structured_with_image", to let the model pick (via real vision, not filename guessing)
      *  which existing photo best illustrates the highlight point it extracts from the text. */
     imageUrls?: string[];
+    /** Parameter slots already registered on the catalog platform (Shopify's Category/Product
+     *  metafields, consulted via CatalogClient.getKnownAttributeFields BEFORE generation) — when
+     *  given, `attributesPatch` should key its entries by these exact field keys wherever grounded
+     *  info exists, instead of inventing an arbitrary label, so the value can publish straight into
+     *  that real platform field. Empty/omitted on VTEX (no metafield concept there). */
+    knownAttributeFields?: Array<{ key: string; name: string }>;
   }): Promise<EnrichedContent>;
 
   evaluateContent(params: { text: string; knownFacts?: string | null; productId?: number }): Promise<ContentEvaluation>;

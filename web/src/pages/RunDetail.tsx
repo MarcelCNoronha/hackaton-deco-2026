@@ -33,6 +33,7 @@ const FIELD_LABELS: Record<EnrichmentProposal["field"], string> = {
   tags: "Tags de navegação",
   cta: "Chamada à ação (CTA)",
   attributes_patch: "Normalização/preenchimento de atributos",
+  featured_image: "Foto de destaque na descrição",
 };
 
 /** description/alt_text/seo_title/meta_description/cta store plain text in proposedValue; the
@@ -72,6 +73,15 @@ function ProposalPreview({ proposal }: { proposal: EnrichmentProposal }) {
     }
     if (proposal.field === "attributes_patch") {
       return <pre style={{ marginBottom: "0.75rem" }}>{JSON.stringify(JSON.parse(proposal.proposedValue), null, 2)}</pre>;
+    }
+    if (proposal.field === "featured_image") {
+      const { url, caption } = JSON.parse(proposal.proposedValue) as { url: string; caption: string };
+      return (
+        <div style={{ marginBottom: "0.75rem" }}>
+          <img src={url} alt={caption} style={{ maxWidth: 200, borderRadius: "var(--radius-md)" }} />
+          {caption && <p className="muted" style={{ margin: "0.3rem 0 0" }}>{caption}</p>}
+        </div>
+      );
     }
     if (proposal.field === "benefit_bullets") {
       const bullets = JSON.parse(proposal.proposedValue) as string[];
@@ -235,6 +245,26 @@ export function RunDetail() {
       setImageGenError(err instanceof Error ? err.message : String(err));
     } finally {
       setGeneratingFor((prev) => ({ ...prev, [productId]: undefined }));
+    }
+  }
+
+  const [publishingImageId, setPublishingImageId] = useState<number | null>(null);
+
+  /** Uploads an already-generated image as a real product photo on the active platform — distinct
+   *  from generating it (which only ever saves inside CatalogIA until this is called). */
+  async function handlePublishImage(productId: number, imageId: number) {
+    setImageGenError(null);
+    setPublishingImageId(imageId);
+    try {
+      const updated = await api.publishGeneratedImage(productId, imageId);
+      setGeneratedImages((prev) => ({
+        ...prev,
+        [productId]: (prev[productId] ?? []).map((img) => (img.id === imageId ? updated : img)),
+      }));
+    } catch (err) {
+      setImageGenError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPublishingImageId(null);
     }
   }
 
@@ -464,6 +494,21 @@ export function RunDetail() {
                           >
                             ⚠ Integridade do produto não confirmada
                           </div>
+                        )}
+                        {image.publishedAt ? (
+                          <div style={{ fontSize: "0.72rem", marginTop: "0.3rem", color: "var(--status-good)" }}>
+                            ✓ Publicada na loja
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            className="link-button"
+                            style={{ fontSize: "0.72rem", marginTop: "0.3rem" }}
+                            onClick={() => handlePublishImage(productId, image.id)}
+                            disabled={publishingImageId === image.id}
+                          >
+                            {publishingImageId === image.id ? "Publicando…" : "Publicar na loja"}
+                          </button>
                         )}
                       </div>
                     ))}

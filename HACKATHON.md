@@ -399,6 +399,93 @@ frete, newsletter) — só o que GA4/GSC já expõem.
   `generated_images`, tabela `category_score_thresholds`, 6 valores novos em `proposal_field`).
   Build e type-check de `server` e `web` verificados limpos ao final.
 
+### Publicação real ampliada + fix crítico no PUT da VTEX (2026-08-04, sexta rodada)
+
+Revisão do que "publicar de verdade" significa por campo, motivada por prints reais da conta
+Shopify de teste (categoria "Flooring & Carpet" já tem Category metafields como Color/Material, e
+Product metafields customizados como `pieces_per_box`/`yield_per_box`/`format` já cadastrados
+pela própria mundialacabamentos) e por dois anúncios reais da VTEX (confirmando que
+"Especificações"/"Características" — Marca, Material, Acabamento, Bitola, Dimensões etc. — é
+exatamente o que `extractVtexSpecifications` já lê).
+
+- **Bullets e Especificações técnicas agora mesclam na descrição** (mesmo mecanismo do FAQ/CTA,
+  `publisher.agent.ts`) — decisão validada pelo próprio conteúdo já publicado da loja (a
+  descrição real de um produto VTEX já lista specs como bullets dentro do texto).
+- **Dados estruturados e Keywords → Shopify Metafields** (namespace `catalogia` fixo, tipo
+  `json`) — Shopify apenas; sem equivalente direto na VTEX.
+- **Normalização de atributos (`attributes_patch`) → Shopify Metafields reais**: antes de
+  escrever, `ShopifyClient.updateProductMetafields` tenta casar a chave com uma definição de
+  metafield **já cadastrada** (por nome/chave, normalização + substring) pra "usar a mesma
+  terminologia" que a loja já usa; se não achar nada parecido, **cria uma nova definição**
+  (`metafieldDefinitionCreate`) em vez de inventar um campo solto — nunca toca nos metafields de
+  categoria padrão (Color/Material etc., tipicamente `metaobject_reference`, fora do escopo por
+  risco de precisar resolver GID de taxonomia). `getKnownAttributeFields` é consultado **antes**
+  da geração (uma vez por run, não por produto) e vira contexto no prompt dos 3 clients de LLM
+  (`buildKnownAttributeFieldsSuffix`), pra o modelo preferir as chaves reais em vez de rótulos
+  livres.
+- **Fotos geradas por IA agora publicam de verdade**: nova rota pública (sem auth, de propósito —
+  VTEX/Shopify buscam a URL diretamente) `GET /api/generated-images/:id/raw` servindo os bytes já
+  salvos no banco, `CatalogClient.addProductImage` (VTEX: `POST .../stockkeepingunit/{sku}/file`
+  com `Url`; Shopify: `productCreateMedia` com `originalSource`), e botão "Publicar na loja" por
+  imagem no RunDetail (`generated_images.publishedAt` novo, migração `0018`). Precisa de
+  `APP_BASE_URL` configurado (a plataforma busca a imagem da nossa própria API, não do navegador
+  do usuário).
+- **Bug crítico corrigido antes de qualquer teste real na VTEX**: `PUT /pvt/product/{id}` da VTEX
+  **não faz merge parcial** — é um replace completo, então mandar só `{Description: "..."}`
+  (como o código fazia até aqui) arriscava zerar Title/LinkId/MetaTagDescription e outros campos
+  não incluídos no corpo. Corrigido com um padrão ler→mesclar→escrever
+  (`VtexClient.updateProductFields`): busca o produto completo primeiro, mescla só o campo sendo
+  alterado, manda o objeto inteiro de volta. Achado a tempo — antes de existir token real de
+  produção pra testar contra.
+- **Link "Ver na loja" do Shopify corrigido**: a loja de teste ainda não está publicada num
+  domínio público (URL de preview `*.shopifypreview.com`, não a storefront real) — trocado pra
+  sempre apontar pro produto no **Admin do Shopify** (`/admin/products/{id}`), que funciona
+  independente do status de publicação, em vez de adivinhar uma URL de storefront que pode não
+  existir ainda.
+- **Combinado para amanhã (2026-08-05)**: token real da VTEX chega — ler a API contra a conta de
+  produção com cuidado redobrado (é loja real, não a Shopify de teste) antes de qualquer
+  publicação em lote. Escrita em "Características" (Specification API da VTEX) fica **para depois
+  da validação com o token real** — decisão explícita de não implementar às cegas contra uma API
+  mais complexa (campos dependem de tipo: texto livre vs. Radio/Checkbox com valores
+  pré-cadastrados) numa loja em produção.
+
+### Configuração de PDP (template determinístico) + Documentação (2026-08-04/05, sexta rodada)
+
+Mudança de arquitetura pedida pelo usuário: "a IA deve ser assertiva e atuar só em partes já
+mapeadas da PDP, sem precisar adivinhar onde introduz conteúdo". Investigação mostrou que o
+"adivinhar" só existia num lugar — a `description` em si, quando `descriptionRichness` pedia pra
+IA escrever `<h2>`/`<table>` livremente; bullets/specs/FAQ/CTA sempre foram dado estruturado
+(array/objeto), só viravam HTML na hora de publicar.
+
+- **A IA nunca mais escreve HTML** — `buildDescriptionRichnessSuffix` (`enrichment-schema.ts`)
+  não pede mais estrutura; `description` é sempre texto corrido em qualquer nível. Pro nível
+  Excelente, a IA ainda identifica o destaque e escolhe a foto (`featuredImageUrl`/
+  `imageCaption`), mas não decide mais onde a imagem entra — isso também virou responsabilidade
+  do template.
+- **Nova tabela `pdp_templates`** chaveada por **(plataforma, categoria, nível)** — `category =
+  '*'` é o padrão pra todo o catálogo hoje, mas o modelo já nasce pronto pra granularidade por
+  categoria (pedido explícito do usuário: "deixar a possibilidade"). Cada linha guarda uma lista
+  ordenada de blocos (`description`, `benefit_bullets`, `technical_specs`, `featured_image`,
+  `faq`, `cta`).
+- **`renderPdpHtml` em `publisher.agent.ts`** é agora o único lugar que gera HTML de descrição —
+  percorre os blocos do template na ordem configurada, renderizando cada um de forma
+  consciente do nível (Médio = texto corrido puro, sem `<ul>`/`<table>`; Bom/Excelente = HTML
+  semântico real). A imagem de destaque passou a ser uma **proposta própria**
+  (`proposal_field = 'featured_image'`, migração `0020`) revisável como qualquer outra, em vez
+  de vir pré-embutida na descrição no momento da geração.
+- **Tela "Configuração de PDP"** (novo item de menu, gated por permissão de conexões): 3 cards
+  (Médio/Bom/Excelente) com os blocos ativos, reordenáveis (↑/↓) e removíveis/adicionáveis —
+  edita a plataforma ativa no momento.
+- **Tela "Documentação"** (novo item de menu, aberto pra qualquer usuário): índice dos materiais
+  gerados durante o desenvolvimento (diagrama de arquitetura, referência de APIs, exemplo de PDP
+  nível Excelente), cada um com link pra fonte viva no repo e pro Artifact publicado.
+- **`docs/README.md` e `docs/exemplos/pdp-nivel-excelente.html` criados no repositório** — até
+  aqui o exemplo de PDP só existia como link de Artifact externo, sem cópia permanente versionada
+  junto do código.
+- Diagrama de arquitetura (`architecture-diagram.ts`) atualizado com o nó de Configuração de PDP
+  alimentando o Publisher — prática combinada com o usuário: toda mudança de peso a partir de
+  agora atualiza a documentação viva (diagrama/referência de APIs) e este arquivo, não só o código.
+
 ## Formação de equipes
 
 - 1 a 5 pessoas por equipe (pode ser solo)
