@@ -118,4 +118,8 @@ export const KNOWN_RISKS: KnownRisk[] = [
     title: "Extração de referência (URL de mercado/fabricante) depende de HTML puro",
     body: "web-fetch.client.ts não usa navegador headless — só busca o HTML e retira tags/scripts. Páginas que carregam o conteúdo principal via JavaScript (SPA pesado) voltam com pouco texto; o usuário recebe um aviso explícito na UI em vez de uma falha silenciosa, mas a extração fica pior nesse caso. Sem cobertura automatizada ainda.",
   },
+  {
+    title: "Deploy de produção defasado (desde 2026-08-04, 16:24)",
+    body: "O commit que adiciona o sync de categorias VTEX, campos de especificação, DNA de conteúdo por categoria e referência de fabricante (9553aaf) passou no CI, mas o workflow Deploy Production falhou no passo de upload/deploy pra VPS — timeout de conexão SSH pro runner do GitHub, mesmo sintoma de bloqueio de rede já visto antes (normalmente transitório, mas uma nova tentativa reproduziu o mesmo timeout, sugerindo um bloqueio mais persistente dessa vez). A VPS segue rodando a versão anterior (db86766) até o deploy ser refeito com sucesso — o teste de conexão VTEX feito nesse meio-tempo usa só o fix de teste de conexão de uma rodada anterior (já implantado), não as features desta seção. Confirmar os 5 containers saudáveis na tag de imagem certa antes de considerar essas features ativas em produção.",
+  },
 ];

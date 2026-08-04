@@ -51,6 +51,13 @@ código morto tentou evitar). No app, tudo isso fica atrás da permissão de Int
 5. **Sem limite de concorrência entre produtos** num run — risco de custo/rate-limit conhecido,
    não testado sob carga real.
 6. **Zero teste automatizado** — tudo validado por type-check/build manual.
+7. **Deploy de produção defasado (desde 2026-08-04, 16:24)** — o commit que adiciona sync de
+   categorias VTEX, campos de especificação, DNA de conteúdo por categoria e referência de
+   fabricante (`9553aaf`) passou no CI mas **falhou ao implantar na VPS** (bloqueio de rede no IP
+   do runner do GitHub Actions, sintoma repetido — ver `HACKATHON.md`). A VPS segue rodando a
+   versão anterior (`db86766`) até o workflow `Deploy Production` rodar com sucesso de novo; a
+   conexão VTEX testada nesse meio tempo usa só o fix de teste de conexão (já implantado
+   anteriormente), não as features desta rodada.
 
 ## Diagrama de arquitetura
 
