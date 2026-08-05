@@ -199,4 +199,17 @@ describe("renderPdpLayout ('modo de layout')", () => {
     expect(html).toMatch(/height:3\.5em/);
     expect(html).not.toContain("font-size");
   });
+
+  it("caps an image block's height in vh (from the cell's fontSize) instead of applying font-size/bold", () => {
+    const layout: PdpLayoutRow[] = [{ columns: [{ block: "ambient_photo", align: "left", bold: true, fontSize: "sm" }] }];
+    const html = renderPdpLayout(layout, "plain", { ambientPhoto: { url: "https://example.com/foto.jpg", caption: "Foto" } });
+    expect(html).toMatch(/max-height:30vh/);
+    expect(html).not.toContain("font-weight");
+  });
+
+  it("positions an image block via margin per the cell's align, since text-align has no effect on a block-level <img>", () => {
+    const layout: PdpLayoutRow[] = [{ columns: [{ block: "featured_image", align: "right", bold: false, fontSize: "md" }] }];
+    const html = renderPdpLayout(layout, "plain", { featuredImage: { url: "https://example.com/foto.jpg", caption: "Foto" } });
+    expect(html).toContain("margin:0 0 0 auto;");
+  });
 });

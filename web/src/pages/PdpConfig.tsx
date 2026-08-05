@@ -34,6 +34,13 @@ const BLOCK_LABELS: Record<PdpBlock, string> = {
  *  instead of "tamanho da letra" (still the same field server-side, see PdpLayoutCell). */
 const STRUCTURAL_BLOCKS = new Set<PdpBlock>(["divider", "spacer"]);
 
+/** "featured_image"/"ambient_photo" have no "bold" concept (nothing to embolden on an <img>) and
+ *  their align/fontSize controls mean something different than for text — align becomes real
+ *  left/right/center positioning, fontSize becomes "how tall can the photo get" (in vh, capped so
+ *  a huge source photo can't push a mobile viewport into an awkward scroll — see
+ *  publisher.agent.ts's IMAGE_MAX_HEIGHT). Still the same two fields server-side. */
+const IMAGE_BLOCKS = new Set<PdpBlock>(["featured_image", "ambient_photo"]);
+
 const ALIGN_LABELS: Record<PdpTextAlign, string> = {
   justify: "Justificado",
   left: "Esquerda",
@@ -158,6 +165,10 @@ export function PdpConfig() {
   // the whole thing. 400 is only the floor for a near-empty template.
   const [previewHeight, setPreviewHeight] = useState(400);
   const previewFrameRef = useRef<HTMLIFrameElement>(null);
+  // Which row is currently being dragged by its handle — null when nothing is. Only the grip
+  // handle itself is draggable (not the whole card), so dragging doesn't fight with clicking the
+  // selects/checkboxes inside a row.
+  const [draggedRow, setDraggedRow] = useState<number | null>(null);
 
   function resizePreviewFrame() {
     const doc = previewFrameRef.current?.contentDocument;
@@ -217,6 +228,19 @@ export function PdpConfig() {
       if (target < 0 || target >= rows.length) return rows;
       const next = [...rows];
       [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }
+
+  /** Drag-and-drop reorder — moves the row entirely out of its old slot and into the new one
+   *  (not a swap like moveRow's arrows), matching how dragging a card to a new spot actually
+   *  reads visually. */
+  function reorderRow(from: number, to: number) {
+    if (from === to) return;
+    updateRows((rows) => {
+      const next = [...rows];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
       return next;
     });
   }
@@ -418,10 +442,43 @@ export function PdpConfig() {
 
                 <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem", marginBottom: "0.75rem" }}>
                   {rows.map((row, ri) => (
-                    <div key={ri} style={{ padding: "0.6rem", background: "var(--surface-2)", borderRadius: "var(--radius-sm)" }}>
+                    <div
+                      key={ri}
+                      onDragOver={(e) => {
+                        if (draggedRow === null) return;
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "move";
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        if (draggedRow !== null) reorderRow(draggedRow, ri);
+                        setDraggedRow(null);
+                      }}
+                      style={{
+                        padding: "0.6rem",
+                        background: "var(--surface-2)",
+                        borderRadius: "var(--radius-sm)",
+                        opacity: draggedRow === ri ? 0.4 : 1,
+                        outline: draggedRow !== null && draggedRow !== ri ? "1px dashed var(--border)" : "none",
+                      }}
+                    >
                       <div className="proposal-header" style={{ marginBottom: "0.5rem" }}>
-                        <span className="muted" style={{ fontFamily: "monospace" }}>
-                          Linha {ri + 1}
+                        <span style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                          <span
+                            draggable
+                            onDragStart={(e) => {
+                              setDraggedRow(ri);
+                              e.dataTransfer.effectAllowed = "move";
+                            }}
+                            onDragEnd={() => setDraggedRow(null)}
+                            title="Arraste para reordenar"
+                            style={{ cursor: "grab", userSelect: "none", fontSize: "1.1rem", lineHeight: 1 }}
+                          >
+                            ⠿
+                          </span>
+                          <span className="muted" style={{ fontFamily: "monospace" }}>
+                            Linha {ri + 1}
+                          </span>
                         </span>
                         <div style={{ display: "flex", gap: "0.3rem" }}>
                           <button type="button" className="secondary" onClick={() => moveRow(ri, -1)} disabled={ri === 0}>
@@ -467,41 +524,47 @@ export function PdpConfig() {
                               ))}
                             </select>
                             {!STRUCTURAL_BLOCKS.has(cell.block) && (
-                              <>
-                                <select value={cell.align} onChange={(e) => updateCell(ri, ci, { align: e.target.value as PdpTextAlign })}>
-                                  {PDP_ALIGN_OPTIONS.map((a) => (
-                                    <option key={a} value={a}>
-                                      {ALIGN_LABELS[a]}
+                              <select value={cell.align} onChange={(e) => updateCell(ri, ci, { align: e.target.value as PdpTextAlign })}>
+                                {PDP_ALIGN_OPTIONS.map((a) => (
+                                  <option key={a} value={a}>
+                                    {ALIGN_LABELS[a]}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                            {!STRUCTURAL_BLOCKS.has(cell.block) && !IMAGE_BLOCKS.has(cell.block) && (
+                              <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+                                <label style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={cell.bold}
+                                    onChange={(e) => updateCell(ri, ci, { bold: e.target.checked })}
+                                  />
+                                  Negrito
+                                </label>
+                                <select value={cell.fontSize} onChange={(e) => updateCell(ri, ci, { fontSize: e.target.value as PdpFontSize })}>
+                                  {PDP_FONT_SIZE_OPTIONS.map((s) => (
+                                    <option key={s} value={s}>
+                                      {FONT_SIZE_LABELS[s]}
                                     </option>
                                   ))}
                                 </select>
-                                <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
-                                  <label style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
-                                    <input
-                                      type="checkbox"
-                                      checked={cell.bold}
-                                      onChange={(e) => updateCell(ri, ci, { bold: e.target.checked })}
-                                    />
-                                    Negrito
-                                  </label>
-                                  <select
-                                    value={cell.fontSize}
-                                    onChange={(e) => updateCell(ri, ci, { fontSize: e.target.value as PdpFontSize })}
-                                  >
-                                    {PDP_FONT_SIZE_OPTIONS.map((s) => (
-                                      <option key={s} value={s}>
-                                        {FONT_SIZE_LABELS[s]}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </div>
-                              </>
+                              </div>
                             )}
                             {cell.block === "spacer" && (
                               <select value={cell.fontSize} onChange={(e) => updateCell(ri, ci, { fontSize: e.target.value as PdpFontSize })}>
                                 {PDP_FONT_SIZE_OPTIONS.map((s) => (
                                   <option key={s} value={s}>
                                     Espaço {FONT_SIZE_LABELS[s].toLowerCase()}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                            {IMAGE_BLOCKS.has(cell.block) && (
+                              <select value={cell.fontSize} onChange={(e) => updateCell(ri, ci, { fontSize: e.target.value as PdpFontSize })}>
+                                {PDP_FONT_SIZE_OPTIONS.map((s) => (
+                                  <option key={s} value={s}>
+                                    Foto {FONT_SIZE_LABELS[s].toLowerCase()} ({s === "sm" ? "30vh" : s === "md" ? "50vh" : "70vh"})
                                   </option>
                                 ))}
                               </select>

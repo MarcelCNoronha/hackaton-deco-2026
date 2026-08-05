@@ -133,11 +133,21 @@ function renderCtaBlock(cta: string): string {
 }
 
 const FEATURED_IMAGE_STYLE = 'style="margin:1.25em 0;"';
-const FEATURED_IMAGE_IMG_STYLE = 'style="max-width:100%;height:auto;display:block;"';
-const FEATURED_IMAGE_CAPTION_STYLE = 'style="font-size:0.85em;margin-top:0.4em;"';
+const FEATURED_IMAGE_CAPTION_STYLE = 'style="font-size:0.85em;margin-top:0.4em;text-align:center;"';
 
-function renderFeaturedImageBlock(url: string, caption: string): string {
-  return `<figure class="catalogia-featured-image" ${FEATURED_IMAGE_STYLE}><img src="${escapeHtml(url)}" alt="${escapeHtml(caption)}" ${FEATURED_IMAGE_IMG_STYLE} />${
+/** `maxHeight`/`alignMargin` only ever vary in "modo de layout" (see renderLayoutCell) — every
+ *  other render mode has no per-block config surface, so they fall back to the size/centering
+ *  this block always used before those existed. `vh` (not `%`) for the cap specifically so a huge
+ *  source photo can never push a mobile viewport into a tall, awkward scroll — confirmed live
+ *  against a real product photo earlier. */
+function renderFeaturedImageBlock(
+  url: string,
+  caption: string,
+  maxHeight: string = "50vh",
+  alignMargin: string = "margin:0 auto;",
+): string {
+  const imgStyle = `style="max-width:100%;height:auto;max-height:${maxHeight};display:block;${alignMargin}"`;
+  return `<figure class="catalogia-featured-image" ${FEATURED_IMAGE_STYLE}><img src="${escapeHtml(url)}" alt="${escapeHtml(caption)}" ${imgStyle} />${
     caption ? `<figcaption ${FEATURED_IMAGE_CAPTION_STYLE}>${escapeHtml(caption)}</figcaption>` : ""
   }</figure>`;
 }
@@ -234,13 +244,33 @@ function wrapLayoutCell(html: string, cell: PdpLayoutCell): string {
   return `<div style="${style}">${html}</div>`;
 }
 
-/** Renders one layout cell — "divider"/"spacer" bypass wrapLayoutCell entirely (align/bold don't
- *  mean anything for a plain rule or an empty gap, and a cell's fontSize means "how big a gap"
- *  for a spacer instead of literal text size), every other block goes through the normal
- *  align/weight/size wrapper. */
+const IMAGE_MAX_HEIGHT: Record<PdpFontSize, string> = { sm: "30vh", md: "50vh", lg: "70vh" };
+const IMAGE_ALIGN_MARGIN: Record<PdpTextAlign, string> = {
+  left: "margin:0 auto 0 0;",
+  right: "margin:0 0 0 auto;",
+  // "Justificado" doesn't mean anything for a single image — reads the same as centered rather
+  // than erroring or silently doing nothing.
+  center: "margin:0 auto;",
+  justify: "margin:0 auto;",
+};
+
+/** Renders one layout cell:
+ *  - "divider"/"spacer" bypass wrapLayoutCell entirely — align/bold don't mean anything for a
+ *    plain rule or an empty gap, and a cell's fontSize means "how big a gap" for a spacer instead
+ *    of literal text size.
+ *  - "featured_image"/"ambient_photo" also bypass it — bold has no meaning on an <img>, align
+ *    becomes real left/right/center positioning (via margin, since a block-level image ignores
+ *    `text-align` on its wrapper), and fontSize becomes "how tall can this photo get" instead of
+ *    literal text size.
+ *  - every other block goes through the normal align/weight/size wrapper. */
 function renderLayoutCell(cell: PdpLayoutCell, level: DescriptionRichness, data: BlockData): string {
   if (cell.block === "divider") return renderDividerBlock();
   if (cell.block === "spacer") return renderSpacerBlock(cell.fontSize);
+  if (cell.block === "featured_image" || cell.block === "ambient_photo") {
+    const photo = cell.block === "featured_image" ? data.featuredImage : data.ambientPhoto;
+    if (!photo) return "";
+    return renderFeaturedImageBlock(photo.url, photo.caption, IMAGE_MAX_HEIGHT[cell.fontSize], IMAGE_ALIGN_MARGIN[cell.align]);
+  }
   return wrapLayoutCell(renderBlock(cell.block, level, data), cell);
 }
 
