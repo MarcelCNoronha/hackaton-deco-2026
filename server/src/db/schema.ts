@@ -263,6 +263,12 @@ export const pdpTemplates = pgTable("pdp_templates", {
   // etc. in publisher.agent.ts), so content escaping/level-awareness never differs between the two
   // modes, only how the pieces get assembled. Null means "simple mode" (blocks list decides).
   customHtml: text("custom_html"),
+  // Optional "modo de layout": a grid of rows, each with 1-2 columns, each column naming which
+  // block renders there plus its own text-align/bold/font-size — richer than `blocks`' fixed
+  // single-column order but without giving up the escaping/level-awareness that raw `customHtml`
+  // does. Precedence at render time (see renderPdp): customHtml > layout > blocks. Null means this
+  // mode isn't in use. Shape validated at the API boundary (pdp-templates.routes.ts), stored as-is.
+  layout: jsonb("layout"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
   pk: primaryKey({ columns: [table.platform, table.category, table.level] }),

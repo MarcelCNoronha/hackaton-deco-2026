@@ -3,7 +3,15 @@ import { db } from "../db/client.js";
 import { enrichmentProposals, enrichmentRuns, products } from "../db/schema.js";
 import type { CatalogClient } from "../clients/catalog-types.js";
 import type { DescriptionRichness } from "../clients/llm-types.js";
-import { resolvePdpTemplate, type PdpBlock, type ResolvedPdpTemplate } from "../repositories/pdp-templates.repo.js";
+import {
+  resolvePdpTemplate,
+  type PdpBlock,
+  type PdpFontSize,
+  type PdpLayoutCell,
+  type PdpLayoutRow,
+  type PdpTextAlign,
+  type ResolvedPdpTemplate,
+} from "../repositories/pdp-templates.repo.js";
 import { getCategoryFields } from "../repositories/category-spec-fields.repo.js";
 import type { CatalogPlatform } from "../clients/catalog-types.js";
 
@@ -60,17 +68,23 @@ function renderDescriptionBlock(text: string): string {
   return (paragraphs.length ? paragraphs : [text]).map((p) => `<p ${PARAGRAPH_STYLE}>${escapeHtml(p)}</p>`).join("");
 }
 
-/** Same reasoning as SPECS_TABLE_STYLE below — confirmed live: this store's theme resets list
- *  markers (no visible •), so an unstyled <ul><li> rendered as plain stacked lines with no bullet
- *  point at all. Restores the marker/spacing, plus a top margin so the list doesn't butt straight
- *  against the paragraph before it. */
-const BULLETS_LIST_STYLE = 'style="list-style:disc;padding-left:1.4em;margin:1.25em 0;line-height:1.5;"';
-const BULLET_ITEM_STYLE = 'style="margin-bottom:0.4em;"';
+/** `<ul>`/`<li>` with `list-style:disc` still rendered as plain stacked lines with no visible
+ *  marker AND no indent on this store's live theme — confirmed by re-checking the actually
+ *  published HTML, which had the inline style intact, meaning something targets `ul`/`li`
+ *  specifically (the `<table>`/`<h2>`/`<h3>` inline styles elsewhere on this same page all render
+ *  fine). Rather than chase that further, bullets are built from `<div>`/`<span>` with a literal "•"
+ *  character positioned via flexbox — no tag a list-targeting rule could catch, no dependence on
+ *  the browser's marker box at all. */
+const BULLETS_SECTION_STYLE = 'style="margin:1.25em 0;"';
+const BULLET_ROW_STYLE = 'style="display:flex;gap:0.6em;margin-bottom:0.4em;line-height:1.5;"';
+const BULLET_MARK_STYLE = 'style="flex:none;"';
 
 function renderBulletsBlock(bullets: string[], level: DescriptionRichness): string {
   if (level === "plain") return `<p>${bullets.map(escapeHtml).join(" — ")}</p>`;
-  const items = bullets.map((b) => `<li ${BULLET_ITEM_STYLE}>${escapeHtml(b)}</li>`).join("");
-  return `<ul class="catalogia-bullets" ${BULLETS_LIST_STYLE}>${items}</ul>`;
+  const items = bullets
+    .map((b) => `<div ${BULLET_ROW_STYLE}><span ${BULLET_MARK_STYLE}>•</span><span>${escapeHtml(b)}</span></div>`)
+    .join("");
+  return `<div class="catalogia-bullets" ${BULLETS_SECTION_STYLE}>${items}</div>`;
 }
 
 /** A bare `<table>` has NO default browser border/spacing — confirmed live: without a store theme
@@ -135,6 +149,33 @@ export interface BlockData {
   faq?: Array<{ question: string; answer: string }>;
   cta?: string;
   featuredImage?: { url: string; caption: string };
+  // "ambient_photo" block's source — manufacturer-reference photo first, AI-generated lifestyle
+  // image as fallback (not wired up yet: no proposal field populates this today, so the block
+  // silently renders empty, same as any other block with no data — see PDP_BLOCKS' doc comment).
+  ambientPhoto?: { url: string; caption: string };
+}
+
+/** Renders exactly one block, or "" when its data wasn't approved/available for this product —
+ *  the single dispatch table every render mode (fixed list, {{placeholder}} template, row/column
+ *  layout) shares, so a new block type or a tweak to an existing one never has to be taught to
+ *  more than one place. */
+function renderBlock(block: PdpBlock, level: DescriptionRichness, data: BlockData): string {
+  switch (block) {
+    case "description":
+      return data.description ? renderDescriptionBlock(data.description) : "";
+    case "benefit_bullets":
+      return data.bullets ? renderBulletsBlock(data.bullets, level) : "";
+    case "technical_specs":
+      return data.specs ? renderSpecsBlock(data.specs, level) : "";
+    case "faq":
+      return data.faq ? renderFaqBlock(data.faq, level) : "";
+    case "cta":
+      return data.cta ? renderCtaBlock(data.cta) : "";
+    case "featured_image":
+      return data.featuredImage ? renderFeaturedImageBlock(data.featuredImage.url, data.featuredImage.caption) : "";
+    case "ambient_photo":
+      return data.ambientPhoto ? renderFeaturedImageBlock(data.ambientPhoto.url, data.ambientPhoto.caption) : "";
+  }
 }
 
 /** Assembles the final description HTML strictly following `blocks`' order — a block is skipped
@@ -143,18 +184,7 @@ export interface BlockData {
  *  preview (pdp-templates.routes.ts) renders with the EXACT same function that actually publishes
  *  — a preview that could drift from real behavior would be worse than no preview at all. */
 export function renderPdpHtml(blocks: PdpBlock[], level: DescriptionRichness, data: BlockData): string {
-  const parts: string[] = [];
-  for (const block of blocks) {
-    if (block === "description" && data.description) parts.push(renderDescriptionBlock(data.description));
-    else if (block === "benefit_bullets" && data.bullets) parts.push(renderBulletsBlock(data.bullets, level));
-    else if (block === "technical_specs" && data.specs) parts.push(renderSpecsBlock(data.specs, level));
-    else if (block === "faq" && data.faq) parts.push(renderFaqBlock(data.faq, level));
-    else if (block === "cta" && data.cta) parts.push(renderCtaBlock(data.cta));
-    else if (block === "featured_image" && data.featuredImage) {
-      parts.push(renderFeaturedImageBlock(data.featuredImage.url, data.featuredImage.caption));
-    }
-  }
-  return parts.join("");
+  return blocks.map((block) => renderBlock(block, level, data)).join("");
 }
 
 /** "Modo avançado" (see pdpTemplates.customHtml's doc comment) — same per-block renderers as
@@ -164,24 +194,59 @@ export function renderPdpHtml(blocks: PdpBlock[], level: DescriptionRichness, da
  *  approved) is replaced with an empty string — same "skip silently, never an empty shell" rule as
  *  the simple-mode renderer, just token-by-token instead of block-by-block. */
 export function renderPdpHtmlFromTemplate(customHtml: string, level: DescriptionRichness, data: BlockData): string {
-  const fragments: Record<PdpBlock, string> = {
-    description: data.description ? renderDescriptionBlock(data.description) : "",
-    benefit_bullets: data.bullets ? renderBulletsBlock(data.bullets, level) : "",
-    technical_specs: data.specs ? renderSpecsBlock(data.specs, level) : "",
-    faq: data.faq ? renderFaqBlock(data.faq, level) : "",
-    cta: data.cta ? renderCtaBlock(data.cta) : "",
-    featured_image: data.featuredImage ? renderFeaturedImageBlock(data.featuredImage.url, data.featuredImage.caption) : "",
-  };
+  const fragments: Partial<Record<PdpBlock, string>> = Object.fromEntries(
+    (["description", "benefit_bullets", "technical_specs", "faq", "cta", "featured_image", "ambient_photo"] as const).map((block) => [
+      block,
+      renderBlock(block, level, data),
+    ]),
+  );
   return customHtml.replace(/\{\{(\w+)\}\}/g, (match, token: string) =>
-    Object.prototype.hasOwnProperty.call(fragments, token) ? fragments[token as PdpBlock] : match,
+    Object.prototype.hasOwnProperty.call(fragments, token) ? (fragments[token as PdpBlock] ?? "") : match,
   );
 }
 
-/** Picks whichever of the two renderers above applies — the one call site both publisher.agent.ts
- *  and the "Configuração de PDP" preview route need, so neither has to duplicate the
- *  customHtml-vs-blocks branch itself. */
-export function renderPdp(template: { blocks: PdpBlock[]; customHtml: string | null }, level: DescriptionRichness, data: BlockData): string {
-  return template.customHtml ? renderPdpHtmlFromTemplate(template.customHtml, level, data) : renderPdpHtml(template.blocks, level, data);
+const ALIGN_CSS: Record<PdpTextAlign, string> = { left: "left", right: "right", center: "center", justify: "justify" };
+const FONT_SIZE_CSS: Record<PdpFontSize, string> = { sm: "0.85em", md: "1em", lg: "1.2em" };
+
+/** Wraps one cell's rendered block in its own align/weight/size — `text-align`/`font-weight`/
+ *  `font-size` all inherit into the block's own tags (paragraphs, list rows, table cells), so one
+ *  wrapper is enough without having to thread these through every renderBlock case individually. */
+function wrapLayoutCell(html: string, cell: PdpLayoutCell): string {
+  if (!html) return "";
+  const style = `text-align:${ALIGN_CSS[cell.align]};font-size:${FONT_SIZE_CSS[cell.fontSize]};${cell.bold ? "font-weight:700;" : ""}`;
+  return `<div style="${style}">${html}</div>`;
+}
+
+/** "Modo de layout" (see pdpTemplates.layout's doc comment) — a row with one column renders full
+ *  width; a row with two renders as a side-by-side flex pair (wraps on narrow viewports rather than
+ *  forcing an overlap). A cell whose block has no data collapses out entirely, same "never an empty
+ *  shell" rule as the other two render modes — including a two-column row where only one side has
+ *  data, which then just renders as that one column, not a lopsided empty box next to it. */
+export function renderPdpLayout(layout: PdpLayoutRow[], level: DescriptionRichness, data: BlockData): string {
+  const rows = layout
+    .map((row) => row.columns.map((cell) => wrapLayoutCell(renderBlock(cell.block, level, data), cell)).filter(Boolean))
+    .filter((cells) => cells.length > 0)
+    .map((cells) =>
+      cells.length === 1
+        ? cells[0]
+        : `<div style="display:flex;gap:1.5em;flex-wrap:wrap;margin:1em 0;">${cells
+            .map((c) => `<div style="flex:1;min-width:220px;">${c}</div>`)
+            .join("")}</div>`,
+    );
+  return rows.join("");
+}
+
+/** Picks whichever render mode applies — the one call site both publisher.agent.ts and the
+ *  "Configuração de PDP" preview route need, so neither has to duplicate the
+ *  customHtml-vs-layout-vs-blocks precedence itself. */
+export function renderPdp(
+  template: { blocks: PdpBlock[]; customHtml: string | null; layout?: PdpLayoutRow[] | null },
+  level: DescriptionRichness,
+  data: BlockData,
+): string {
+  if (template.customHtml) return renderPdpHtmlFromTemplate(template.customHtml, level, data);
+  if (template.layout && template.layout.length > 0) return renderPdpLayout(template.layout, level, data);
+  return renderPdpHtml(template.blocks, level, data);
 }
 
 async function markPublished(proposalId: number): Promise<void> {

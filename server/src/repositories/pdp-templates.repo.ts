@@ -8,9 +8,36 @@ export const DEFAULT_PDP_CATEGORY = "*";
 
 /** Every block that can be merged into the description HTML, in the order a merchant might pick —
  *  "featured_image" only ever renders when the run's `descriptionRichness` is
- *  "structured_with_image" AND the LLM actually picked a photo (silently skipped otherwise). */
-export const PDP_BLOCKS = ["description", "benefit_bullets", "technical_specs", "featured_image", "faq", "cta"] as const;
+ *  "structured_with_image" AND the LLM actually picked a photo (silently skipped otherwise).
+ *  "ambient_photo" is the manufacturer-reference/lifestyle photo a merchant can choose to show
+ *  INSTEAD of (or alongside) "technical_specs" in the description — real specs always go to the
+ *  Specification module ("Características do Produto") regardless of whether this block is used. */
+export const PDP_BLOCKS = [
+  "description",
+  "benefit_bullets",
+  "technical_specs",
+  "featured_image",
+  "ambient_photo",
+  "faq",
+  "cta",
+] as const;
 export type PdpBlock = (typeof PDP_BLOCKS)[number];
+
+export type PdpTextAlign = "left" | "right" | "center" | "justify";
+export type PdpFontSize = "sm" | "md" | "lg";
+
+/** One cell of the "modo de layout" grid — see schema.ts's doc comment on pdpTemplates.layout. */
+export interface PdpLayoutCell {
+  block: PdpBlock;
+  align: PdpTextAlign;
+  bold: boolean;
+  fontSize: PdpFontSize;
+}
+
+/** One row of the layout grid — 1 or 2 cells (columns) wide. */
+export interface PdpLayoutRow {
+  columns: PdpLayoutCell[];
+}
 
 export interface PdpTemplate {
   platform: CatalogPlatform;
@@ -20,6 +47,10 @@ export interface PdpTemplate {
   /** "Modo avançado" — free-form HTML with {{placeholder}} tokens (see schema.ts's doc comment on
    *  pdpTemplates.customHtml). Null means "simple mode" — `blocks` decides the structure instead. */
   customHtml: string | null;
+  /** "Modo de layout" — rows/columns grid, each cell naming a block + its own align/bold/fontSize
+   *  (see schema.ts's doc comment on pdpTemplates.layout). Null means this mode isn't in use.
+   *  Ignored when `customHtml` is set. */
+  layout: PdpLayoutRow[] | null;
   /** "specific" — this exact category has its own saved row for this level. "default" — no
    *  category-specific row exists, so `blocks`/`customHtml` are inherited from the catalog-wide
    *  `'*'` row (or the hardcoded factory default if even that doesn't exist yet). Only meaningful
@@ -33,6 +64,7 @@ export interface PdpTemplate {
 export interface ResolvedPdpTemplate {
   blocks: PdpBlock[];
   customHtml: string | null;
+  layout: PdpLayoutRow[] | null;
 }
 
 /** Same order the pipeline has always merged these in (see HACKATHON.md) — used whenever no
@@ -64,6 +96,7 @@ export async function getPdpTemplates(platform: CatalogPlatform, category: strin
         level,
         blocks: specificRow.blocks as PdpBlock[],
         customHtml: specificRow.customHtml,
+        layout: (specificRow.layout as PdpLayoutRow[] | null) ?? null,
         source: "specific" as const,
       };
     }
@@ -75,6 +108,7 @@ export async function getPdpTemplates(platform: CatalogPlatform, category: strin
       level,
       blocks: (fallbackRow?.blocks as PdpBlock[] | undefined) ?? defaultBlocksFor(level),
       customHtml: fallbackRow?.customHtml ?? null,
+      layout: (fallbackRow?.layout as PdpLayoutRow[] | null | undefined) ?? null,
       source: "default" as const,
     };
   });
@@ -100,6 +134,7 @@ export async function resolvePdpTemplate(
   return {
     blocks: (row?.blocks as PdpBlock[] | undefined) ?? defaultBlocksFor(level),
     customHtml: row?.customHtml ?? null,
+    layout: (row?.layout as PdpLayoutRow[] | null | undefined) ?? null,
   };
 }
 
@@ -111,8 +146,12 @@ export async function setPdpTemplate(params: {
   /** Omit/null to stay in (or revert to) simple mode; a non-empty string switches this
    *  (platform, category, level) to advanced mode — see schema.ts's doc comment. */
   customHtml?: string | null;
+  /** Omit/null to stay in (or revert to) simple/advanced mode; a non-empty array switches this
+   *  (platform, category, level) to "modo de layout" — see schema.ts's doc comment. */
+  layout?: PdpLayoutRow[] | null;
 }): Promise<void> {
   const customHtml = params.customHtml?.trim() || null;
+  const layout = params.layout?.length ? params.layout : null;
   await db
     .insert(pdpTemplates)
     .values({
@@ -121,10 +160,11 @@ export async function setPdpTemplate(params: {
       level: params.level,
       blocks: params.blocks,
       customHtml,
+      layout,
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
       target: [pdpTemplates.platform, pdpTemplates.category, pdpTemplates.level],
-      set: { blocks: params.blocks, customHtml, updatedAt: new Date() },
+      set: { blocks: params.blocks, customHtml, layout, updatedAt: new Date() },
     });
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { renderPdp, renderPdpHtml, renderPdpHtmlFromTemplate } from "./publisher.agent.js";
+import { renderPdp, renderPdpHtml, renderPdpHtmlFromTemplate, renderPdpLayout } from "./publisher.agent.js";
+import type { PdpLayoutRow } from "../repositories/pdp-templates.repo.js";
 
 describe("renderPdpHtml", () => {
   it("escapes HTML-significant characters so a malicious/odd attribute value can't inject markup", () => {
@@ -9,17 +10,17 @@ describe("renderPdpHtml", () => {
     expect(html).toContain("&amp; cia");
   });
 
-  it("renders bullets as plain text (no <ul>/<li>) on the Médio (plain) level", () => {
+  it("renders bullets as plain text (no bullet rows) on the Médio (plain) level", () => {
     const html = renderPdpHtml(["benefit_bullets"], "plain", { bullets: ["Fácil de limpar", "Alta durabilidade"] });
-    expect(html).not.toContain("<ul");
-    expect(html).not.toContain("<li>");
+    expect(html).not.toContain("catalogia-bullets");
     expect(html).toContain("Fácil de limpar");
   });
 
-  it("renders bullets as a real <ul>/<li> list on structured levels (Bom/Excelente)", () => {
+  it("renders bullets as a marked list on structured levels (Bom/Excelente) — using a literal • rather than <ul>/<li>'s native marker, which this store's theme silently hides even with an explicit list-style", () => {
     const html = renderPdpHtml(["benefit_bullets"], "structured", { bullets: ["Fácil de limpar", "Alta durabilidade"] });
-    expect(html).toContain("<ul");
-    expect(html).toContain("Fácil de limpar</li>");
+    expect(html).toContain("catalogia-bullets");
+    expect(html).toContain(">•<");
+    expect(html).toContain("Fácil de limpar</span>");
   });
 
   it("respects the blocks array order regardless of the order fields are supplied in", () => {
@@ -112,5 +113,74 @@ describe("renderPdp (mode dispatch)", () => {
     });
     expect(html).not.toContain("Compre agora");
     expect(html).toContain("Olá.");
+  });
+
+  it("uses layout when set and customHtml is null, ignoring the blocks list entirely", () => {
+    const layout: PdpLayoutRow[] = [{ columns: [{ block: "cta", align: "center", bold: false, fontSize: "md" }] }];
+    const html = renderPdp({ blocks: ["description"], customHtml: null, layout }, "plain", {
+      description: "Olá.",
+      cta: "Compre agora",
+    });
+    expect(html).not.toContain("Olá.");
+    expect(html).toContain("Compre agora");
+  });
+
+  it("prefers customHtml over layout when both are set", () => {
+    const layout: PdpLayoutRow[] = [{ columns: [{ block: "cta", align: "center", bold: false, fontSize: "md" }] }];
+    const html = renderPdp({ blocks: [], customHtml: "<div>{{description}}</div>", layout }, "plain", {
+      description: "Olá.",
+      cta: "Compre agora",
+    });
+    expect(html).toContain("Olá.");
+    expect(html).not.toContain("Compre agora");
+  });
+});
+
+describe("renderPdpLayout ('modo de layout')", () => {
+  it("renders a single-column row full width, applying that cell's align/bold/fontSize", () => {
+    const layout: PdpLayoutRow[] = [{ columns: [{ block: "cta", align: "center", bold: true, fontSize: "lg" }] }];
+    const html = renderPdpLayout(layout, "plain", { cta: "Compre agora" });
+    expect(html).toMatch(/text-align:center/);
+    expect(html).toMatch(/font-weight:700/);
+    expect(html).toMatch(/font-size:1\.2em/);
+    expect(html).toContain("Compre agora");
+  });
+
+  it("renders a two-column row side by side with each cell keeping its own styling", () => {
+    const layout: PdpLayoutRow[] = [
+      {
+        columns: [
+          { block: "benefit_bullets", align: "justify", bold: false, fontSize: "md" },
+          { block: "technical_specs", align: "right", bold: false, fontSize: "sm" },
+        ],
+      },
+    ];
+    const html = renderPdpLayout(layout, "structured", {
+      bullets: ["Resistente"],
+      specs: [{ label: "Material", value: "Cerâmica" }],
+    });
+    expect(html).toContain("display:flex");
+    expect(html).toMatch(/text-align:right/);
+    expect(html).toContain("Resistente");
+    expect(html).toContain("Cerâmica");
+  });
+
+  it("collapses a two-column row down to just the populated column when the other cell has no data", () => {
+    const layout: PdpLayoutRow[] = [
+      {
+        columns: [
+          { block: "cta", align: "left", bold: false, fontSize: "md" },
+          { block: "faq", align: "left", bold: false, fontSize: "md" },
+        ],
+      },
+    ];
+    const html = renderPdpLayout(layout, "plain", { cta: "Compre agora" });
+    expect(html).not.toContain("display:flex");
+    expect(html).toContain("Compre agora");
+  });
+
+  it("skips a row entirely when none of its cells have data", () => {
+    const layout: PdpLayoutRow[] = [{ columns: [{ block: "faq", align: "left", bold: false, fontSize: "md" }] }];
+    expect(renderPdpLayout(layout, "plain", {})).toBe("");
   });
 });

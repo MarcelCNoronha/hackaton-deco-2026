@@ -176,6 +176,13 @@
       "when": 1785887918146,
       "tag": "0024_careless_siren",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1785893494562,
+      "tag": "0025_mature_cloak",
+      "breakpoints": true
     }
   ]
 }

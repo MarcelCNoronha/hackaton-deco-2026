@@ -7,6 +7,13 @@ import { requireSection } from "../../auth/guards.js";
 
 const levelEnum = z.enum(["plain", "structured", "structured_with_image"]);
 const blockEnum = z.enum(PDP_BLOCKS);
+const alignEnum = z.enum(["left", "right", "center", "justify"]);
+const fontSizeEnum = z.enum(["sm", "md", "lg"]);
+const layoutCellSchema = z.object({ block: blockEnum, align: alignEnum, bold: z.boolean(), fontSize: fontSizeEnum });
+const layoutSchema = z
+  .array(z.object({ columns: z.array(layoutCellSchema).min(1).max(2) }))
+  .nullable()
+  .optional();
 
 const templateBody = z.object({
   level: levelEnum,
@@ -15,6 +22,9 @@ const templateBody = z.object({
   // Non-empty switches this (platform, category, level) to "modo avançado" — see
   // pdpTemplates.customHtml's doc comment. Empty/omitted keeps (or reverts to) simple mode.
   customHtml: z.string().nullable().optional(),
+  // Non-empty switches this (platform, category, level) to "modo de layout" — see
+  // pdpTemplates.layout's doc comment. Empty/omitted keeps (or reverts to) simple/advanced mode.
+  layout: layoutSchema,
 });
 
 /** Generic placeholder content — the preview isn't tied to a real product, so this stands in for
@@ -47,6 +57,7 @@ const SAMPLE_DATA = {
   ],
   cta: "Adicione ao carrinho e receba em casa em até 5 dias úteis.",
   featuredImage: { url: PLACEHOLDER_IMAGE, caption: "Destaque: acabamento resistente a manchas" },
+  ambientPhoto: { url: PLACEHOLDER_IMAGE, caption: "Produto em ambiente real" },
 };
 
 export async function pdpTemplatesRoutes(app: FastifyInstance) {
@@ -67,23 +78,31 @@ export async function pdpTemplatesRoutes(app: FastifyInstance) {
    *  straight from the (possibly unsaved) editor state, not from the DB, so the user sees the
    *  effect of an edit before clicking "Salvar". */
   app.post("/api/pdp-templates/preview", async (req, reply) => {
-    const body = z.object({ level: levelEnum, blocks: z.array(blockEnum), customHtml: z.string().nullable().optional() }).parse(req.body);
-    const html = renderPdp({ blocks: body.blocks as PdpBlock[], customHtml: body.customHtml?.trim() || null }, body.level, SAMPLE_DATA);
+    const body = z
+      .object({ level: levelEnum, blocks: z.array(blockEnum), customHtml: z.string().nullable().optional(), layout: layoutSchema })
+      .parse(req.body);
+    const html = renderPdp(
+      { blocks: body.blocks as PdpBlock[], customHtml: body.customHtml?.trim() || null, layout: body.layout ?? null },
+      body.level,
+      SAMPLE_DATA,
+    );
     return reply.send({ html });
   });
 
   app.put("/api/pdp-templates", async (req, reply) => {
     const body = templateBody.parse(req.body);
     const customHtml = body.customHtml?.trim() || null;
-    // Only enforced in simple mode — in "modo avançado" the merchant's own HTML decides the
-    // structure, {{description}} isn't required to appear in it (though publishing without ANY
-    // description content would be an odd choice, it's the merchant's call, not ours to block).
-    if (!customHtml && !body.blocks.includes("description")) {
+    const layout = body.layout?.length ? body.layout : null;
+    // Only enforced in simple mode — in "modo avançado"/"modo de layout" the merchant's own
+    // markup/grid decides the structure, {{description}}/a description cell isn't required to
+    // appear (though publishing without ANY description content would be an odd choice, it's the
+    // merchant's call, not ours to block).
+    if (!customHtml && !layout && !body.blocks.includes("description")) {
       return reply.status(400).send({ error: "O bloco 'description' é obrigatório em qualquer estrutura de PDP." });
     }
     const platform = await getCatalogPlatform();
     const category = body.category ?? DEFAULT_PDP_CATEGORY;
-    await setPdpTemplate({ platform, category, level: body.level, blocks: body.blocks, customHtml });
+    await setPdpTemplate({ platform, category, level: body.level, blocks: body.blocks, customHtml, layout });
     return { platform, category, templates: await getPdpTemplates(platform, category) };
   });
 }

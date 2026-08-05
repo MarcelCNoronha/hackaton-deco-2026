@@ -193,12 +193,38 @@ export interface LevelCostEstimate {
 
 /** Every block that can be merged into the description HTML, in the order a merchant picks — see
  *  server/src/repositories/pdp-templates.repo.ts (single source of truth). */
-export const PDP_BLOCKS = ["description", "benefit_bullets", "technical_specs", "featured_image", "faq", "cta"] as const;
+export const PDP_BLOCKS = [
+  "description",
+  "benefit_bullets",
+  "technical_specs",
+  "featured_image",
+  "ambient_photo",
+  "faq",
+  "cta",
+] as const;
 
 /** Mirrors the server's MAX_REFERENCE_LINKS (category-reference-links.repo.ts) — kept as a literal
  *  here too since the two projects don't share imports across the client/server boundary. */
 export const MAX_REFERENCE_LINKS = 3;
 export type PdpBlock = (typeof PDP_BLOCKS)[number];
+
+export const PDP_ALIGN_OPTIONS = ["justify", "left", "right", "center"] as const;
+export type PdpTextAlign = (typeof PDP_ALIGN_OPTIONS)[number];
+export const PDP_FONT_SIZE_OPTIONS = ["sm", "md", "lg"] as const;
+export type PdpFontSize = (typeof PDP_FONT_SIZE_OPTIONS)[number];
+
+/** One cell of the "modo de layout" grid — mirrors server/src/repositories/pdp-templates.repo.ts's
+ *  PdpLayoutCell. */
+export interface PdpLayoutCell {
+  block: PdpBlock;
+  align: PdpTextAlign;
+  bold: boolean;
+  fontSize: PdpFontSize;
+}
+
+export interface PdpLayoutRow {
+  columns: PdpLayoutCell[];
+}
 
 /** Mirrors the server's `'*'` catalog-wide default category (pdp-templates.repo.ts's
  *  DEFAULT_PDP_CATEGORY) — kept as its own constant (even though it's the same literal as
@@ -210,6 +236,12 @@ export interface PdpTemplate {
   category: string;
   level: DescriptionRichness;
   blocks: PdpBlock[];
+  /** "Modo avançado" — free-form HTML with {{placeholder}} tokens. Null means simple/layout mode
+   *  decides instead. Takes priority over `layout`/`blocks` when set. */
+  customHtml: string | null;
+  /** "Modo de layout" — rows/columns grid, each cell naming a block + its own align/bold/fontSize.
+   *  Null means this mode isn't in use. Ignored when `customHtml` is set. */
+  layout: PdpLayoutRow[] | null;
   /** "specific" — this category has its own saved structure for this level. "default" — inherited
    *  from the catalog-wide `'*'` template (or the factory default if that isn't set either). */
   source: "specific" | "default";
@@ -511,12 +543,18 @@ export const api = {
     request<{ platform: CatalogPlatform; category: string; templates: PdpTemplate[] }>(
       `/pdp-templates${category ? `?category=${encodeURIComponent(category)}` : ""}`,
     ),
-  setPdpTemplate: (body: { level: DescriptionRichness; blocks: PdpBlock[]; category?: string }) =>
+  setPdpTemplate: (body: {
+    level: DescriptionRichness;
+    blocks: PdpBlock[];
+    category?: string;
+    customHtml?: string | null;
+    layout?: PdpLayoutRow[] | null;
+  }) =>
     request<{ platform: CatalogPlatform; category: string; templates: PdpTemplate[] }>("/pdp-templates", {
       method: "PUT",
       body: JSON.stringify(body),
     }),
-  previewPdpTemplate: (body: { level: DescriptionRichness; blocks: PdpBlock[] }) =>
+  previewPdpTemplate: (body: { level: DescriptionRichness; blocks: PdpBlock[]; customHtml?: string | null; layout?: PdpLayoutRow[] | null }) =>
     request<{ html: string }>("/pdp-templates/preview", { method: "POST", body: JSON.stringify(body) }),
 
   getCategoryNodes: () => request<{ platform: CatalogPlatform; nodes: CategoryTreeNode[] }>("/category-nodes"),
