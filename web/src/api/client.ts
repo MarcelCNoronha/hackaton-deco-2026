@@ -681,7 +681,10 @@ export const api = {
   listProducts: () => request<Product[]>("/products"),
   resyncProduct: (id: number) => request<Product>(`/products/${id}/resync`, { method: "POST" }),
   listGeneratedImages: (productId: number) => request<GeneratedImage[]>(`/products/${productId}/generated-images`),
-  generateImage: (productId: number, body: { kind: "principal" | "lifestyle" | "dimensional" | "feature_callout"; note?: string }) =>
+  generateImage: (
+    productId: number,
+    body: { kind: "principal" | "lifestyle" | "dimensional" | "feature_callout"; note?: string; runId?: number },
+  ) =>
     request<GeneratedImage>(`/products/${productId}/generated-images`, { method: "POST", body: JSON.stringify(body) }),
   classifyGeneratedImage: (imageId: number, classification: PhotoClassification) =>
     request<GeneratedImage>(`/generated-images/${imageId}/classify`, { method: "PATCH", body: JSON.stringify({ classification }) }),

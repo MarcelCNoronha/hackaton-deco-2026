@@ -22,6 +22,11 @@ import { PHOTO_CLASSIFICATION_LABELS, resolvePhotoLabel } from "../../lib/photo-
 const generateImageBody = z.object({
   kind: z.enum(["principal", "lifestyle", "dimensional", "feature_callout"]),
   note: z.string().max(500).optional(),
+  // Which run's "Custo da otimização" this generation's cost should count toward — optional since
+  // this endpoint doesn't strictly require a run context, but RunDetail (the only caller today)
+  // always has one in scope; omitting it silently drops the cost from every run total, confirmed
+  // live (2026-08-05).
+  runId: z.number().optional(),
 });
 
 const manufacturerReferenceBody = z.object({ manufacturerReferenceUrl: z.string().url().nullable() });
@@ -171,7 +176,7 @@ export async function productsRoutes(app: FastifyInstance) {
     }
 
     try {
-      const gemini = new GeminiClient(geminiCreds.apiKey, IMAGE_GENERATION_MODEL, makeRequestLogger());
+      const gemini = new GeminiClient(geminiCreds.apiKey, IMAGE_GENERATION_MODEL, makeRequestLogger(body.runId));
       const row = await generateProductImage({ gemini, product, kind: body.kind, note: body.note });
       return reply.status(201).send(row);
     } catch (err) {

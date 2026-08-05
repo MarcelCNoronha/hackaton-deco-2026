@@ -267,8 +267,11 @@ export function RunDetail() {
     setImageGenError(null);
     setGeneratingFor((prev) => ({ ...prev, [productId]: kind }));
     try {
-      const image = await api.generateImage(productId, { kind });
+      const image = await api.generateImage(productId, { kind, runId });
       setGeneratedImages((prev) => ({ ...prev, [productId]: [image, ...(prev[productId] ?? [])] }));
+      // The run may already be done (poll loop stopped) — costs otherwise wouldn't reflect this
+      // generation's price until something else happens to trigger a refresh.
+      api.runCosts(runId).then(setCosts);
     } catch (err) {
       setImageGenError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -585,6 +588,17 @@ export function RunDetail() {
                     >
                       {generatingFor[productId] === "feature_callout" ? "Gerando…" : "🎯 Gerar foto de destaque"}
                     </button>
+                    {descriptionProposal && (descriptionProposal.status === "approved" || descriptionProposal.status === "published") && (
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={() => handleRepublish(descriptionProposal)}
+                        disabled={republishingId === descriptionProposal.id}
+                        title="Reprocessa a descrição já publicada usando as fotos classificadas agora (principal/ambientada/dimensional/destaque) — útil depois de mudar um Label ou gerar uma foto nova."
+                      >
+                        {republishingId === descriptionProposal.id ? "Enviando…" : "🔄 Republicar anúncio"}
+                      </button>
+                    )}
                   </div>
                 </div>
                 {(generatedImages[productId]?.length ?? 0) === 0 && (catalogImages[productId]?.length ?? 0) === 0 ? (
