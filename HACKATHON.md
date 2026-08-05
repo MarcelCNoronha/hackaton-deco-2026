@@ -318,6 +318,35 @@ specs, FAQ, dados estruturados) + alt-text de imagem, sem opção de escolher. A
   > departamento > marca > `'*'`, do mais específico pro mais genérico) e estender
   `resolvePdpTemplate`/`getPdpTemplates` pra considerar múltiplas chaves em vez de só `category`.
 
+- **Palavras recomendadas/proibidas e instruções por campo e por padrão de foto, por categoria** —
+  pedido em 2026-08-05, não implementado. Duas peças complementares:
+  1. **Listas de palavras por categoria**: cadastrar, por categoria (com fallback pro
+     catálogo-wide `'*'`), duas listas de palavras/termos — uma **recomendada** (terminologia que a
+     IA deve preferir — vocabulário da marca/categoria) e outra **proibida** (termos a evitar — ex.
+     superlativos sem sustentação, concorrentes, termos regulatórios/sensíveis) — aplicadas à
+     geração de descrição/SEO/FAQ como um todo.
+  2. **Instrução própria por campo de conteúdo e por padrão de foto**: hoje cada campo de conteúdo
+     (`description`, `benefit_bullets`, `technical_specs`, `faq`, `structured_data`, `seo_title`,
+     `meta_description`, `keywords`, `tags`, `cta`, `attributes_patch` — `EnrichmentField` em
+     `llm-types.ts`) só tem um fragmento de prompt fixo no código
+     (`FIELD_SPECS[field].promptFragment`, `enrichment-schema.ts`) — não existe onde o usuário digite
+     uma instrução própria por campo (ex: "em `benefit_bullets`, sempre citar garantia primeiro").
+     Do lado de imagem já existe um campo livre `note` por chamada (`generateProductImage`,
+     `image-generation.agent.ts`) pros 4 padrões (`principal`/`lifestyle`/`dimensional`/
+     `feature_callout`), mas é digitado a cada geração, não persistido por categoria/padrão. A ideia
+     é persistir uma instrução de texto livre por (categoria, campo-ou-padrão-de-foto), reaplicada
+     em todo run daquela categoria sem precisar redigitar.
+
+  As duas peças encaixariam na mesma tabela nova, na mesma tela ("Configuração de PDP", mesmo
+  seletor de categoria unificado) e no mesmo padrão de resolução específica > `'*'` já usado por
+  `category_content_profile`/`category_score_thresholds`/`pdp_templates`. Exigiria: nova
+  coluna/tabela chaveada por (plataforma, categoria, campo-ou-padrão-de-foto), um suffix novo em
+  `enrichment-schema.ts` que injete a instrução do campo específico (os suffixes existentes —
+  `buildContentProfileSuffix`/`buildTopSearchQueriesSuffix`/etc. — são todos globais, não por
+  campo), e usar a instrução persistida como default do `note` na tela de geração de imagem. Vale
+  considerar também um guard-rail no Evaluator (`evaluator.agent.ts`) que verifique se algum termo
+  proibido escapou pro texto final, em vez de confiar só na instrução do prompt.
+
 ### Geração de imagem por IA (implementado em 2026-08-03, com uma limitação de conta)
 
 Feature nova: gera foto "ambientada" (produto em cenário de uso real) ou de "destaque" (close-up
