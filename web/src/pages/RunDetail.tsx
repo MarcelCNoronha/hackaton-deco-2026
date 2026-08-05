@@ -310,12 +310,36 @@ export function RunDetail() {
     }
   }
 
+  const [deletingImageId, setDeletingImageId] = useState<number | null>(null);
+
+  /** Removes a generated/reference photo from the panel so unwanted or never-classified
+   *  generations don't pile up — confirms first only when it's already published, since that
+   *  also deletes the real photo from the storefront, not just this row. */
+  async function handleDeleteGeneratedImage(productId: number, image: GeneratedImage) {
+    if (image.publishedAt && !window.confirm("Essa foto já está publicada na loja — excluir aqui também remove a foto real da loja. Continuar?")) {
+      return;
+    }
+    setImageGenError(null);
+    setDeletingImageId(image.id);
+    try {
+      await api.deleteGeneratedImage(image.id);
+      setGeneratedImages((prev) => ({
+        ...prev,
+        [productId]: (prev[productId] ?? []).filter((img) => img.id !== image.id),
+      }));
+    } catch (err) {
+      setImageGenError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDeletingImageId(null);
+    }
+  }
+
   /** Assigns which of the 4 carousel slots a generated-here image fills — the 3 AI kinds default
    *  to a matching classification already (see CLASSIFICATION_BY_KIND server-side), but a
    *  manufacturer_reference photo starts unclassified, and any of them can be reassigned. Purely
    *  local metadata until "Publicar na loja" actually sends it — distinct from classifying a photo
    *  already live on the platform, see handleClassifyCatalogImage. */
-  async function handleClassifyGeneratedImage(productId: number, imageId: number, classification: PhotoClassification) {
+  async function handleClassifyGeneratedImage(productId: number, imageId: number, classification: PhotoClassification | null) {
     setImageGenError(null);
     setClassifyingId(`generated-${imageId}`);
     try {
@@ -333,7 +357,7 @@ export function RunDetail() {
 
   /** Re-labels a photo already on the platform — sends the VTEX write immediately (no separate
    *  "publish" step, since the photo's already live; only its Label metadata is changing). */
-  async function handleClassifyCatalogImage(productId: number, imageId: string, classification: PhotoClassification) {
+  async function handleClassifyCatalogImage(productId: number, imageId: string, classification: PhotoClassification | null) {
     setImageGenError(null);
     setClassifyingId(`catalog-${imageId}`);
     try {
@@ -704,13 +728,13 @@ export function RunDetail() {
                           )}
                           <select
                             value={image.classification ?? ""}
-                            onChange={(e) => handleClassifyGeneratedImage(productId, image.id, e.target.value as PhotoClassification)}
+                            onChange={(e) =>
+                              handleClassifyGeneratedImage(productId, image.id, e.target.value === "" ? null : (e.target.value as PhotoClassification))
+                            }
                             disabled={classifyingId === `generated-${image.id}`}
                             style={{ width: "100%", marginTop: "0.3rem", fontSize: "0.72rem" }}
                           >
-                            <option value="" disabled>
-                              Classificar…
-                            </option>
+                            <option value="">Sem classificação</option>
                             {optionsFor(image.classification ?? "")}
                           </select>
                           {image.publishedAt ? (
@@ -735,6 +759,15 @@ export function RunDetail() {
                               {publishingImageId === image.id ? "Publicando…" : "Publicar na loja"}
                             </button>
                           )}
+                          <button
+                            type="button"
+                            className="link-button danger"
+                            style={{ fontSize: "0.72rem", marginTop: "0.2rem" }}
+                            onClick={() => handleDeleteGeneratedImage(productId, image)}
+                            disabled={deletingImageId === image.id}
+                          >
+                            {deletingImageId === image.id ? "Excluindo…" : "🗑️ Excluir"}
+                          </button>
                         </div>
                       ),
                     })),
@@ -757,13 +790,13 @@ export function RunDetail() {
                             {platform === "vtex" ? (
                               <select
                                 value={currentClassification}
-                                onChange={(e) => handleClassifyCatalogImage(productId, image.id, e.target.value as PhotoClassification)}
+                                onChange={(e) =>
+                                  handleClassifyCatalogImage(productId, image.id, e.target.value === "" ? null : (e.target.value as PhotoClassification))
+                                }
                                 disabled={classifyingId === `catalog-${image.id}`}
                                 style={{ width: "100%", marginTop: "0.3rem", fontSize: "0.72rem" }}
                               >
-                                <option value="" disabled>
-                                  {classifyingId === `catalog-${image.id}` ? "Salvando…" : "Classificar…"}
-                                </option>
+                                <option value="">{classifyingId === `catalog-${image.id}` ? "Salvando…" : "Sem classificação"}</option>
                                 {optionsFor(currentClassification)}
                               </select>
                             ) : (

@@ -115,11 +115,19 @@ export interface CatalogClient {
    *  no equivalent concept; its implementation throws rather than silently no-op-ing a request the
    *  merchant explicitly asked for. */
   updateImageLabel(params: { externalId: string; variantId: string; imageId: string; label: string }): Promise<void>;
-  /** Reorders the gallery/carousel to match each photo's current Label (1, 2, 3, 4, 5...) — VTEX
-   *  only, via its real writable Position field (see vtex.client.ts's VtexSkuFile doc comment).
-   *  Shopify's implementation throws, same as updateImageLabel, since there's no Label to order by
-   *  there in the first place. */
+  /** Composes the gallery/carousel to be EXACTLY this store's classified selection: reorders every
+   *  photo with a numeric Label (1, 2, 3, 4, 5...) to match via VTEX's real writable Position field
+   *  (see vtex.client.ts's VtexSkuFile doc comment), and DELETES every photo with no Label at all —
+   *  a shopper should only ever see what was deliberately classified here, not leftover unlabeled
+   *  photos. Throws without deleting anything if NOTHING is classified yet (would otherwise zero
+   *  out the whole gallery). VTEX only; Shopify's implementation throws, same as updateImageLabel,
+   *  since there's no Label to order/select by there in the first place. */
   reorderImagesByLabel(params: { externalId: string; variantId: string }): Promise<void>;
+  /** Permanently removes one photo from the platform — used both by reorderImagesByLabel's
+   *  unclassified cleanup and by a human explicitly deleting a photo from CatalogIA's own "Fotos"
+   *  panel to stop unwanted/unused generations from piling up. VTEX: DELETE stockkeepingunit file
+   *  (confirmed against VTEX's own API reference). Shopify: `fileDelete`. */
+  deleteImage(params: { externalId: string; variantId: string; imageId: string }): Promise<void>;
   /** Publishes the seo_title/meta_description proposals — both platforms have a native field for
    *  these (VTEX: Title/MetaTagDescription on the product record. Shopify: the `seo` input on
    *  productUpdate), unlike structured_data/benefit_bullets which stay in-app only. Either key may
@@ -166,6 +174,13 @@ export interface CatalogClient {
    *  fetchable URL (both platforms fetch the bytes server-side rather than accepting a direct
    *  upload here), see the `/api/generated-images/:id/raw` route. `label` is VTEX's own numeric
    *  image-slot tag (e.g. "2" for "foto ambientada" — see publisher.agent.ts's read side); ignored
-   *  on Shopify, which has no equivalent concept. */
-  addProductImage(params: { externalId: string; variantId: string; imageUrl: string; altText?: string; label?: string }): Promise<void>;
+   *  on Shopify, which has no equivalent concept. Returns the new photo's own platform id
+   *  (persisted as generatedImages.platformImageId) so it can later be recognized/re-labeled. */
+  addProductImage(params: {
+    externalId: string;
+    variantId: string;
+    imageUrl: string;
+    altText?: string;
+    label?: string;
+  }): Promise<{ id: string }>;
 }

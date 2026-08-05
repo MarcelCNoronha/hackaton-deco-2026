@@ -391,6 +391,10 @@ export interface GeneratedImage {
   /** Set once this image was actually uploaded to the active catalog platform as a real product
    *  photo — null means it only ever existed inside CatalogIA. */
   publishedAt: string | null;
+  /** The platform's own id for the uploaded file (set together with publishedAt) — lets this exact
+   *  photo be recognized among /products/:id/catalog-images (so it isn't shown twice) and
+   *  re-labeled/cleared directly if declassified after publishing. */
+  platformImageId: string | null;
   createdAt: string;
 }
 
@@ -686,14 +690,21 @@ export const api = {
     body: { kind: "principal" | "lifestyle" | "dimensional" | "feature_callout"; note?: string; runId?: number },
   ) =>
     request<GeneratedImage>(`/products/${productId}/generated-images`, { method: "POST", body: JSON.stringify(body) }),
-  classifyGeneratedImage: (imageId: number, classification: PhotoClassification) =>
+  // classification: null declassifies — if the photo was already published, this also clears its
+  // real Label on the platform, not just the local metadata (see the route's doc comment).
+  classifyGeneratedImage: (imageId: number, classification: PhotoClassification | null) =>
     request<GeneratedImage>(`/generated-images/${imageId}/classify`, { method: "PATCH", body: JSON.stringify({ classification }) }),
   publishGeneratedImage: (productId: number, imageId: number) =>
     request<GeneratedImage>(`/products/${productId}/generated-images/${imageId}/publish`, { method: "POST" }),
+  /** Deletes a generated/reference photo from the panel so unwanted or never-classified
+   *  generations don't pile up — if it was already published, the real photo is removed from the
+   *  platform too, not just locally. */
+  deleteGeneratedImage: (imageId: number) => request<{ ok: boolean }>(`/generated-images/${imageId}`, { method: "DELETE" }),
   /** The product's own photos already on the platform, outside CatalogIA's generatedImages table
    *  — shown in the same panel so every photo for a product can be classified from one place. */
   listCatalogImages: (productId: number) => request<CatalogImage[]>(`/products/${productId}/catalog-images`),
-  classifyCatalogImage: (productId: number, imageId: string, classification: PhotoClassification) =>
+  // classification: null clears the photo's Label on the platform entirely.
+  classifyCatalogImage: (productId: number, imageId: string, classification: PhotoClassification | null) =>
     request<{ ok: boolean; label: string }>(`/products/${productId}/catalog-images/${imageId}/classify`, {
       method: "PATCH",
       body: JSON.stringify({ classification }),

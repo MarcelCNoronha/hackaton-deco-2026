@@ -160,6 +160,12 @@ export const generatedImages = pgTable("generated_images", {
   // product photo (see products.routes.ts's publish route) — null means it only ever existed
   // inside CatalogIA.
   publishedAt: timestamp("published_at", { withTimezone: true }),
+  // The platform's own id for the file created by that upload (VTEX SKU file Id) — lets
+  // /api/products/:id/catalog-images recognize "this platform photo IS this generated-images row"
+  // by identity instead of URL (VTEX rewrites the upload Url to its own CDN host on read, so a
+  // URL comparison never matches — confirmed live), and lets declassifying a published photo
+  // clear its real Label on the platform instead of only updating local metadata.
+  platformImageId: text("platform_image_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
   productIdIdx: index("generated_images_product_id_idx").on(table.productId),

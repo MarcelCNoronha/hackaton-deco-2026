@@ -455,12 +455,20 @@ export class ShopifyClient implements CatalogClient {
     }
   }
 
-  async addProductImage(params: { externalId: string; variantId: string; imageUrl: string; altText?: string; label?: string }): Promise<void> {
-    type Resp = { productCreateMedia: { mediaUserErrors: Array<{ field: string[]; message: string }> } };
+  async addProductImage(params: {
+    externalId: string;
+    variantId: string;
+    imageUrl: string;
+    altText?: string;
+    label?: string;
+  }): Promise<{ id: string }> {
+    type Resp = {
+      productCreateMedia: { media: Array<{ id: string }>; mediaUserErrors: Array<{ field: string[]; message: string }> };
+    };
     const data = await this.graphql<Resp>(
       "addProductImage",
       `mutation CreateMedia($productId: ID!, $media: [CreateMediaInput!]!) {
-        productCreateMedia(productId: $productId, media: $media) { mediaUserErrors { field message } }
+        productCreateMedia(productId: $productId, media: $media) { media { id } mediaUserErrors { field message } }
       }`,
       {
         productId: params.externalId,
@@ -470,6 +478,7 @@ export class ShopifyClient implements CatalogClient {
     if (data.productCreateMedia.mediaUserErrors.length > 0) {
       throw new Error(`Shopify productCreateMedia userError: ${data.productCreateMedia.mediaUserErrors[0].message}`);
     }
+    return { id: data.productCreateMedia.media[0].id };
   }
 
   async updateProductTags(externalId: string, tags: string[]): Promise<void> {
@@ -523,5 +532,21 @@ export class ShopifyClient implements CatalogClient {
 
   async reorderImagesByLabel(): Promise<void> {
     throw new Error("Shopify não usa Label — não há como reordenar por ele nesta plataforma.");
+  }
+
+  /** Same generic Files API as updateImageAltText — `fileDelete` takes the MediaImage/File id
+   *  directly, no product-scoping needed. */
+  async deleteImage(params: { externalId: string; variantId: string; imageId: string }): Promise<void> {
+    type Resp = { fileDelete: { userErrors: Array<{ field: string[]; message: string }> } };
+    const data = await this.graphql<Resp>(
+      "deleteImage",
+      `mutation DeleteFile($fileIds: [ID!]!) {
+        fileDelete(fileIds: $fileIds) { userErrors { field message } }
+      }`,
+      { fileIds: [params.imageId] },
+    );
+    if (data.fileDelete.userErrors.length > 0) {
+      throw new Error(`Shopify fileDelete userError: ${data.fileDelete.userErrors[0].message}`);
+    }
   }
 }

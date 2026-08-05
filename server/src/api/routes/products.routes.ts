@@ -32,7 +32,8 @@ const generateImageBody = z.object({
 
 const manufacturerReferenceBody = z.object({ manufacturerReferenceUrl: z.string().url().nullable() });
 
-const classifyImageBody = z.object({ classification: z.enum(["principal", "ambientada", "dimensional", "destaque"]) });
+// null = declassify — clears whatever slot this photo held (see the two classify routes below).
+const classifyImageBody = z.object({ classification: z.enum(["principal", "ambientada", "dimensional", "destaque"]).nullable() });
 
 const republishBody = z.object({ runId: z.number() });
 
@@ -190,41 +191,96 @@ export async function productsRoutes(app: FastifyInstance) {
   // A manufacturer_reference photo's classification isn't implied by its kind (unlike the 4
   // AI-generated kinds — see CLASSIFICATION_BY_KIND) since a downloaded photo could fill any of
   // the 4 slots; this lets a human assign (or reassign) one. Also usable to re-classify an
-  // AI-generated image if its auto-assigned slot isn't what the merchant actually wants.
+  // AI-generated image if its auto-assigned slot isn't what the merchant actually wants, or to
+  // declassify one (classification: null) — if it was already published (platformImageId set) on
+  // VTEX, this also clears its real Label there so it stops being picked up as the
+  // principal/ambient/dimensional/destaque photo, not just locally.
   app.patch<{ Params: { id: string } }>("/api/generated-images/:id/classify", async (req, reply) => {
     const body = classifyImageBody.parse(req.body);
+    const existing = await db.query.generatedImages.findFirst({ where: eq(generatedImages.id, Number(req.params.id)) });
+    if (!existing) return reply.status(404).send({ error: "Imagem não encontrada" });
+
+    if (body.classification === null && existing.platformImageId) {
+      try {
+        const catalog = await requireActiveCatalogClient();
+        if (catalog.platform === "vtex") {
+          const product = await db.query.products.findFirst({ where: eq(products.id, existing.productId) });
+          if (product) {
+            await catalog.updateImageLabel({
+              externalId: product.vtexProductId,
+              variantId: product.vtexSkuId,
+              imageId: existing.platformImageId,
+              label: "",
+            });
+          }
+        }
+      } catch (err) {
+        return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
     const [updated] = await db
       .update(generatedImages)
       .set({ classification: body.classification })
       .where(eq(generatedImages.id, Number(req.params.id)))
       .returning();
-    if (!updated) return reply.status(404).send({ error: "Imagem não encontrada" });
     return updated;
+  });
+
+  /** Deletes a generated/reference photo from CatalogIA's own "Fotos" panel, so unwanted or
+   *  never-classified generations don't pile up. If it was already published (platformImageId
+   *  set), the real photo is deleted from the platform FIRST — an error there aborts the whole
+   *  request rather than deleting the local row and leaving an untracked orphan live on the
+   *  storefront. */
+  app.delete<{ Params: { id: string } }>("/api/generated-images/:id", async (req, reply) => {
+    const existing = await db.query.generatedImages.findFirst({ where: eq(generatedImages.id, Number(req.params.id)) });
+    if (!existing) return reply.status(404).send({ error: "Imagem não encontrada" });
+
+    if (existing.platformImageId) {
+      try {
+        const catalog = await requireActiveCatalogClient();
+        const product = await db.query.products.findFirst({ where: eq(products.id, existing.productId) });
+        if (product) {
+          await catalog.deleteImage({
+            externalId: product.vtexProductId,
+            variantId: product.vtexSkuId,
+            imageId: existing.platformImageId,
+          });
+        }
+      } catch (err) {
+        return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
+    await db.delete(generatedImages).where(eq(generatedImages.id, Number(req.params.id)));
+    return reply.send({ ok: true });
   });
 
   /** The product's own photos already on the platform (a merchant's direct VTEX upload, most of
    *  which predate this store's Label convention and so come back unclassified) — shown alongside
    *  generated-images (AI + manufacturer reference) in the same panel so every photo for a product
    *  can be classified into one carousel from one place, see RunDetail's "Fotos" section. Excludes
-   *  any image whose URL is one of OUR OWN generated-images uploads (the exact
-   *  `${APP_BASE_URL}/api/generated-images/:id/raw` URL addProductImage sends VTEX) — once
-   *  published, that same photo becomes a real platform image and would otherwise show up twice:
-   *  once as its "Gerada por IA"/"Foto do fabricante" card, once again here as "Já na loja". */
+   *  any image that IS one of our own already-published generated-images rows — matched by the
+   *  platform's own file id (platformImageId), not URL: VTEX rewrites the upload Url to its own
+   *  CDN host on read, so a URL comparison never matches (confirmed live) — without this, a
+   *  published photo would show up twice: once as its "Gerada por IA"/"Foto do fabricante" card,
+   *  once again here as "Já na loja". */
   app.get<{ Params: { id: string } }>("/api/products/:id/catalog-images", async (req, reply) => {
     const product = await db.query.products.findFirst({ where: eq(products.id, Number(req.params.id)) });
     if (!product) return reply.status(404).send({ error: "Produto não encontrado" });
     try {
       const catalog = await requireActiveCatalogClient();
       const detail = await catalog.getProduct(product.vtexProductId);
-      const ownUploadPrefix = `${env.APP_BASE_URL}/api/generated-images/`;
-      return detail.images.filter((img) => !img.url.startsWith(ownUploadPrefix));
+      const ownRows = await db.query.generatedImages.findMany({ where: eq(generatedImages.productId, product.id) });
+      const ownPlatformIds = new Set(ownRows.map((r) => r.platformImageId).filter((id): id is string => id !== null));
+      return detail.images.filter((img) => !ownPlatformIds.has(img.id));
     } catch (err) {
       return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
     }
   });
 
-  // Re-labels a photo that's already on the platform (see updateImageLabel's doc comment) — VTEX
-  // only, since Shopify has no equivalent field.
+  // Re-labels (or, for classification: null, clears the Label of) a photo that's already on the
+  // platform — VTEX only, since Shopify has no equivalent field.
   app.patch<{ Params: { id: string; imageId: string } }>(
     "/api/products/:id/catalog-images/:imageId/classify",
     async (req, reply) => {
@@ -233,7 +289,7 @@ export async function productsRoutes(app: FastifyInstance) {
       if (!product) return reply.status(404).send({ error: "Produto não encontrado" });
       try {
         const catalog = await requireActiveCatalogClient();
-        const label = await resolvePhotoLabel(catalog, product.vtexProductId, body.classification);
+        const label = body.classification === null ? "" : await resolvePhotoLabel(catalog, product.vtexProductId, body.classification);
         await catalog.updateImageLabel({
           externalId: product.vtexProductId,
           variantId: product.vtexSkuId,
@@ -293,7 +349,7 @@ export async function productsRoutes(app: FastifyInstance) {
       try {
         const catalog = await requireActiveCatalogClient();
         const label = await resolvePhotoLabel(catalog, product.vtexProductId, image.classification);
-        await catalog.addProductImage({
+        const { id: platformImageId } = await catalog.addProductImage({
           externalId: product.vtexProductId,
           variantId: product.vtexSkuId,
           imageUrl: `${env.APP_BASE_URL}/api/generated-images/${image.id}/raw`,
@@ -302,7 +358,7 @@ export async function productsRoutes(app: FastifyInstance) {
         });
         const [updated] = await db
           .update(generatedImages)
-          .set({ publishedAt: new Date() })
+          .set({ publishedAt: new Date(), platformImageId })
           .where(eq(generatedImages.id, image.id))
           .returning();
         return updated;

@@ -280,6 +280,14 @@ specs, FAQ, dados estruturados) + alt-text de imagem, sem opção de escolher. A
   confundir com a duração do vídeo de demo do hackathon (5 minutos, ver "Entregáveis
   obrigatórios"), são coisas completamente diferentes.
 
+- **Seleção de recorte da foto de referência para guiar a geração da foto de destaque** — pedido
+  em 2026-08-05, não implementado. Hoje `image-generation.agent.ts`'s `feature_callout` prompt só
+  aceita uma nota de texto livre (`note`) pra dizer qual detalhe destacar; a ideia é deixar o
+  usuário desenhar/selecionar uma região (crop) de uma das fotos de referência do produto, e usar
+  essa seleção (recorte + coordenadas, ou só o recorte como imagem de referência adicional) como
+  guia visual pro Gemini saber exatamente em qual ponto do produto focar, em vez de depender só de
+  descrição em texto.
+
 - ~~**Descrição em HTML rico de verdade (padrão gsuplementos)**~~ — **implementado em
   2026-08-03/04** como os níveis Bom/Excelente (`DescriptionRichness`), ver seção "Score
   composto, níveis de anúncio e Padrões de Otimização" abaixo — HTML estruturado + imagem

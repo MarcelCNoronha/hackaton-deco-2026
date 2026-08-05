@@ -1,0 +1,1 @@
+ALTER TABLE "generated_images" ADD COLUMN "platform_image_id" text;

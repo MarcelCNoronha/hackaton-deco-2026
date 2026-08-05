@@ -471,17 +471,28 @@ export class VtexClient implements CatalogClient {
     await this.updateSkuFile(params.variantId, params.imageId, { label: params.label });
   }
 
-  /** Reorders every one of a SKU's photos to match this store's Label convention (1=principal,
-   *  2=ambientada, 3=dimensional, 4+=destaque, in that numeric order) by writing each file's real
-   *  `Position` field — see VtexSkuFile's doc comment for how that was confirmed live. Only
-   *  touches files whose Label is already a plain number; anything unclassified (or a non-numeric
-   *  Label from before this convention existed) keeps whatever position it already has rather than
-   *  being forced somewhere. Best-effort per file — one file's write failing (e.g. a transient
-   *  network blip) doesn't stop the rest from reordering. */
+  /** Composes a SKU's photo carousel to be EXACTLY this store's classified selection (confirmed
+   *  explicit product requirement, 2026-08-05): every file whose Label is a plain number
+   *  (1=principal, 2=ambientada, 3=dimensional, 4+=destaque) gets reordered to match via its real
+   *  `Position` field (see VtexSkuFile's doc comment for how that was confirmed live); every file
+   *  with NO Label (or a non-numeric one) is DELETED from the platform outright, not just skipped —
+   *  the carousel a shopper sees should only ever contain what was deliberately classified here.
+   *  Safety guard: if not a single file has a numeric Label yet (nothing classified), this refuses
+   *  to delete anything and throws instead — a real product's whole gallery going to zero photos
+   *  because nothing was classified yet would be worse than a stale carousel. Best-effort per file
+   *  beyond that check — one file's write/delete failing (e.g. a transient network blip) doesn't
+   *  stop the rest from being processed. */
   async reorderImagesByLabel(params: { externalId: string; variantId: string }): Promise<void> {
     const files = await this.fetchSkuFiles(params.variantId);
-    for (const file of files) {
-      if (!file.Label || !/^\d+$/.test(file.Label)) continue;
+    const classified = files.filter((f) => f.Label && /^\d+$/.test(f.Label));
+    const unclassified = files.filter((f) => !f.Label || !/^\d+$/.test(f.Label));
+    if (classified.length === 0 && unclassified.length > 0) {
+      throw new Error(
+        `Nenhuma foto do SKU ${params.variantId} está classificada ainda — recusando remover as ${unclassified.length} foto(s) sem Label para não deixar o anúncio sem nenhuma imagem.`,
+      );
+    }
+
+    for (const file of classified) {
       const position = Number(file.Label);
       if (file.Position === position) continue;
       try {
@@ -506,6 +517,29 @@ export class VtexClient implements CatalogClient {
         console.error(`Failed to reorder SKU ${params.variantId} file ${file.Id} (Label ${file.Label}) to Position ${position}:`, err);
       }
     }
+
+    for (const file of unclassified) {
+      try {
+        await this.deleteImage({ externalId: params.externalId, variantId: params.variantId, imageId: String(file.Id) });
+      } catch (err) {
+        console.error(`Failed to delete unclassified SKU ${params.variantId} file ${file.Id}:`, err);
+      }
+    }
+  }
+
+  /** Permanently removes one photo from the platform — confirmed against VTEX's own API reference
+   *  (`DELETE /api/catalog/pvt/stockkeepingunit/{skuId}/file/{skuFileId}`, "Delete SKU image
+   *  file") before ever calling it against a real account, given how irreversible this is. Used
+   *  both by reorderImagesByLabel's unclassified cleanup and by a human explicitly deleting a
+   *  photo from CatalogIA's own "Fotos" panel (see products.routes.ts). */
+  async deleteImage(params: { externalId: string; variantId: string; imageId: string }): Promise<void> {
+    await requestWithRetry({
+      provider: "vtex",
+      operation: "deleteSkuFile",
+      url: `${this.baseUrl}/pvt/stockkeepingunit/${params.variantId}/file/${params.imageId}`,
+      init: { method: "DELETE", headers: this.headers() },
+      onAttempt: this.onAttempt,
+    });
   }
 
   /** `PUT /pvt/product/{id}` is NOT a partial update — VTEX does not merge, it replaces. Fields
@@ -617,9 +651,18 @@ export class VtexClient implements CatalogClient {
 
   /** Attaches a new SKU image by URL (VTEX fetches the bytes itself from `Url` — no direct binary
    *  upload here, same as the Shopify implementation). Unlike `updateSkuImageAltText` (PUT, edits
-   *  an existing image), this is a POST — VTEX creates a new file entry. */
-  async addProductImage(params: { externalId: string; variantId: string; imageUrl: string; altText?: string; label?: string }): Promise<void> {
-    await requestWithRetry({
+   *  an existing image), this is a POST — VTEX creates a new file entry. Returns that new file's
+   *  own id (persisted as generatedImages.platformImageId) so this exact upload can later be
+   *  recognized among the product's platform photos (URL comparison doesn't work — VTEX rewrites
+   *  it to its own CDN host on read, confirmed live) and re-labeled/cleared directly. */
+  async addProductImage(params: {
+    externalId: string;
+    variantId: string;
+    imageUrl: string;
+    altText?: string;
+    label?: string;
+  }): Promise<{ id: string }> {
+    const res = await requestWithRetry({
       provider: "vtex",
       operation: "addProductImage",
       url: `${this.baseUrl}/pvt/stockkeepingunit/${params.variantId}/file`,
@@ -630,6 +673,8 @@ export class VtexClient implements CatalogClient {
       },
       onAttempt: this.onAttempt,
     });
+    const created = (await res.json()) as { Id: number };
+    return { id: String(created.Id) };
   }
 
   /** Same "not a partial update" footgun as updateProductFields — confirmed live: sending just
