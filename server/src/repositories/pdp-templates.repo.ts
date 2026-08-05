@@ -20,6 +20,11 @@ export const PDP_BLOCKS = [
   "ambient_photo",
   "faq",
   "cta",
+  // Purely structural — no product data behind them, always render regardless of what's
+  // approved for a given product. Let a merchant space rows apart or draw a visible break in
+  // "modo de layout" without having to keep nudging every block's own margin instead.
+  "divider",
+  "spacer",
 ] as const;
 export type PdpBlock = (typeof PDP_BLOCKS)[number];
 

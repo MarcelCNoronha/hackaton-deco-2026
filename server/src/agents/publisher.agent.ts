@@ -142,6 +142,20 @@ function renderFeaturedImageBlock(url: string, caption: string): string {
   }</figure>`;
 }
 
+/** "divider"/"spacer" are purely structural — no product data behind them, so unlike every other
+ *  block they always render something, never "" (see PDP_BLOCKS' doc comment). Size only matters
+ *  in "modo de layout", where each cell picks its own — elsewhere (fixed block list, {{token}}
+ *  template) there's no per-block config surface at all, so they fall back to "md". */
+function renderDividerBlock(): string {
+  return `<hr style="border:none;border-top:1px solid #ddd;margin:0.5em 0;" />`;
+}
+
+const SPACER_HEIGHT: Record<PdpFontSize, string> = { sm: "1em", md: "2em", lg: "3.5em" };
+
+function renderSpacerBlock(size: PdpFontSize = "md"): string {
+  return `<div style="height:${SPACER_HEIGHT[size]};" aria-hidden="true"></div>`;
+}
+
 export interface BlockData {
   description?: string;
   bullets?: string[];
@@ -175,6 +189,10 @@ function renderBlock(block: PdpBlock, level: DescriptionRichness, data: BlockDat
       return data.featuredImage ? renderFeaturedImageBlock(data.featuredImage.url, data.featuredImage.caption) : "";
     case "ambient_photo":
       return data.ambientPhoto ? renderFeaturedImageBlock(data.ambientPhoto.url, data.ambientPhoto.caption) : "";
+    case "divider":
+      return renderDividerBlock();
+    case "spacer":
+      return renderSpacerBlock();
   }
 }
 
@@ -195,10 +213,9 @@ export function renderPdpHtml(blocks: PdpBlock[], level: DescriptionRichness, da
  *  the simple-mode renderer, just token-by-token instead of block-by-block. */
 export function renderPdpHtmlFromTemplate(customHtml: string, level: DescriptionRichness, data: BlockData): string {
   const fragments: Partial<Record<PdpBlock, string>> = Object.fromEntries(
-    (["description", "benefit_bullets", "technical_specs", "faq", "cta", "featured_image", "ambient_photo"] as const).map((block) => [
-      block,
-      renderBlock(block, level, data),
-    ]),
+    (
+      ["description", "benefit_bullets", "technical_specs", "faq", "cta", "featured_image", "ambient_photo", "divider", "spacer"] as const
+    ).map((block) => [block, renderBlock(block, level, data)]),
   );
   return customHtml.replace(/\{\{(\w+)\}\}/g, (match, token: string) =>
     Object.prototype.hasOwnProperty.call(fragments, token) ? (fragments[token as PdpBlock] ?? "") : match,
@@ -217,6 +234,16 @@ function wrapLayoutCell(html: string, cell: PdpLayoutCell): string {
   return `<div style="${style}">${html}</div>`;
 }
 
+/** Renders one layout cell — "divider"/"spacer" bypass wrapLayoutCell entirely (align/bold don't
+ *  mean anything for a plain rule or an empty gap, and a cell's fontSize means "how big a gap"
+ *  for a spacer instead of literal text size), every other block goes through the normal
+ *  align/weight/size wrapper. */
+function renderLayoutCell(cell: PdpLayoutCell, level: DescriptionRichness, data: BlockData): string {
+  if (cell.block === "divider") return renderDividerBlock();
+  if (cell.block === "spacer") return renderSpacerBlock(cell.fontSize);
+  return wrapLayoutCell(renderBlock(cell.block, level, data), cell);
+}
+
 /** "Modo de layout" (see pdpTemplates.layout's doc comment) — a row with one column renders full
  *  width; a row with two renders as a side-by-side flex pair (wraps on narrow viewports rather than
  *  forcing an overlap). A cell whose block has no data collapses out entirely, same "never an empty
@@ -224,7 +251,7 @@ function wrapLayoutCell(html: string, cell: PdpLayoutCell): string {
  *  data, which then just renders as that one column, not a lopsided empty box next to it. */
 export function renderPdpLayout(layout: PdpLayoutRow[], level: DescriptionRichness, data: BlockData): string {
   const rows = layout
-    .map((row) => row.columns.map((cell) => wrapLayoutCell(renderBlock(cell.block, level, data), cell)).filter(Boolean))
+    .map((row) => row.columns.map((cell) => renderLayoutCell(cell, level, data)).filter(Boolean))
     .filter((cells) => cells.length > 0)
     .map((cells) =>
       cells.length === 1

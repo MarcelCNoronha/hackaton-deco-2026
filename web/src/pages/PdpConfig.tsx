@@ -25,7 +25,14 @@ const BLOCK_LABELS: Record<PdpBlock, string> = {
   ambient_photo: "Foto ambientada",
   faq: "FAQ",
   cta: "Chamada à ação (CTA)",
+  divider: "Linha divisória",
+  spacer: "Espaçamento",
 };
+
+/** "divider"/"spacer" have no product data and no real alignment/weight concept — align/bold
+ *  controls are hidden for them in the editor, and fontSize is relabeled "tamanho do espaço"
+ *  instead of "tamanho da letra" (still the same field server-side, see PdpLayoutCell). */
+const STRUCTURAL_BLOCKS = new Set<PdpBlock>(["divider", "spacer"]);
 
 const ALIGN_LABELS: Record<PdpTextAlign, string> = {
   justify: "Justificado",
@@ -448,30 +455,46 @@ export function PdpConfig() {
                                 </option>
                               ))}
                             </select>
-                            <select value={cell.align} onChange={(e) => updateCell(ri, ci, { align: e.target.value as PdpTextAlign })}>
-                              {PDP_ALIGN_OPTIONS.map((a) => (
-                                <option key={a} value={a}>
-                                  {ALIGN_LABELS[a]}
-                                </option>
-                              ))}
-                            </select>
-                            <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
-                              <label style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
-                                <input
-                                  type="checkbox"
-                                  checked={cell.bold}
-                                  onChange={(e) => updateCell(ri, ci, { bold: e.target.checked })}
-                                />
-                                Negrito
-                              </label>
+                            {!STRUCTURAL_BLOCKS.has(cell.block) && (
+                              <>
+                                <select value={cell.align} onChange={(e) => updateCell(ri, ci, { align: e.target.value as PdpTextAlign })}>
+                                  {PDP_ALIGN_OPTIONS.map((a) => (
+                                    <option key={a} value={a}>
+                                      {ALIGN_LABELS[a]}
+                                    </option>
+                                  ))}
+                                </select>
+                                <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+                                  <label style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={cell.bold}
+                                      onChange={(e) => updateCell(ri, ci, { bold: e.target.checked })}
+                                    />
+                                    Negrito
+                                  </label>
+                                  <select
+                                    value={cell.fontSize}
+                                    onChange={(e) => updateCell(ri, ci, { fontSize: e.target.value as PdpFontSize })}
+                                  >
+                                    {PDP_FONT_SIZE_OPTIONS.map((s) => (
+                                      <option key={s} value={s}>
+                                        {FONT_SIZE_LABELS[s]}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                              </>
+                            )}
+                            {cell.block === "spacer" && (
                               <select value={cell.fontSize} onChange={(e) => updateCell(ri, ci, { fontSize: e.target.value as PdpFontSize })}>
                                 {PDP_FONT_SIZE_OPTIONS.map((s) => (
                                   <option key={s} value={s}>
-                                    {FONT_SIZE_LABELS[s]}
+                                    Espaço {FONT_SIZE_LABELS[s].toLowerCase()}
                                   </option>
                                 ))}
                               </select>
-                            </div>
+                            )}
                             {row.columns.length > 1 && (
                               <button type="button" className="secondary" onClick={() => removeColumn(ri, ci)}>
                                 Remover coluna

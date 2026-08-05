@@ -183,4 +183,20 @@ describe("renderPdpLayout ('modo de layout')", () => {
     const layout: PdpLayoutRow[] = [{ columns: [{ block: "faq", align: "left", bold: false, fontSize: "md" }] }];
     expect(renderPdpLayout(layout, "plain", {})).toBe("");
   });
+
+  it("renders a divider unconditionally — it has no product data to be missing", () => {
+    const layout: PdpLayoutRow[] = [{ columns: [{ block: "divider", align: "left", bold: true, fontSize: "lg" }] }];
+    const html = renderPdpLayout(layout, "plain", {});
+    expect(html).toContain("<hr");
+    // align/bold are meaningless for a rule — never leak into its markup.
+    expect(html).not.toContain("text-align");
+    expect(html).not.toContain("font-weight");
+  });
+
+  it("renders a spacer sized by the cell's fontSize, treated as a gap height rather than text size", () => {
+    const layout: PdpLayoutRow[] = [{ columns: [{ block: "spacer", align: "left", bold: false, fontSize: "lg" }] }];
+    const html = renderPdpLayout(layout, "plain", {});
+    expect(html).toMatch(/height:3\.5em/);
+    expect(html).not.toContain("font-size");
+  });
 });

@@ -201,6 +201,8 @@ export const PDP_BLOCKS = [
   "ambient_photo",
   "faq",
   "cta",
+  "divider",
+  "spacer",
 ] as const;
 
 /** Mirrors the server's MAX_REFERENCE_LINKS (category-reference-links.repo.ts) — kept as a literal
