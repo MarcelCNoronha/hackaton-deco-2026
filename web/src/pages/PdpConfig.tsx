@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   api,
   DEFAULT_PDP_CATEGORY,
@@ -152,6 +152,17 @@ export function PdpConfig() {
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [previewHtml, setPreviewHtml] = useState<string>("");
+  // Grows to fit the preview's real content on every reload (srcDoc change re-triggers the
+  // iframe's load event) — a fixed height meant the taller a merchant's own layout got (more
+  // rows, dividers, spacers), the more it just scrolled inside a small box instead of showing
+  // the whole thing. 400 is only the floor for a near-empty template.
+  const [previewHeight, setPreviewHeight] = useState(400);
+  const previewFrameRef = useRef<HTMLIFrameElement>(null);
+
+  function resizePreviewFrame() {
+    const doc = previewFrameRef.current?.contentDocument;
+    if (doc?.body) setPreviewHeight(Math.max(400, doc.body.scrollHeight + 32));
+  }
 
   const leafNodes = categoryNodes.filter((n) => n.isLeaf);
   const isSpecificCategory = selectedCategory !== DEFAULT_PDP_CATEGORY;
@@ -523,9 +534,11 @@ export function PdpConfig() {
                   </p>
                 </div>
                 <iframe
+                  ref={previewFrameRef}
                   title="Preview da PDP"
                   srcDoc={buildPreviewDoc(previewHtml, platform)}
-                  style={{ width: "100%", height: 520, border: "none" }}
+                  onLoad={resizePreviewFrame}
+                  style={{ width: "100%", height: previewHeight, border: "none", display: "block" }}
                 />
               </section>
             </div>

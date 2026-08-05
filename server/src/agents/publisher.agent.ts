@@ -276,6 +276,15 @@ export function renderPdp(
   return renderPdpHtml(template.blocks, level, data);
 }
 
+/** Whether a resolved template actually places this block somewhere — used to skip the extra
+ *  "fetch the product's own images" round-trip (see ambient_photo sourcing below) for every
+ *  product in a run when the merchant's template doesn't even use that block. */
+function templateUsesBlock(template: ResolvedPdpTemplate, block: PdpBlock): boolean {
+  if (template.customHtml) return template.customHtml.includes(`{{${block}}}`);
+  if (template.layout && template.layout.length > 0) return template.layout.some((row) => row.columns.some((c) => c.block === block));
+  return template.blocks.includes(block);
+}
+
 async function markPublished(proposalId: number): Promise<void> {
   await db.update(enrichmentProposals).set({ status: "published", publishedAt: new Date() }).where(eq(enrichmentProposals.id, proposalId));
 }
@@ -361,6 +370,20 @@ export async function publishApprovedProposals(params: {
         const featuredImage = featuredImageProposal
           ? (JSON.parse(featuredImageProposal.proposedValue) as { url: string; caption: string })
           : undefined;
+        // No proposal/generation step produces this — it's sourced straight from the product's own
+        // already-hosted photos, no AI call needed. This store's own convention tags the lifestyle/
+        // "foto ambientada" shot with image Label "2" (confirmed live); only bothers fetching the
+        // product's images at all when the resolved template actually places this block somewhere.
+        let ambientPhoto: { url: string; caption: string } | undefined;
+        if (templateUsesBlock(template, "ambient_photo")) {
+          try {
+            const detail = await params.catalog.getProduct(product.vtexProductId);
+            const labeled = detail.images.find((img) => img.label === "2");
+            if (labeled) ambientPhoto = { url: labeled.url, caption: labeled.altText ?? product.title };
+          } catch (err) {
+            console.error(`Failed to resolve ambient_photo for product ${productId} — leaving that block empty`, err);
+          }
+        }
         const finalDescription = renderPdp(template, level, {
           description: descriptionProposal?.proposedValue ?? product.description ?? undefined,
           bullets: bulletsProposal ? (JSON.parse(bulletsProposal.proposedValue) as string[]) : undefined,
@@ -368,6 +391,7 @@ export async function publishApprovedProposals(params: {
           faq: faqProposal ? (JSON.parse(faqProposal.proposedValue) as Array<{ question: string; answer: string }>) : undefined,
           cta: ctaProposal?.proposedValue,
           featuredImage,
+          ambientPhoto,
         });
         await params.catalog.updateProductDescription(product.vtexProductId, finalDescription);
         for (const p of mergedProposals) {
