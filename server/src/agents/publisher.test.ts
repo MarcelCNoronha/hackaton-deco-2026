@@ -81,7 +81,8 @@ describe("renderPdpHtmlFromTemplate ('modo avançado')", () => {
       cta: "Compre agora",
     });
     expect(html).not.toContain("catalogia-faq");
-    expect(html).toBe("<section></section><footer><p class=\"catalogia-cta\"><strong>Compre agora</strong></p></footer>");
+    expect(html).toContain("<section></section><footer>");
+    expect(html).toContain("<strong>Compre agora</strong></p></footer>");
   });
 
   it("leaves an unrecognized {{token}} untouched instead of silently deleting it", () => {

@@ -48,16 +48,24 @@ function escapeHtml(text: string): string {
  *  without touching a prompt. "plain" (Médio) renders everything as flowing paragraphs — no
  *  headings/lists/tables — matching that tier's "texto corrido" definition; "structured"/
  *  "structured_with_image" (Bom/Excelente) use real semantic HTML. */
+/** Shared type scale/spacing for every block below — confirmed live that this store's theme
+ *  supplies none of it (raw tags butted straight against each other with no visual breathing
+ *  room, and h2/h3 with no distinct size from body text). Kept in one place so every section
+ *  reads as part of one consistent system instead of each block inventing its own numbers. */
+const SECTION_HEADING_STYLE = 'style="font-size:1.15em;font-weight:700;margin:1.5em 0 0.75em;line-height:1.3;"';
+const PARAGRAPH_STYLE = 'style="margin:0 0 1em;line-height:1.6;"';
+
 function renderDescriptionBlock(text: string): string {
   const paragraphs = text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
-  return (paragraphs.length ? paragraphs : [text]).map((p) => `<p>${escapeHtml(p)}</p>`).join("");
+  return (paragraphs.length ? paragraphs : [text]).map((p) => `<p ${PARAGRAPH_STYLE}>${escapeHtml(p)}</p>`).join("");
 }
 
 /** Same reasoning as SPECS_TABLE_STYLE below — confirmed live: this store's theme resets list
  *  markers (no visible •), so an unstyled <ul><li> rendered as plain stacked lines with no bullet
- *  point at all. Restores just the marker/spacing, nothing that could clash with a theme. */
-const BULLETS_LIST_STYLE = 'style="list-style:disc;padding-left:1.4em;margin:0.75em 0;"';
-const BULLET_ITEM_STYLE = 'style="margin-bottom:0.35em;"';
+ *  point at all. Restores the marker/spacing, plus a top margin so the list doesn't butt straight
+ *  against the paragraph before it. */
+const BULLETS_LIST_STYLE = 'style="list-style:disc;padding-left:1.4em;margin:1.25em 0;line-height:1.5;"';
+const BULLET_ITEM_STYLE = 'style="margin-bottom:0.4em;"';
 
 function renderBulletsBlock(bullets: string[], level: DescriptionRichness): string {
   if (level === "plain") return `<p>${bullets.map(escapeHtml).join(" — ")}</p>`;
@@ -70,9 +78,11 @@ function renderBulletsBlock(bullets: string[], level: DescriptionRichness): stri
  *  rendered as an unstructured stack of label/value lines, not a real table. Inline styles here
  *  guarantee a legible table regardless of the theme's own CSS — deliberately minimal (borders,
  *  padding, no color) so it can't clash with a theme's palette. */
-const SPECS_TABLE_STYLE = 'style="width:100%;border-collapse:collapse;"';
-const SPECS_CELL_STYLE = 'style="padding:0.4em 0.75em;border:1px solid #ddd;text-align:left;"';
-const SPECS_LABEL_CELL_STYLE = 'style="padding:0.4em 0.75em;border:1px solid #ddd;text-align:left;font-weight:600;width:35%;"';
+const SPECS_SECTION_STYLE = 'style="margin:1.5em 0;"';
+const SPECS_TABLE_STYLE = 'style="width:100%;border-collapse:collapse;font-size:0.95em;"';
+const SPECS_CELL_STYLE = 'style="padding:0.5em 0.75em;border:1px solid #ddd;text-align:left;line-height:1.4;"';
+const SPECS_LABEL_CELL_STYLE =
+  'style="padding:0.5em 0.75em;border:1px solid #ddd;text-align:left;font-weight:600;width:35%;line-height:1.4;"';
 
 function renderSpecsBlock(specs: Array<{ label: string; value: string }>, level: DescriptionRichness): string {
   if (level === "plain") {
@@ -81,15 +91,16 @@ function renderSpecsBlock(specs: Array<{ label: string; value: string }>, level:
   const rows = specs
     .map((s) => `<tr><td ${SPECS_LABEL_CELL_STYLE}>${escapeHtml(s.label)}</td><td ${SPECS_CELL_STYLE}>${escapeHtml(s.value)}</td></tr>`)
     .join("");
-  return `<div class="catalogia-specs"><h2>Especificações</h2><table ${SPECS_TABLE_STYLE}>${rows}</table></div>`;
+  return `<div class="catalogia-specs" ${SPECS_SECTION_STYLE}><h2 ${SECTION_HEADING_STYLE}>Especificações</h2><table ${SPECS_TABLE_STYLE}>${rows}</table></div>`;
 }
 
 /** Same reasoning as the specs table/bullets styles above — confirmed live: with no theme rule
  *  distinguishing <h3> from the <p> right after it, a question ran straight into its answer and
  *  into the next question with no visible break at all. Bolds the question and spaces out each
  *  question/answer pair, nothing else. */
-const FAQ_QUESTION_STYLE = 'style="font-weight:600;margin:0 0 0.2em;"';
-const FAQ_ANSWER_STYLE = 'style="margin:0 0 1em;"';
+const FAQ_SECTION_STYLE = 'style="margin:1.5em 0;"';
+const FAQ_QUESTION_STYLE = 'style="font-weight:600;margin:1em 0 0.3em;line-height:1.4;"';
+const FAQ_ANSWER_STYLE = 'style="margin:0 0 0.25em;line-height:1.6;"';
 
 function renderFaqBlock(faq: Array<{ question: string; answer: string }>, level: DescriptionRichness): string {
   if (level === "plain") {
@@ -98,16 +109,22 @@ function renderFaqBlock(faq: Array<{ question: string; answer: string }>, level:
   const items = faq
     .map((f) => `<h3 ${FAQ_QUESTION_STYLE}>${escapeHtml(f.question)}</h3><p ${FAQ_ANSWER_STYLE}>${escapeHtml(f.answer)}</p>`)
     .join("");
-  return `<div class="catalogia-faq"><h2>Perguntas frequentes</h2>${items}</div>`;
+  return `<div class="catalogia-faq" ${FAQ_SECTION_STYLE}><h2 ${SECTION_HEADING_STYLE}>Perguntas frequentes</h2>${items}</div>`;
 }
+
+const CTA_STYLE = 'style="margin:1.5em 0 0.5em;font-size:1.05em;line-height:1.5;"';
 
 function renderCtaBlock(cta: string): string {
-  return `<p class="catalogia-cta"><strong>${escapeHtml(cta)}</strong></p>`;
+  return `<p class="catalogia-cta" ${CTA_STYLE}><strong>${escapeHtml(cta)}</strong></p>`;
 }
 
+const FEATURED_IMAGE_STYLE = 'style="margin:1.25em 0;"';
+const FEATURED_IMAGE_IMG_STYLE = 'style="max-width:100%;height:auto;display:block;"';
+const FEATURED_IMAGE_CAPTION_STYLE = 'style="font-size:0.85em;margin-top:0.4em;"';
+
 function renderFeaturedImageBlock(url: string, caption: string): string {
-  return `<figure class="catalogia-featured-image"><img src="${escapeHtml(url)}" alt="${escapeHtml(caption)}" />${
-    caption ? `<figcaption>${escapeHtml(caption)}</figcaption>` : ""
+  return `<figure class="catalogia-featured-image" ${FEATURED_IMAGE_STYLE}><img src="${escapeHtml(url)}" alt="${escapeHtml(caption)}" ${FEATURED_IMAGE_IMG_STYLE} />${
+    caption ? `<figcaption ${FEATURED_IMAGE_CAPTION_STYLE}>${escapeHtml(caption)}</figcaption>` : ""
   }</figure>`;
 }
 
