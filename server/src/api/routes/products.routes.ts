@@ -205,14 +205,19 @@ export async function productsRoutes(app: FastifyInstance) {
   /** The product's own photos already on the platform (a merchant's direct VTEX upload, most of
    *  which predate this store's Label convention and so come back unclassified) — shown alongside
    *  generated-images (AI + manufacturer reference) in the same panel so every photo for a product
-   *  can be classified into one carousel from one place, see RunDetail's "Fotos" section. */
+   *  can be classified into one carousel from one place, see RunDetail's "Fotos" section. Excludes
+   *  any image whose URL is one of OUR OWN generated-images uploads (the exact
+   *  `${APP_BASE_URL}/api/generated-images/:id/raw` URL addProductImage sends VTEX) — once
+   *  published, that same photo becomes a real platform image and would otherwise show up twice:
+   *  once as its "Gerada por IA"/"Foto do fabricante" card, once again here as "Já na loja". */
   app.get<{ Params: { id: string } }>("/api/products/:id/catalog-images", async (req, reply) => {
     const product = await db.query.products.findFirst({ where: eq(products.id, Number(req.params.id)) });
     if (!product) return reply.status(404).send({ error: "Produto não encontrado" });
     try {
       const catalog = await requireActiveCatalogClient();
       const detail = await catalog.getProduct(product.vtexProductId);
-      return detail.images;
+      const ownUploadPrefix = `${env.APP_BASE_URL}/api/generated-images/`;
+      return detail.images.filter((img) => !img.url.startsWith(ownUploadPrefix));
     } catch (err) {
       return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
     }

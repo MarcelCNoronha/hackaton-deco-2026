@@ -19,6 +19,17 @@ import {
 
 type GeneratableImageKind = "principal" | "lifestyle" | "dimensional" | "feature_callout";
 
+/** Derives a catalog image's current classification from its VTEX Label — the select for these
+ *  images has no local classification field to read directly the way a generatedImages row does,
+ *  only the Label string the platform itself returns. */
+function classificationFromLabel(label: string | null): PhotoClassification | "" {
+  if (label === "1") return "principal";
+  if (label === "2") return "ambientada";
+  if (label === "3") return "dimensional";
+  if (label && /^\d+$/.test(label) && Number(label) >= 4) return "destaque";
+  return "";
+}
+
 const PHOTO_CLASSIFICATION_LABELS: Record<PhotoClassification, string> = {
   principal: "Foto principal (1)",
   ambientada: "Foto ambientada (2)",
@@ -621,115 +632,182 @@ export function RunDetail() {
                     )}
                   </div>
                 </div>
-                {(generatedImages[productId]?.length ?? 0) === 0 && (catalogImages[productId]?.length ?? 0) === 0 ? (
-                  <p className="muted" style={{ margin: 0 }}>
-                    Nenhuma foto encontrada para este produto ainda.
-                  </p>
-                ) : (
-                  <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
-                    {generatedImages[productId]?.map((image) => (
-                      <div key={`generated-${image.id}`} style={{ width: 160 }}>
-                        <img
-                          src={`data:${image.mimeType};base64,${image.imageBase64}`}
-                          alt={image.classification ? PHOTO_CLASSIFICATION_LABELS[image.classification] : "Foto do produto"}
-                          style={{ width: "100%", height: 160, objectFit: "cover", borderRadius: "var(--radius-md)" }}
-                        />
-                        <div className="muted" style={{ fontSize: "0.72rem", marginTop: "0.3rem" }}>
-                          {image.kind === "manufacturer_reference" ? "Foto do fabricante" : `Gerada por IA · ${formatCost(Number(image.costUsd ?? 0))}`}
-                        </div>
-                        {image.kind === "manufacturer_reference" && image.sourceUrl && (
-                          <a
-                            href={image.sourceUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="muted"
-                            style={{ fontSize: "0.7rem", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                          >
-                            {image.sourceUrl}
-                          </a>
-                        )}
-                        {!image.integrityVerified && (
-                          <div
-                            style={{ fontSize: "0.72rem", marginTop: "0.2rem", color: "var(--status-warning)" }}
-                            title={image.integrityNotes ?? ""}
-                          >
-                            ⚠ Integridade do produto não confirmada
+                {(() => {
+                  // One combined, ordered view of every photo for this product regardless of
+                  // source (generated-here vs already-on-the-platform) — sorted by classification
+                  // slot (principal, ambientada, dimensional, then every "destaque" one together),
+                  // not by whatever order each source's API happened to return. The numeric Label
+                  // actually sent to VTEX is unchanged by any of this — purely how this panel
+                  // organizes/names cards for a human reviewing them.
+                  type PhotoCard = { key: string; classification: PhotoClassification | ""; render: (name: string) => React.ReactNode };
+                  const SLOT_ORDER: Record<PhotoClassification | "", number> = {
+                    principal: 0,
+                    ambientada: 1,
+                    dimensional: 2,
+                    destaque: 3,
+                    "": 4,
+                  };
+                  // Locking rule: principal/ambientada/dimensional are 1-photo slots — once any
+                  // photo (from either source) holds one, that option disables on every OTHER
+                  // photo's select so two photos can never both claim the same single slot.
+                  // "destaque" stays open on every select since it's the one slot allowing more
+                  // than one photo.
+                  const usedSingleSlots = new Set<PhotoClassification>();
+                  for (const img of generatedImages[productId] ?? []) {
+                    if (img.classification && img.classification !== "destaque") usedSingleSlots.add(img.classification);
+                  }
+                  for (const img of catalogImages[productId] ?? []) {
+                    const c = classificationFromLabel(img.label);
+                    if (c && c !== "destaque") usedSingleSlots.add(c);
+                  }
+                  function optionsFor(ownValue: PhotoClassification | "") {
+                    return (Object.keys(PHOTO_CLASSIFICATION_LABELS) as PhotoClassification[]).map((c) => (
+                      <option key={c} value={c} disabled={c !== "destaque" && c !== ownValue && usedSingleSlots.has(c)}>
+                        {PHOTO_CLASSIFICATION_LABELS[c]}
+                      </option>
+                    ));
+                  }
+
+                  const cards: PhotoCard[] = [
+                    ...(generatedImages[productId] ?? []).map((image) => ({
+                      key: `generated-${image.id}`,
+                      classification: (image.classification ?? "") as PhotoClassification | "",
+                      render: (name: string) => (
+                        <div style={{ width: 160 }}>
+                          <img
+                            src={`data:${image.mimeType};base64,${image.imageBase64}`}
+                            alt={name}
+                            style={{ width: "100%", height: 160, objectFit: "cover", borderRadius: "var(--radius-md)" }}
+                          />
+                          <div style={{ fontSize: "0.75rem", fontWeight: 600, marginTop: "0.3rem" }}>{name}</div>
+                          <div className="muted" style={{ fontSize: "0.72rem" }}>
+                            {image.kind === "manufacturer_reference" ? "Foto do fabricante" : `Gerada por IA · ${formatCost(Number(image.costUsd ?? 0))}`}
                           </div>
-                        )}
-                        <select
-                          value={image.classification ?? ""}
-                          onChange={(e) => handleClassifyGeneratedImage(productId, image.id, e.target.value as PhotoClassification)}
-                          disabled={classifyingId === `generated-${image.id}`}
-                          style={{ width: "100%", marginTop: "0.3rem", fontSize: "0.72rem" }}
-                        >
-                          <option value="" disabled>
-                            Classificar…
-                          </option>
-                          {(Object.keys(PHOTO_CLASSIFICATION_LABELS) as PhotoClassification[]).map((c) => (
-                            <option key={c} value={c}>
-                              {PHOTO_CLASSIFICATION_LABELS[c]}
-                            </option>
-                          ))}
-                        </select>
-                        {image.publishedAt ? (
-                          <div style={{ fontSize: "0.72rem", marginTop: "0.3rem", color: "var(--status-good)" }}>
-                            ✓ Publicada na loja
-                          </div>
-                        ) : (
-                          <button
-                            type="button"
-                            className="link-button"
-                            style={{ fontSize: "0.72rem", marginTop: "0.3rem" }}
-                            onClick={() => handlePublishImage(productId, image.id)}
-                            disabled={publishingImageId === image.id || !image.integrityVerified || !image.classification}
-                            title={
-                              !image.integrityVerified
-                                ? "Integridade não confirmada — gere uma nova imagem para publicar."
-                                : !image.classification
-                                  ? "Classifique a foto antes de publicar."
-                                  : undefined
-                            }
-                          >
-                            {publishingImageId === image.id ? "Publicando…" : "Publicar na loja"}
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                    {catalogImages[productId]?.map((image) => (
-                      <div key={`catalog-${image.id}`} style={{ width: 160 }}>
-                        <img
-                          src={image.url}
-                          alt={image.altText ?? "Foto do produto já na loja"}
-                          style={{ width: "100%", height: 160, objectFit: "cover", borderRadius: "var(--radius-md)" }}
-                        />
-                        <div className="muted" style={{ fontSize: "0.72rem", marginTop: "0.3rem" }}>
-                          Já na loja {image.label ? `· Label ${image.label}` : "· sem Label"}
-                        </div>
-                        {platform === "vtex" ? (
+                          {image.kind === "manufacturer_reference" && image.sourceUrl && (
+                            <a
+                              href={image.sourceUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="muted"
+                              style={{ fontSize: "0.7rem", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                            >
+                              {image.sourceUrl}
+                            </a>
+                          )}
+                          {!image.integrityVerified && (
+                            <div
+                              style={{ fontSize: "0.72rem", marginTop: "0.2rem", color: "var(--status-warning)" }}
+                              title={image.integrityNotes ?? ""}
+                            >
+                              ⚠ Integridade do produto não confirmada
+                            </div>
+                          )}
                           <select
-                            value=""
-                            onChange={(e) => handleClassifyCatalogImage(productId, image.id, e.target.value as PhotoClassification)}
-                            disabled={classifyingId === `catalog-${image.id}`}
+                            value={image.classification ?? ""}
+                            onChange={(e) => handleClassifyGeneratedImage(productId, image.id, e.target.value as PhotoClassification)}
+                            disabled={classifyingId === `generated-${image.id}`}
                             style={{ width: "100%", marginTop: "0.3rem", fontSize: "0.72rem" }}
                           >
                             <option value="" disabled>
-                              {classifyingId === `catalog-${image.id}` ? "Salvando…" : "Classificar…"}
+                              Classificar…
                             </option>
-                            {(Object.keys(PHOTO_CLASSIFICATION_LABELS) as PhotoClassification[]).map((c) => (
-                              <option key={c} value={c}>
-                                {PHOTO_CLASSIFICATION_LABELS[c]}
-                              </option>
-                            ))}
+                            {optionsFor(image.classification ?? "")}
                           </select>
-                        ) : (
-                          <div className="muted" style={{ fontSize: "0.68rem", marginTop: "0.3rem" }}>
-                            Shopify não usa Label
+                          {image.publishedAt ? (
+                            <div style={{ fontSize: "0.72rem", marginTop: "0.3rem", color: "var(--status-good)" }}>
+                              ✓ Publicada na loja
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              className="link-button"
+                              style={{ fontSize: "0.72rem", marginTop: "0.3rem" }}
+                              onClick={() => handlePublishImage(productId, image.id)}
+                              disabled={publishingImageId === image.id || !image.integrityVerified || !image.classification}
+                              title={
+                                !image.integrityVerified
+                                  ? "Integridade não confirmada — gere uma nova imagem para publicar."
+                                  : !image.classification
+                                    ? "Classifique a foto antes de publicar."
+                                    : undefined
+                              }
+                            >
+                              {publishingImageId === image.id ? "Publicando…" : "Publicar na loja"}
+                            </button>
+                          )}
+                        </div>
+                      ),
+                    })),
+                    ...(catalogImages[productId] ?? []).map((image) => {
+                      const currentClassification = classificationFromLabel(image.label);
+                      return {
+                        key: `catalog-${image.id}`,
+                        classification: currentClassification,
+                        render: (name: string) => (
+                          <div style={{ width: 160 }}>
+                            <img
+                              src={image.url}
+                              alt={name}
+                              style={{ width: "100%", height: 160, objectFit: "cover", borderRadius: "var(--radius-md)" }}
+                            />
+                            <div style={{ fontSize: "0.75rem", fontWeight: 600, marginTop: "0.3rem" }}>{name}</div>
+                            <div className="muted" style={{ fontSize: "0.72rem" }}>
+                              Já na loja {image.label ? `· Label ${image.label}` : "· sem Label"}
+                            </div>
+                            {platform === "vtex" ? (
+                              <select
+                                value={currentClassification}
+                                onChange={(e) => handleClassifyCatalogImage(productId, image.id, e.target.value as PhotoClassification)}
+                                disabled={classifyingId === `catalog-${image.id}`}
+                                style={{ width: "100%", marginTop: "0.3rem", fontSize: "0.72rem" }}
+                              >
+                                <option value="" disabled>
+                                  {classifyingId === `catalog-${image.id}` ? "Salvando…" : "Classificar…"}
+                                </option>
+                                {optionsFor(currentClassification)}
+                              </select>
+                            ) : (
+                              <div className="muted" style={{ fontSize: "0.68rem", marginTop: "0.3rem" }}>
+                                Shopify não usa Label
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
+                        ),
+                      };
+                    }),
+                  ];
+
+                  if (cards.length === 0) {
+                    return (
+                      <p className="muted" style={{ margin: 0 }}>
+                        Nenhuma foto encontrada para este produto ainda.
+                      </p>
+                    );
+                  }
+
+                  const sorted = [...cards].sort((a, b) => SLOT_ORDER[a.classification] - SLOT_ORDER[b.classification]);
+                  let detalheCount = 0;
+                  const CLASSIFICATION_NAMES: Record<PhotoClassification | "", string> = {
+                    principal: "Foto Principal",
+                    ambientada: "Foto Ambientada",
+                    dimensional: "Foto Dimensional",
+                    destaque: "",
+                    "": "Não classificada",
+                  };
+                  return (
+                    <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
+                      {sorted.map((card) => {
+                        const name =
+                          card.classification === "destaque"
+                            ? detalheCount++ === 0
+                              ? "Foto Detalhe"
+                              : `Foto Detalhe ${detalheCount - 1}`
+                            : CLASSIFICATION_NAMES[card.classification];
+                        return <div key={card.key}>{card.render(name)}</div>;
+                      })}
+                    </div>
+                  );
+                })()}
               </div>
 
               {productProposals.map((proposal) => (
