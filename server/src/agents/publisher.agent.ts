@@ -53,9 +53,16 @@ function renderDescriptionBlock(text: string): string {
   return (paragraphs.length ? paragraphs : [text]).map((p) => `<p>${escapeHtml(p)}</p>`).join("");
 }
 
+/** Same reasoning as SPECS_TABLE_STYLE below — confirmed live: this store's theme resets list
+ *  markers (no visible •), so an unstyled <ul><li> rendered as plain stacked lines with no bullet
+ *  point at all. Restores just the marker/spacing, nothing that could clash with a theme. */
+const BULLETS_LIST_STYLE = 'style="list-style:disc;padding-left:1.4em;margin:0.75em 0;"';
+const BULLET_ITEM_STYLE = 'style="margin-bottom:0.35em;"';
+
 function renderBulletsBlock(bullets: string[], level: DescriptionRichness): string {
   if (level === "plain") return `<p>${bullets.map(escapeHtml).join(" — ")}</p>`;
-  return `<ul class="catalogia-bullets">${bullets.map((b) => `<li>${escapeHtml(b)}</li>`).join("")}</ul>`;
+  const items = bullets.map((b) => `<li ${BULLET_ITEM_STYLE}>${escapeHtml(b)}</li>`).join("");
+  return `<ul class="catalogia-bullets" ${BULLETS_LIST_STYLE}>${items}</ul>`;
 }
 
 /** A bare `<table>` has NO default browser border/spacing — confirmed live: without a store theme
@@ -77,11 +84,20 @@ function renderSpecsBlock(specs: Array<{ label: string; value: string }>, level:
   return `<div class="catalogia-specs"><h2>Especificações</h2><table ${SPECS_TABLE_STYLE}>${rows}</table></div>`;
 }
 
+/** Same reasoning as the specs table/bullets styles above — confirmed live: with no theme rule
+ *  distinguishing <h3> from the <p> right after it, a question ran straight into its answer and
+ *  into the next question with no visible break at all. Bolds the question and spaces out each
+ *  question/answer pair, nothing else. */
+const FAQ_QUESTION_STYLE = 'style="font-weight:600;margin:0 0 0.2em;"';
+const FAQ_ANSWER_STYLE = 'style="margin:0 0 1em;"';
+
 function renderFaqBlock(faq: Array<{ question: string; answer: string }>, level: DescriptionRichness): string {
   if (level === "plain") {
     return `<div class="catalogia-faq">${faq.map((f) => `<p><strong>${escapeHtml(f.question)}</strong> ${escapeHtml(f.answer)}</p>`).join("")}</div>`;
   }
-  const items = faq.map((f) => `<h3>${escapeHtml(f.question)}</h3><p>${escapeHtml(f.answer)}</p>`).join("");
+  const items = faq
+    .map((f) => `<h3 ${FAQ_QUESTION_STYLE}>${escapeHtml(f.question)}</h3><p ${FAQ_ANSWER_STYLE}>${escapeHtml(f.answer)}</p>`)
+    .join("");
   return `<div class="catalogia-faq"><h2>Perguntas frequentes</h2>${items}</div>`;
 }
 

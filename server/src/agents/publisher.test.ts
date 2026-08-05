@@ -19,7 +19,7 @@ describe("renderPdpHtml", () => {
   it("renders bullets as a real <ul>/<li> list on structured levels (Bom/Excelente)", () => {
     const html = renderPdpHtml(["benefit_bullets"], "structured", { bullets: ["Fácil de limpar", "Alta durabilidade"] });
     expect(html).toContain("<ul");
-    expect(html).toContain("<li>Fácil de limpar</li>");
+    expect(html).toContain("Fácil de limpar</li>");
   });
 
   it("respects the blocks array order regardless of the order fields are supplied in", () => {
