@@ -31,12 +31,21 @@ import { enqueueCategorySync } from "../../queue/queues.js";
 // credentials to an attacker-controlled host. Restricted to what a real VTEX subdomain/environment
 // segment can contain.
 const VTEX_SEGMENT = /^[a-z0-9-]+$/;
+// storefrontDomain gets interpolated into customer-facing "Ver na loja" URLs (never sent alongside
+// credentials, but still worth keeping to an actual hostname shape rather than arbitrary text).
+const HOSTNAME_PATTERN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i;
 const vtexBody = z.object({
   displayName: z.string().min(1),
   account: z.string().min(1).regex(VTEX_SEGMENT, "Deve conter apenas letras minúsculas, números e hífen."),
   environment: z.string().min(1).regex(VTEX_SEGMENT, "Deve conter apenas letras minúsculas, números e hífen.").default("vtexcommercestable"),
   appKey: z.string().min(1),
   appToken: z.string().min(1),
+  // Optional — the real public storefront hostname (e.g. "www.mundialacabamentos.com.br"), see
+  // VtexCredentials.storefrontDomain's doc comment for why this can't be auto-discovered from the
+  // API. Falls back to the raw {account}.{environment}.com.br domain when left blank.
+  storefrontDomain: z
+    .union([z.string().trim().regex(HOSTNAME_PATTERN, "Deve ser um domínio válido, ex: www.minhaloja.com.br"), z.literal("")])
+    .optional(),
 });
 
 // Same concern as VTEX above — shopDomain is interpolated into the GraphQL endpoint URL alongside

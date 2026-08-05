@@ -212,6 +212,32 @@ async function listProductsByStatus(
   };
 }
 
+/** Tallies every local product into exactly the 3 groups the "Filtro de Status" pills use
+ *  (Otimizar/Validar/Otimizado) — the products page used to show these counts from two dedicated
+ *  endpoints (products/optimized-count, products/pending-review-count) that counted distinct
+ *  PROPOSALS ever, regardless of which run they came from. That disagreed with the pills, which
+ *  classify by each product's LATEST run only — confirmed live: "A Validar: 1" while the "Validar"
+ *  pill itself showed zero matching products, because that one pending proposal belonged to a run
+ *  a product had since been re-optimized past. This computes counts with the exact same
+ *  per-product logic the pills/listProductsByStatus already use, so "pending"/"published" (the two
+ *  that only ever apply to a product with a local row) can never disagree with what filtering
+ *  shows. `none` is a best-effort exception: it only counts products already synced locally with
+ *  zero runs, not the full live-catalog "Não otimizado" set the pill itself browses (which can
+ *  include products never touched/synced at all) — an exact match there would need a live catalog
+ *  total-count call, not just this local snapshot. */
+async function computeStatusCounts(platform: CatalogPlatform): Promise<{ none: number; pending: number; published: number }> {
+  const localRows = await db.query.products.findMany({ where: eq(products.platform, platform) });
+  const enrichment = await computeProductEnrichment(localRows.map((row) => row.id));
+  const counts = { none: 0, pending: 0, published: 0 };
+  for (const row of localRows) {
+    const status = enrichment.get(row.id)?.optimizationStatus;
+    if (status === "published") counts.published++;
+    else if (status === "pending") counts.pending++;
+    else counts.none++;
+  }
+  return counts;
+}
+
 export async function catalogRoutes(app: FastifyInstance) {
   // Switching the active platform is a sensitive config action — same permission as Integrações.
   app.get("/api/catalog/platform", { preHandler: requireSection("connections") }, async () => ({
@@ -267,4 +293,15 @@ export async function catalogRoutes(app: FastifyInstance) {
       }
     },
   );
+
+  // Backs the 3 "Filtro de Status" stat tiles — see computeStatusCounts' doc comment for why these
+  // can't just reuse products/optimized-count + products/pending-review-count.
+  app.get("/api/catalog/products/status-counts", { preHandler: requireAuth }, async (_req, reply) => {
+    try {
+      const platform = await getCatalogPlatform();
+      return await computeStatusCounts(platform);
+    } catch (err) {
+      return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
 }

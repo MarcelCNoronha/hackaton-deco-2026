@@ -72,12 +72,15 @@ const FIELD_SPECS: Record<EnrichmentField, FieldSpec> = {
     schema: {
       type: "string",
       description:
-        "Título otimizado para SEO: corrige ortografia/caixa-alta indevida, remove ruído, inclui a palavra-chave " +
-        "principal — continua sendo o mesmo produto, nunca inventa modelo/marca diferente.",
+        "Título otimizado para SEO, até 60 caracteres (limite real de exibição em resultados de busca e no " +
+        "campo de título da VTEX — o que passar disso é truncado, geralmente no meio de uma palavra): corrige " +
+        "ortografia/caixa-alta indevida, remove ruído, inclui a palavra-chave principal — continua sendo o " +
+        "mesmo produto, nunca inventa modelo/marca diferente.",
     },
     promptFragment:
-      "'seoTitle' — título otimizado para SEO a partir do título atual (correção ortográfica/padronização, " +
-      "palavra-chave principal no início, sem caixa-alta abusiva), sem mudar de que produto se trata",
+      "'seoTitle' — título otimizado para SEO a partir do título atual, até 60 caracteres (correção " +
+      "ortográfica/padronização, palavra-chave principal no início, sem caixa-alta abusiva), sem mudar de que " +
+      "produto se trata",
   },
   meta_description: {
     property: "metaDescription",

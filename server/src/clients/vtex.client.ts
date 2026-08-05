@@ -16,6 +16,13 @@ export interface VtexCredentials {
   environment: string; // usually "vtexcommercestable"
   appKey: string;
   appToken: string;
+  /** The real public storefront hostname (e.g. "www.mundialacabamentos.com.br") — optional
+   *  because plenty of accounts never bind a custom domain, but confirmed live that
+   *  `{account}.{environment}.com.br` and the Search API's own `link` field BOTH keep reporting
+   *  the raw VTEX-hosted domain even for a product on an account that clearly has a working custom
+   *  domain (the storefront itself is reachable there) — so there is no reliable way to discover
+   *  this from the API alone, it has to be told to us. Falls back to the raw domain when unset. */
+  storefrontDomain?: string;
 }
 
 export interface VtexProduct {
@@ -150,6 +157,9 @@ export class VtexClient implements CatalogClient {
   private readonly host: string;
   private readonly baseUrl: string;
   private readonly searchBaseUrl: string;
+  /** Storefront-facing hostname — see VtexCredentials.storefrontDomain's doc comment for why this
+   *  can't just be `this.host` (the API host) or trusted from the Search API's own `link` field. */
+  private readonly storefrontHost: string;
 
   constructor(
     private readonly credentials: VtexCredentials,
@@ -158,6 +168,7 @@ export class VtexClient implements CatalogClient {
     this.host = `${credentials.account}.${credentials.environment}.com.br`;
     this.baseUrl = `https://${this.host}/api/catalog`;
     this.searchBaseUrl = `https://${this.host}/api/catalog_system/pub`;
+    this.storefrontHost = credentials.storefrontDomain?.trim() || this.host;
   }
 
   private headers() {
@@ -257,11 +268,11 @@ export class VtexClient implements CatalogClient {
         attributes: item ? extractVtexSpecifications(item) : {},
         brand: item?.brand ?? null,
         category: formatVtexCategoryPath(item?.categories),
-        // Real public storefront URL (custom domain, e.g. mundialacabamentos.com.br) — same field
-        // listProducts already uses. `{account}.{environment}.com.br` (getProduct's own fallback
-        // below) is VTEX's raw hosted domain, not necessarily what the store's DNS actually points
-        // shoppers to, so it's wrong whenever a custom domain is configured (the normal case).
-        url: item?.link ?? (item?.linkText ? `https://${this.host}/${item.linkText}/p` : null),
+        // Built from storefrontHost + linkText, NOT `item.link` — confirmed live that `link` keeps
+        // reporting the raw `{account}.{environment}.com.br` domain even for a product on an
+        // account with a working custom domain (the storefront itself is reachable there), so it
+        // can't be trusted as "the real shopper-facing URL". See VtexCredentials.storefrontDomain.
+        url: item?.linkText ? `https://${this.storefrontHost}/${item.linkText}/p` : (item?.link ?? null),
       };
     } catch (err) {
       console.error(`VTEX getProductSpecifications failed for product ${productId} — continuing with empty attributes`, err);
@@ -298,10 +309,9 @@ export class VtexClient implements CatalogClient {
       // against a live account (no VTEX connection available to test against right now).
       collection: null,
       sku: sku?.RefId ?? null,
-      // Falls back to the raw VTEX-hosted domain only if the search-API lookup above failed
-      // entirely (see fetchProductSpecifications) — still better than no link at all, but wrong
-      // for any store using a custom domain, which is the common case.
-      url: url ?? (product.LinkId ? `https://${this.host}/${product.LinkId}/p` : null),
+      // Falls back to storefrontHost + the private product's own LinkId only if the search-API
+      // lookup above failed entirely (see fetchProductSpecifications) — still better than nothing.
+      url: url ?? (product.LinkId ? `https://${this.storefrontHost}/${product.LinkId}/p` : null),
       imageUrl: images[0] ? `https://${this.credentials.account}.${images[0].FileLocation}` : null,
       variantId: sku ? String(sku.Id) : "",
       images: images.map((img) => ({
@@ -346,7 +356,9 @@ export class VtexClient implements CatalogClient {
         brand: p.brand ?? null,
         collection: null, // see getProduct's comment — VTEX Collections not wired up yet
         sku: extractVtexReferenceId(p.items?.[0]?.referenceId),
-        url: p.link ?? (p.linkText ? `https://${this.host}/${p.linkText}/p` : null),
+        // See fetchProductSpecifications' comment — `link` isn't trustworthy, storefrontHost + the
+        // reliable `linkText` is.
+        url: p.linkText ? `https://${this.storefrontHost}/${p.linkText}/p` : (p.link ?? null),
       })),
       hasMore: items.length === params.pageSize,
       total,
@@ -571,7 +583,16 @@ export class VtexClient implements CatalogClient {
     });
   }
 
+  /** Same "not a partial update" footgun as updateProductFields — confirmed live: sending just
+   *  `{Text: altText}` 400s with "Field Url is required". VTEX also never echoes the original
+   *  upload URL back on GET (`Url` comes back null, only `FileLocation` does), so the current
+   *  record has to be re-fetched and its real hosted URL reconstructed before writing back,
+   *  preserving `Label`/`IsMain` — an unguarded merge here would otherwise silently wipe this
+   *  store's own image-label convention (e.g. `Label: "2"` for the "foto ambientada" shot). */
   async updateSkuImageAltText(skuId: string | number, imageId: string, altText: string): Promise<void> {
+    const files = await this.fetchSkuFiles(skuId);
+    const current = files.find((f) => String(f.Id) === String(imageId));
+    if (!current) throw new Error(`Image ${imageId} not found on SKU ${skuId} — can't update its alt text`);
     await requestWithRetry({
       provider: "vtex",
       operation: "updateSkuImageAltText",
@@ -579,7 +600,12 @@ export class VtexClient implements CatalogClient {
       init: {
         method: "PUT",
         headers: this.headers(),
-        body: JSON.stringify({ Text: altText }),
+        body: JSON.stringify({
+          Url: `https://${this.credentials.account}.${current.FileLocation}`,
+          Text: altText,
+          Label: current.Label ?? "",
+          IsMain: current.IsMain,
+        }),
       },
       onAttempt: this.onAttempt,
     });

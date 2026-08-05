@@ -15,6 +15,24 @@ import { getExpectedAttributeKeys } from "../repositories/catalog-attributes.rep
 import { getCategoryFields } from "../repositories/category-spec-fields.repo.js";
 import { resolveCategoryContentProfile } from "../repositories/category-content-profile.repo.js";
 
+// Real platform/SEO limits — the prompt already asks for these lengths (see
+// enrichment-schema.ts), but a prompt is a request, not a guarantee, and a search engine or VTEX
+// itself truncates mid-word past these counts. This is the hard backstop that actually gets
+// written, so a model that ignores the prompt can't publish an SEO title that gets cut off
+// mid-word on a Google result or in VTEX's own title field.
+const SEO_TITLE_MAX_LENGTH = 60;
+const META_DESCRIPTION_MAX_LENGTH = 160;
+
+/** Cuts at the last whole word that still fits, rather than mid-word — a truncated "…" reads as
+ *  intentional, a truncated half-word reads as broken. Exported for unit testing (see
+ *  content-enrichment.agent.test.ts). */
+export function truncateAtWordBoundary(text: string, maxLength: number): string {
+  if (text.length <= maxLength) return text;
+  const cut = text.slice(0, maxLength - 1);
+  const lastSpace = cut.lastIndexOf(" ");
+  return `${(lastSpace > 0 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`;
+}
+
 interface VtexImage {
   ImageUrl: string;
   ImageName?: string;
@@ -149,7 +167,7 @@ function buildProposalRows(params: {
       field: "seo_title",
       agent: "content",
       originalValue: product.title,
-      proposedValue: enriched.seoTitle,
+      proposedValue: truncateAtWordBoundary(enriched.seoTitle, SEO_TITLE_MAX_LENGTH),
       ...reuseFields,
     });
   }
@@ -160,7 +178,7 @@ function buildProposalRows(params: {
       field: "meta_description",
       agent: "content",
       originalValue: null,
-      proposedValue: enriched.metaDescription,
+      proposedValue: truncateAtWordBoundary(enriched.metaDescription, META_DESCRIPTION_MAX_LENGTH),
       ...reuseFields,
     });
   }
