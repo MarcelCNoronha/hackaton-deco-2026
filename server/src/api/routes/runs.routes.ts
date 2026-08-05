@@ -1,8 +1,8 @@
 import type { FastifyInstance } from "fastify";
-import { and, desc, eq, ilike, inArray, or } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../../db/client.js";
-import { enrichmentProposals, enrichmentRuns, products } from "../../db/schema.js";
+import { agentRequestLogs, enrichmentProposals, enrichmentRuns, products } from "../../db/schema.js";
 import { createEnrichmentRun } from "../../orchestrator/enrichment-run.orchestrator.js";
 import { enqueueEnrichmentRun, enqueuePublishRun } from "../../queue/queues.js";
 import { getModelRouting } from "../../repositories/model-routing.repo.js";
@@ -114,10 +114,30 @@ export async function runsRoutes(app: FastifyInstance) {
     return { estimates };
   });
 
+  // `summary.totalCostUsd` is a snapshot frozen the moment a run finishes (see
+  // enrichment-run.orchestrator.ts) — it never accounts for cost logged AFTER that (e.g.
+  // generating a photo from RunDetail well after the run completed, see products.routes.ts's
+  // generateImage runId param). Confirmed live: History showed $0.08 for a run whose own detail
+  // page showed $0.12. This overlays the live, current sum from agent_request_logs on top of the
+  // frozen snapshot before ever returning it, so the two pages can't disagree.
+  async function withLiveCost(runs: (typeof enrichmentRuns.$inferSelect)[]) {
+    if (runs.length === 0) return runs;
+    const rows = await db
+      .select({ runId: agentRequestLogs.runId, totalCostUsd: sql<string>`coalesce(sum(${agentRequestLogs.costUsd}), 0)` })
+      .from(agentRequestLogs)
+      .where(inArray(agentRequestLogs.runId, runs.map((r) => r.id)))
+      .groupBy(agentRequestLogs.runId);
+    const costByRunId = new Map(rows.map((r) => [r.runId, Number(r.totalCostUsd)]));
+    return runs.map((run) => ({
+      ...run,
+      summary: { ...(run.summary as Record<string, unknown>), totalCostUsd: costByRunId.get(run.id) ?? 0 },
+    }));
+  }
+
   app.get<{ Querystring: { search?: string; categoryId?: string; brandId?: string } }>("/api/runs", async (req) => {
     const { search, categoryId, brandId } = req.query;
     if (!search && !categoryId && !brandId) {
-      return db.query.enrichmentRuns.findMany({ orderBy: desc(enrichmentRuns.startedAt) });
+      return withLiveCost(await db.query.enrichmentRuns.findMany({ orderBy: desc(enrichmentRuns.startedAt) }));
     }
 
     // Same filter fields as the "Nova otimização" product picker (search/categoryId/brandId) —
@@ -136,16 +156,19 @@ export async function runsRoutes(app: FastifyInstance) {
     const runIds = matches.map((m) => m.runId);
     if (runIds.length === 0) return [];
 
-    return db.query.enrichmentRuns.findMany({
-      where: inArray(enrichmentRuns.id, runIds),
-      orderBy: desc(enrichmentRuns.startedAt),
-    });
+    return withLiveCost(
+      await db.query.enrichmentRuns.findMany({
+        where: inArray(enrichmentRuns.id, runIds),
+        orderBy: desc(enrichmentRuns.startedAt),
+      }),
+    );
   });
 
   app.get<{ Params: { id: string } }>("/api/runs/:id", async (req, reply) => {
     const run = await db.query.enrichmentRuns.findFirst({ where: eq(enrichmentRuns.id, Number(req.params.id)) });
     if (!run) return reply.status(404).send({ error: "Run not found" });
-    return run;
+    const [withCost] = await withLiveCost([run]);
+    return withCost;
   });
 
   app.post<{ Params: { id: string } }>(
