@@ -51,9 +51,17 @@ describe("renderPdpHtml", () => {
     const plain = renderPdpHtml(["technical_specs"], "plain", { specs });
     const structured = renderPdpHtml(["technical_specs"], "structured", { specs });
 
-    expect(plain).not.toContain("<table>");
+    expect(plain).not.toContain("<table");
     expect(plain).toContain("Material: Cerâmica");
-    expect(structured).toContain("<table>");
+    expect(structured).toContain("<table");
+  });
+
+  it("inline-styles the specs table so it reads as a real table even without any theme CSS targeting it", () => {
+    // A bare <table> has no default browser border/spacing — confirmed live against a real store
+    // theme, it rendered as an unstructured stack of lines without this.
+    const html = renderPdpHtml(["technical_specs"], "structured", { specs: [{ label: "Material", value: "Cerâmica" }] });
+    expect(html).toMatch(/<table style="[^"]*border-collapse:collapse/);
+    expect(html).toMatch(/<td style="[^"]*border:1px solid/);
   });
 });
 

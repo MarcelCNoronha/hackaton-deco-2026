@@ -58,12 +58,23 @@ function renderBulletsBlock(bullets: string[], level: DescriptionRichness): stri
   return `<ul class="catalogia-bullets">${bullets.map((b) => `<li>${escapeHtml(b)}</li>`).join("")}</ul>`;
 }
 
+/** A bare `<table>` has NO default browser border/spacing — confirmed live: without a store theme
+ *  rule targeting it (most don't, since raw tables are unusual inside a product description), it
+ *  rendered as an unstructured stack of label/value lines, not a real table. Inline styles here
+ *  guarantee a legible table regardless of the theme's own CSS — deliberately minimal (borders,
+ *  padding, no color) so it can't clash with a theme's palette. */
+const SPECS_TABLE_STYLE = 'style="width:100%;border-collapse:collapse;"';
+const SPECS_CELL_STYLE = 'style="padding:0.4em 0.75em;border:1px solid #ddd;text-align:left;"';
+const SPECS_LABEL_CELL_STYLE = 'style="padding:0.4em 0.75em;border:1px solid #ddd;text-align:left;font-weight:600;width:35%;"';
+
 function renderSpecsBlock(specs: Array<{ label: string; value: string }>, level: DescriptionRichness): string {
   if (level === "plain") {
     return `<p>${specs.map((s) => `${escapeHtml(s.label)}: ${escapeHtml(s.value)}`).join(". ")}</p>`;
   }
-  const rows = specs.map((s) => `<tr><td>${escapeHtml(s.label)}</td><td>${escapeHtml(s.value)}</td></tr>`).join("");
-  return `<div class="catalogia-specs"><h2>Especificações</h2><table>${rows}</table></div>`;
+  const rows = specs
+    .map((s) => `<tr><td ${SPECS_LABEL_CELL_STYLE}>${escapeHtml(s.label)}</td><td ${SPECS_CELL_STYLE}>${escapeHtml(s.value)}</td></tr>`)
+    .join("");
+  return `<div class="catalogia-specs"><h2>Especificações</h2><table ${SPECS_TABLE_STYLE}>${rows}</table></div>`;
 }
 
 function renderFaqBlock(faq: Array<{ question: string; answer: string }>, level: DescriptionRichness): string {
