@@ -27,14 +27,19 @@ interface ProductImage {
  *  — more images raises cost and risks diluting which one the model treats as "the product". */
 const MAX_REFERENCE_IMAGES = 2;
 
-/** "Integridade do produto é inegociável" (requisito explícito do usuário): a imagem gerada tem
- *  que mostrar o MESMO produto, nunca um "parecido" — só cenário/enquadramento/iluminação podem
- *  mudar. Reforçado aqui no prompt E checado de novo depois via verifyImageIntegrity (gate
+/** "Integridade do produto é inegociável" (requisito explícito do usuário, reforçado de novo em
+ *  2026-08-05: sempre deixar explícito, nunca gerar variação parecida, e frisar cor à parte por
+ *  ser o desvio mais comum/sutil de um modelo de imagem) — a imagem gerada tem que mostrar O
+ *  PRODUTO EXATO das fotos de referência, nunca uma variação parecida ou genérica da mesma
+ *  categoria. Reforçado aqui no prompt E checado de novo depois via verifyImageIntegrity (gate
  *  independente, não confia só na instrução). */
 const INTEGRITY_INSTRUCTION =
-  " PROIBIDO alterar a forma, cor, material ou rótulo/logo do produto mostrado nas imagens de referência — " +
-  "é o MESMO produto, nunca um produto parecido ou genérico. Apenas cenário, enquadramento e iluminação " +
-  "podem mudar.";
+  " INTEGRIDADE DO PRODUTO É OBRIGATÓRIA: gere a cena usando O MESMO PRODUTO EXATO mostrado nas imagens de " +
+  "referência — não é permitido gerar uma variação parecida, um modelo similar da mesma linha/categoria, " +
+  "ou uma versão genérica. É PROIBIDO alterar a forma, o material, o rótulo/logo e, especialmente, a COR: " +
+  "mantenha fielmente a mesma cor/tom/acabamento exatos do produto de referência, sem qualquer variação de " +
+  "matiz, saturação ou brilho. Apenas cenário, enquadramento e iluminação ambiente podem mudar — o produto " +
+  "em si deve permanecer idêntico em todos os aspectos.";
 
 const PROMPTS: Record<GeneratableImageKind, (title: string, note?: string) => string> = {
   principal: (title, note) =>
