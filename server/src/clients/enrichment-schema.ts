@@ -232,7 +232,10 @@ export function buildCategoryFieldsSuffix(fields?: Array<{ name: string }>): str
   return (
     ` Os campos de especificação que esta categoria aceita na plataforma são: ${list}. Ao preencher ` +
     `'attributesPatch'/'technicalSpecs', use só esses rótulos (ou o mais próximo semanticamente) — nunca invente ` +
-    `um atributo fora dessa lista.`
+    `um atributo fora dessa lista. Cada fato vai no campo mais específico que existir pra ele — nunca combine dois ` +
+    `fatos diferentes dentro de um único rótulo só porque é mais fácil (ex.: se "Vazão" e "Rendimento" são campos ` +
+    `separados na lista, e você tem os dois dados, preencha os dois separadamente, cada um com só o seu próprio ` +
+    `valor, em vez de escrever "Rendimento: X / Vazão: Y" tudo dentro do campo Rendimento).`
   );
 }
 
