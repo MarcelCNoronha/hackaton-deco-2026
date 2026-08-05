@@ -152,13 +152,22 @@ export function Runs() {
     setLoadingList(true);
     setCatalogError(null);
     try {
-      const result = await api.listCatalogProducts({
-        search: search || undefined,
-        categoryId: categoryId || undefined,
-        brandId: brandId || undefined,
-        page: targetPage,
-        pageSize: PAGE_SIZE,
-      });
+      // "A Validar"/"Pronta e enviada" (filter narrowed to exactly one of these) query our own
+      // snapshot directly instead of the live catalog browse — see api.listProductsByStatus's doc
+      // comment for why: paginating the raw catalog and filtering client-side only ever showed
+      // matches that happened to land on the current page, missing most of them on any real
+      // catalog. Search/category/brand filters don't apply in this mode yet.
+      const onlyStatus = statusFilter.size === 1 ? [...statusFilter][0] : null;
+      const result =
+        onlyStatus === "pending" || onlyStatus === "published"
+          ? await api.listProductsByStatus({ status: onlyStatus, page: targetPage, pageSize: PAGE_SIZE })
+          : await api.listCatalogProducts({
+              search: search || undefined,
+              categoryId: categoryId || undefined,
+              brandId: brandId || undefined,
+              page: targetPage,
+              pageSize: PAGE_SIZE,
+            });
       setListResult(result);
       setPage(targetPage);
     } catch (err) {
@@ -183,6 +192,19 @@ export function Runs() {
     const interval = setInterval(refreshStats, 30_000);
     return () => clearInterval(interval);
   }, []);
+
+  // Re-fetches whenever the status filter changes — needed now that "A Validar"/"Pronta e
+  // enviada" hit a different endpoint (see loadProducts) instead of just re-filtering
+  // already-loaded items client-side. Skips the very first run so it doesn't duplicate the mount
+  // effect's own initial loadProducts(1) call above.
+  const statusFilterMounted = useRef(false);
+  useEffect(() => {
+    if (!statusFilterMounted.current) {
+      statusFilterMounted.current = true;
+      return;
+    }
+    loadProducts(1);
+  }, [statusFilter]);
 
   function handleSearch(e: React.FormEvent) {
     e.preventDefault();

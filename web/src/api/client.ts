@@ -563,6 +563,14 @@ export const api = {
     query.set("pageSize", String(params.pageSize));
     return request<CatalogListResult>(`/catalog/products?${query.toString()}`);
   },
+  /** For the "A Validar"/"Pronta e enviada" filter pills — queries our own snapshot directly
+   *  (status decides membership before pagination), so every matching product across the whole
+   *  account shows up, not just whichever ones land on the current page of listCatalogProducts'
+   *  live catalog browse. */
+  listProductsByStatus: (params: { status: "pending" | "published"; page: number; pageSize: number }) => {
+    const query = new URLSearchParams({ status: params.status, page: String(params.page), pageSize: String(params.pageSize) });
+    return request<CatalogListResult>(`/catalog/products/by-status?${query.toString()}`);
+  },
 
   listRuns: (filter?: CatalogFilter) => {
     const query = new URLSearchParams();

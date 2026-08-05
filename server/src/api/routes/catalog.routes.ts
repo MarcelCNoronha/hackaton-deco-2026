@@ -23,6 +23,12 @@ const listQuery = z.object({
   pageSize: z.coerce.number().int().positive().max(100).default(24),
 });
 
+const byStatusQuery = z.object({
+  status: z.enum(["pending", "published"]),
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().positive().max(100).default(24),
+});
+
 /** Loads the credentials for whichever platform is active and builds the matching CatalogClient —
  *  same factory-per-request pattern used for LLM clients in the orchestrator. */
 export async function requireActiveCatalogClient(): Promise<CatalogClient> {
@@ -40,21 +46,20 @@ export async function requireActiveCatalogClient(): Promise<CatalogClient> {
   return new ShopifyClient(credentials as ShopifyCredentials, logger);
 }
 
-/** Cross-references catalog items against our local snapshot so the product list can badge items
- *  that already have a past optimization — green once every proposal from that run was published,
- *  red while any of them still needs human review — linking to the run that produced it. */
-async function withOptimizationStatus(result: CatalogListResult, platform: CatalogPlatform) {
-  const externalIds = result.items.map((item) => item.externalId);
-  if (externalIds.length === 0) return { ...result, items: [] };
+interface ProductEnrichment {
+  lastRunId: number | null;
+  optimizedAt: string | null;
+  optimizationStatus: "pending" | "published" | null;
+  optimizationCostUsd: number | null;
+  impactReadiness: "none" | "partial" | "ready";
+}
 
-  const localRows = await db.query.products.findMany({
-    where: and(inArray(products.vtexProductId, externalIds), eq(products.platform, platform)),
-  });
-  const localIdByExternalId = new Map(localRows.map((row) => [row.vtexProductId, row.id]));
-  const skuByProductId = new Map(localRows.map((row) => [row.id, row.sku]));
-  const manufacturerReferenceUrlByProductId = new Map(localRows.map((row) => [row.id, row.manufacturerReferenceUrl]));
-  const localIds = localRows.map((row) => row.id);
-
+/** Shared by withOptimizationStatus (annotating a page of the LIVE platform catalog) and
+ *  listProductsByStatus (querying our own snapshot directly, status-first) — everything about a
+ *  local product that depends on its proposal/run/cost/impact history, keyed by our own
+ *  products.id. Returns an entry for every id passed in, even ones with no run yet (all nulls/
+ *  "none"), so callers never need an extra `?? default` fallback per field. */
+async function computeProductEnrichment(localIds: number[]): Promise<Map<number, ProductEnrichment>> {
   const lastRunByProductId = new Map<number, { runId: number; optimizedAt: string }>();
   const statusByProductId = new Map<number, "pending" | "published">();
   if (localIds.length > 0) {
@@ -102,31 +107,108 @@ async function withOptimizationStatus(result: CatalogListResult, platform: Catal
   // published. Drives the Impacto button color: not published yet, still maturing, or ready to compare.
   const earliestPublishedAtByProductId = await getEarliestPublishedAtByProduct(localIds);
 
+  const result = new Map<number, ProductEnrichment>();
+  for (const productId of localIds) {
+    const lastRun = lastRunByProductId.get(productId);
+    const costUsd = lastRun ? costByProductAndRun.get(`${productId}:${lastRun.runId}`) ?? 0 : null;
+    const earliestPublishedAt = earliestPublishedAtByProductId.get(productId);
+    const daysSincePublish = earliestPublishedAt
+      ? Math.floor((Date.now() - earliestPublishedAt.getTime()) / (24 * 60 * 60 * 1000))
+      : null;
+    result.set(productId, {
+      lastRunId: lastRun?.runId ?? null,
+      optimizedAt: lastRun?.optimizedAt ?? null,
+      optimizationStatus: statusByProductId.get(productId) ?? null,
+      optimizationCostUsd: costUsd,
+      impactReadiness: daysSincePublish === null ? "none" : daysSincePublish >= MATURATION_DAYS ? "ready" : "partial",
+    });
+  }
+  return result;
+}
+
+/** Cross-references catalog items against our local snapshot so the product list can badge items
+ *  that already have a past optimization — green once every proposal from that run was published,
+ *  red while any of them still needs human review — linking to the run that produced it. */
+async function withOptimizationStatus(result: CatalogListResult, platform: CatalogPlatform) {
+  const externalIds = result.items.map((item) => item.externalId);
+  if (externalIds.length === 0) return { ...result, items: [] };
+
+  const localRows = await db.query.products.findMany({
+    where: and(inArray(products.vtexProductId, externalIds), eq(products.platform, platform)),
+  });
+  const localIdByExternalId = new Map(localRows.map((row) => [row.vtexProductId, row.id]));
+  const skuByProductId = new Map(localRows.map((row) => [row.id, row.sku]));
+  const manufacturerReferenceUrlByProductId = new Map(localRows.map((row) => [row.id, row.manufacturerReferenceUrl]));
+  const enrichment = await computeProductEnrichment(localRows.map((row) => row.id));
+
   return {
     ...result,
     items: result.items.map((item) => {
       const productId = localIdByExternalId.get(item.externalId);
-      const lastRun = productId !== undefined ? lastRunByProductId.get(productId) : undefined;
-      const costUsd =
-        productId !== undefined && lastRun ? costByProductAndRun.get(`${productId}:${lastRun.runId}`) ?? 0 : null;
-      const earliestPublishedAt = productId !== undefined ? earliestPublishedAtByProductId.get(productId) : undefined;
-      const daysSincePublish = earliestPublishedAt
-        ? Math.floor((Date.now() - earliestPublishedAt.getTime()) / (24 * 60 * 60 * 1000))
-        : null;
-      const impactReadiness: "none" | "partial" | "ready" =
-        daysSincePublish === null ? "none" : daysSincePublish >= MATURATION_DAYS ? "ready" : "partial";
+      const e = productId !== undefined ? enrichment.get(productId) : undefined;
       return {
         ...item,
         productId: productId ?? null,
         sku: (productId !== undefined ? skuByProductId.get(productId) : undefined) ?? item.sku ?? null,
-        lastRunId: lastRun?.runId ?? null,
-        optimizedAt: lastRun?.optimizedAt ?? null,
-        optimizationStatus: productId !== undefined ? statusByProductId.get(productId) ?? null : null,
-        optimizationCostUsd: costUsd,
-        impactReadiness,
+        lastRunId: e?.lastRunId ?? null,
+        optimizedAt: e?.optimizedAt ?? null,
+        optimizationStatus: e?.optimizationStatus ?? null,
+        optimizationCostUsd: e?.optimizationCostUsd ?? null,
+        impactReadiness: e?.impactReadiness ?? "none",
         manufacturerReferenceUrl: (productId !== undefined ? manufacturerReferenceUrlByProductId.get(productId) : undefined) ?? null,
       };
     }),
+  };
+}
+
+/** Lists products directly from our local snapshot, filtered to a specific optimization status —
+ *  the opposite direction from withOptimizationStatus above: status decides membership FIRST, then
+ *  gets paginated, instead of paginating the live platform catalog and hoping matching products
+ *  land on the current page. Fixes the "A Validar"/"Pronta e enviada" filter pills only ever
+ *  matching whatever happened to be on the currently-loaded page of the raw catalog — with this,
+ *  they show every matching product across the whole account. Only meaningful for products that
+ *  already have a local row (touched by at least one run) — "Não otimizado" has no local row to
+ *  query this way, so the frontend keeps using the live-catalog browse for that case. */
+async function listProductsByStatus(
+  platform: CatalogPlatform,
+  status: "pending" | "published",
+  page: number,
+  pageSize: number,
+): Promise<CatalogListResult> {
+  const localRows = await db.query.products.findMany({ where: eq(products.platform, platform) });
+  const enrichment = await computeProductEnrichment(localRows.map((row) => row.id));
+
+  const matching = localRows
+    .filter((row) => enrichment.get(row.id)?.optimizationStatus === status)
+    .sort((a, b) => (enrichment.get(b.id)?.optimizedAt ?? "").localeCompare(enrichment.get(a.id)?.optimizedAt ?? ""));
+
+  const start = (page - 1) * pageSize;
+  const pageRows = matching.slice(start, start + pageSize);
+
+  return {
+    items: pageRows.map((row) => {
+      const e = enrichment.get(row.id)!;
+      const images = (row.images as Array<{ ImageUrl: string }>) ?? [];
+      return {
+        externalId: row.vtexProductId,
+        title: row.title,
+        imageUrl: images[0]?.ImageUrl ?? null,
+        category: row.category,
+        collection: row.collection,
+        brand: row.brand,
+        url: row.url,
+        productId: row.id,
+        sku: row.sku,
+        lastRunId: e.lastRunId,
+        optimizedAt: e.optimizedAt,
+        optimizationStatus: e.optimizationStatus,
+        optimizationCostUsd: e.optimizationCostUsd,
+        impactReadiness: e.impactReadiness,
+        manufacturerReferenceUrl: row.manufacturerReferenceUrl,
+      };
+    }),
+    hasMore: start + pageSize < matching.length,
+    total: matching.length,
   };
 }
 
@@ -163,6 +245,23 @@ export async function catalogRoutes(app: FastifyInstance) {
         const catalog = await requireActiveCatalogClient();
         const result = await catalog.listProducts(query);
         return await withOptimizationStatus(result, platform);
+      } catch (err) {
+        return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
+  // See listProductsByStatus's doc comment — only for the "A Validar"/"Pronta e enviada" filter
+  // pills, which need every matching product account-wide, not just whatever's on the current
+  // page of the live catalog browse above.
+  app.get<{ Querystring: Record<string, string> }>(
+    "/api/catalog/products/by-status",
+    { preHandler: requireAuth },
+    async (req, reply) => {
+      const query = byStatusQuery.parse(req.query);
+      try {
+        const platform = await getCatalogPlatform();
+        return await listProductsByStatus(platform, query.status, query.page, query.pageSize);
       } catch (err) {
         return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
       }
