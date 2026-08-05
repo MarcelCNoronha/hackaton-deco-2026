@@ -758,3 +758,52 @@ export async function republishProposal(params: { catalog: CatalogClient; propos
   }
   return { ok: true };
 }
+
+/** Full re-publish for ONE product — every approved/edited/published proposal it has in the given
+ *  run (description, specs, SEO, tags, keywords, attributes, alt-texts, all of it), plus reordering
+ *  its photo carousel to match each photo's current Label (see reorderImagesByLabel). Meant for the
+ *  "Republicar anúncio" action in RunDetail: after reclassifying a photo or generating a new one,
+ *  this pushes the whole product back out in one click reflecting the current state, rather than
+ *  needing a separate "Salvar e reenviar" per field plus a separate reorder step. Reordering is
+ *  best-effort — a failure there doesn't undo/block the content republish that already succeeded. */
+export async function republishProduct(params: {
+  catalog: CatalogClient;
+  runId: number;
+  productId: number;
+}): Promise<{ ok: boolean; error?: string }> {
+  const [run, product] = await Promise.all([
+    db.query.enrichmentRuns.findFirst({ where: eq(enrichmentRuns.id, params.runId) }),
+    db.query.products.findFirst({ where: eq(products.id, params.productId) }),
+  ]);
+  if (!product) return { ok: false, error: "Produto não encontrado" };
+
+  const level = ((run?.scope as { descriptionRichness?: DescriptionRichness } | null)?.descriptionRichness ?? "plain") as DescriptionRichness;
+
+  const proposalsForProduct = await db.query.enrichmentProposals.findMany({
+    where: and(
+      eq(enrichmentProposals.runId, params.runId),
+      eq(enrichmentProposals.productId, params.productId),
+      inArray(enrichmentProposals.status, ["approved", "edited", "published"]),
+    ),
+  });
+
+  const templateCache = new Map<string, ResolvedPdpTemplate>();
+  const templateFor = async (category: string | null): Promise<ResolvedPdpTemplate> => {
+    const key = category ?? "";
+    if (!templateCache.has(key)) templateCache.set(key, await resolvePdpTemplate(params.catalog.platform, category, level));
+    return templateCache.get(key)!;
+  };
+
+  const result = await publishProductProposals(params.catalog, level, product, proposalsForProduct, templateFor);
+
+  try {
+    await params.catalog.reorderImagesByLabel({ externalId: product.vtexProductId, variantId: product.vtexSkuId });
+  } catch (err) {
+    console.error(`Failed to reorder photo carousel for product ${params.productId} — content still republished normally`, err);
+  }
+
+  if (result.published === 0 && result.failed > 0) {
+    return { ok: false, error: "Falha ao republicar — veja os logs do servidor." };
+  }
+  return { ok: true };
+}

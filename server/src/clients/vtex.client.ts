@@ -53,7 +53,11 @@ export interface VtexSku {
  *  not `{account}.vteximg.com.br/...`) — see fetchSkuFiles. `Label` is a free-text tag the
  *  merchant sets per photo in the admin; this store's own convention uses "2" for the
  *  lifestyle/"foto ambientada" shot, confirmed live (see manufacturer-image.agent.ts's future
- *  ambient-photo sourcing). */
+ *  ambient-photo sourcing). `Position` is the real, writable field that controls storefront
+ *  gallery/carousel order (lower first) — confirmed live: the original catalog photo sits at 0,
+ *  while every photo this app has ever uploaded via addProductImage came back at 9999 (VTEX's
+ *  apparent "no explicit position given" default), regardless of its Label — see
+ *  reorderImagesByLabel. */
 interface VtexSkuFile {
   Id: number;
   ArchiveId: number;
@@ -62,6 +66,7 @@ interface VtexSkuFile {
   Text?: string;
   Label?: string;
   FileLocation: string;
+  Position: number;
 }
 
 interface VtexSearchProduct {
@@ -464,6 +469,43 @@ export class VtexClient implements CatalogClient {
    *  photo that was never assigned a Label at all. */
   async updateImageLabel(params: { externalId: string; variantId: string; imageId: string; label: string }): Promise<void> {
     await this.updateSkuFile(params.variantId, params.imageId, { label: params.label });
+  }
+
+  /** Reorders every one of a SKU's photos to match this store's Label convention (1=principal,
+   *  2=ambientada, 3=dimensional, 4+=destaque, in that numeric order) by writing each file's real
+   *  `Position` field — see VtexSkuFile's doc comment for how that was confirmed live. Only
+   *  touches files whose Label is already a plain number; anything unclassified (or a non-numeric
+   *  Label from before this convention existed) keeps whatever position it already has rather than
+   *  being forced somewhere. Best-effort per file — one file's write failing (e.g. a transient
+   *  network blip) doesn't stop the rest from reordering. */
+  async reorderImagesByLabel(params: { externalId: string; variantId: string }): Promise<void> {
+    const files = await this.fetchSkuFiles(params.variantId);
+    for (const file of files) {
+      if (!file.Label || !/^\d+$/.test(file.Label)) continue;
+      const position = Number(file.Label);
+      if (file.Position === position) continue;
+      try {
+        await requestWithRetry({
+          provider: "vtex",
+          operation: "reorderSkuFile",
+          url: `${this.baseUrl}/pvt/stockkeepingunit/${params.variantId}/file/${file.Id}`,
+          init: {
+            method: "PUT",
+            headers: this.headers(),
+            body: JSON.stringify({
+              Url: `https://${this.credentials.account}.${file.FileLocation}`,
+              Text: file.Text ?? "",
+              Label: file.Label,
+              IsMain: file.IsMain,
+              Position: position,
+            }),
+          },
+          onAttempt: this.onAttempt,
+        });
+      } catch (err) {
+        console.error(`Failed to reorder SKU ${params.variantId} file ${file.Id} (Label ${file.Label}) to Position ${position}:`, err);
+      }
+    }
   }
 
   /** `PUT /pvt/product/{id}` is NOT a partial update — VTEX does not merge, it replaces. Fields

@@ -520,4 +520,8 @@ export class ShopifyClient implements CatalogClient {
   async updateImageLabel(): Promise<void> {
     throw new Error("Shopify não tem um campo equivalente ao Label da VTEX — não é possível classificar fotos em slots numerados nesta plataforma.");
   }
+
+  async reorderImagesByLabel(): Promise<void> {
+    throw new Error("Shopify não usa Label — não há como reordenar por ele nesta plataforma.");
+  }
 }

@@ -338,6 +338,26 @@ export function RunDetail() {
     }
   }
 
+  const [republishingProductId, setRepublishingProductId] = useState<number | null>(null);
+
+  /** Republishes EVERY approved/edited/published proposal this product has (description, SEO,
+   *  tags, keywords, attributes, alt-texts...) plus reordering its photo carousel to match each
+   *  photo's current Label — for after reclassifying a photo or generating a new one, so the
+   *  storefront actually reflects the current state without clicking a separate "reenviar" per
+   *  field. */
+  async function handleRepublishProduct(productId: number) {
+    setImageGenError(null);
+    setRepublishingProductId(productId);
+    try {
+      await api.republishProduct(productId, runId);
+      refresh();
+    } catch (err) {
+      setImageGenError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRepublishingProductId(null);
+    }
+  }
+
   async function review(proposal: EnrichmentProposal, status: "approved" | "rejected" | "edited") {
     const proposedValue = status === "edited" ? drafts[proposal.id] ?? proposal.proposedValue : undefined;
     await api.reviewProposal(proposal.id, { status, proposedValue });
@@ -592,11 +612,11 @@ export function RunDetail() {
                       <button
                         type="button"
                         className="secondary"
-                        onClick={() => handleRepublish(descriptionProposal)}
-                        disabled={republishingId === descriptionProposal.id}
-                        title="Reprocessa a descrição já publicada usando as fotos classificadas agora (principal/ambientada/dimensional/destaque) — útil depois de mudar um Label ou gerar uma foto nova."
+                        onClick={() => handleRepublishProduct(productId)}
+                        disabled={republishingProductId === productId}
+                        title="Reenvia tudo que já foi aprovado/publicado deste produto (descrição, SEO, tags, etc) e reordena o carrossel de fotos pelos Labels — útil depois de mudar um Label ou gerar uma foto nova."
                       >
-                        {republishingId === descriptionProposal.id ? "Enviando…" : "🔄 Republicar anúncio"}
+                        {republishingProductId === productId ? "Enviando…" : "🔄 Republicar anúncio"}
                       </button>
                     )}
                   </div>

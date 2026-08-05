@@ -698,6 +698,12 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ classification }),
     }),
+  /** Republishes EVERY approved/edited/published proposal this product has in the given run
+   *  (description, SEO, tags, keywords, attributes, alt-texts...), plus reordering its photo
+   *  carousel to match each photo's current Label — one click for "I changed some Labels/photos,
+   *  push it all back out reflecting that". */
+  republishProduct: (productId: number, runId: number) =>
+    request<{ ok: boolean }>(`/products/${productId}/republish`, { method: "POST", body: JSON.stringify({ runId }) }),
   productRealImpact: (id: number) => request<RealImpact>(`/products/${id}/real-impact`),
   optimizedProductCount: () => request<{ count: number }>("/products/optimized-count"),
   pendingReviewCount: () => request<{ count: number }>("/products/pending-review-count"),

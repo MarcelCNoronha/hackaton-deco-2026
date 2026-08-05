@@ -115,6 +115,11 @@ export interface CatalogClient {
    *  no equivalent concept; its implementation throws rather than silently no-op-ing a request the
    *  merchant explicitly asked for. */
   updateImageLabel(params: { externalId: string; variantId: string; imageId: string; label: string }): Promise<void>;
+  /** Reorders the gallery/carousel to match each photo's current Label (1, 2, 3, 4, 5...) — VTEX
+   *  only, via its real writable Position field (see vtex.client.ts's VtexSkuFile doc comment).
+   *  Shopify's implementation throws, same as updateImageLabel, since there's no Label to order by
+   *  there in the first place. */
+  reorderImagesByLabel(params: { externalId: string; variantId: string }): Promise<void>;
   /** Publishes the seo_title/meta_description proposals — both platforms have a native field for
    *  these (VTEX: Title/MetaTagDescription on the product record. Shopify: the `seo` input on
    *  productUpdate), unlike structured_data/benefit_bullets which stay in-app only. Either key may

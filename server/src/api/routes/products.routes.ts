@@ -8,6 +8,7 @@ import { syncProduct } from "../../agents/catalog-reader.agent.js";
 import { extractManufacturerFacts } from "../../agents/reference-facts.agent.js";
 import { extractManufacturerReferenceImage } from "../../agents/manufacturer-image.agent.js";
 import { generateProductImage } from "../../agents/image-generation.agent.js";
+import { republishProduct } from "../../agents/publisher.agent.js";
 import { getProductRealImpact } from "../../agents/impact.agent.js";
 import { requireActiveCatalogClient } from "./catalog.routes.js";
 import { getConnectionCredentials } from "../../repositories/connections.repo.js";
@@ -32,6 +33,8 @@ const generateImageBody = z.object({
 const manufacturerReferenceBody = z.object({ manufacturerReferenceUrl: z.string().url().nullable() });
 
 const classifyImageBody = z.object({ classification: z.enum(["principal", "ambientada", "dimensional", "destaque"]) });
+
+const republishBody = z.object({ runId: z.number() });
 
 export async function productsRoutes(app: FastifyInstance) {
   app.addHook("preHandler", requireAuth);
@@ -238,6 +241,22 @@ export async function productsRoutes(app: FastifyInstance) {
       }
     },
   );
+
+  // Full republish for one product (see republishProduct's doc comment) — every approved/edited/
+  // published proposal it has in this run, plus reordering its photo carousel to match each
+  // photo's current Label. Distinct from /api/proposals/:id/republish, which only touches ONE
+  // proposal (and its merged-field siblings, if any).
+  app.post<{ Params: { id: string } }>("/api/products/:id/republish", async (req, reply) => {
+    const body = republishBody.parse(req.body);
+    try {
+      const catalog = await requireActiveCatalogClient();
+      const result = await republishProduct({ catalog, runId: body.runId, productId: Number(req.params.id) });
+      if (!result.ok) return reply.status(400).send({ error: result.error });
+      return reply.send({ ok: true });
+    } catch (err) {
+      return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
 
   /** Uploads an already-generated image as a real product photo on the active catalog platform —
    *  distinct from generating it (above), which only ever saves it inside CatalogIA. Requires
