@@ -286,6 +286,23 @@ specs, FAQ, dados estruturados) + alt-text de imagem, sem opção de escolher. A
   embutida no nível Excelente, escolhida por visão multimodal a partir das fotos reais do
   produto.
 
+- **Configuração de PDP por Marca/Departamento/Categoria/Subcategoria** — pedido em 2026-08-05,
+  não implementado. Hoje a "Configuração de PDP" (`pdp_templates`) resolve por um único nível:
+  categoria/subcategoria (ou o catalogo-wide `'*'`), ver `pdp-templates.repo.ts`. A ideia é dar
+  ao editor de layout mais níveis de granularidade além desse — por Marca (ex. um padrão só pra
+  DECA) e por Departamento (ex. um padrão só pra "Cozinha", acima de Categoria/Subcategoria).
+  Exigiria: decidir a ordem de precedência entre os níveis (provavelmente subcategoria > categoria
+  > departamento > marca > `'*'`, do mais específico pro mais genérico) e estender
+  `resolvePdpTemplate`/`getPdpTemplates` pra considerar múltiplas chaves em vez de só `category`.
+
+- **Textos de apoio SEO e GEO** — pedido em 2026-08-05, não implementado. GEO (Generative Engine
+  Optimization — otimizar para IAs de busca/resposta tipo ChatGPT/Perplexity, distinto de SEO
+  tradicional) ainda não tem nenhum campo/proposta dedicado no pipeline de enriquecimento; hoje só
+  existe `seo_title`/`meta_description`/`structured_data`/`keywords` (SEO clássico). Precisa
+  definir o que exatamente "texto de apoio" significa aqui (ex. um bloco de contexto factual
+  citável por um assistente de IA, separado da descrição voltada ao comprador humano) antes de
+  desenhar o campo.
+
 ### Geração de imagem por IA (implementado em 2026-08-03, com uma limitação de conta)
 
 Feature nova: gera foto "ambientada" (produto em cenário de uso real) ou de "destaque" (close-up
