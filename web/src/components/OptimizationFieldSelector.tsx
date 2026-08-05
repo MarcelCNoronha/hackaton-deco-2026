@@ -73,7 +73,7 @@ export function OptimizationFieldSelector({ productCount, confirmLabel, onCancel
     for (const field of ALL_ENRICHMENT_FIELDS) initial[field] = true;
     return initial;
   });
-  const [level, setLevel] = useState<OptimizationLevel>("bom");
+  const [level, setLevel] = useState<OptimizationLevel>("excelente");
   const [tone, setTone] = useState<CommunicationTone>("auto");
   const [estimates, setEstimates] = useState<FieldCostEstimate[] | null>(null);
   const [levelEstimates, setLevelEstimates] = useState<LevelCostEstimate[] | null>(null);

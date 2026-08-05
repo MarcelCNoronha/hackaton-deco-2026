@@ -22,7 +22,10 @@ const BLOCK_LABELS: Record<PdpBlock, string> = {
   benefit_bullets: "Bullets de benefício",
   technical_specs: "Especificações técnicas",
   featured_image: "Foto de destaque",
+  principal_photo: "Foto principal",
   ambient_photo: "Foto ambientada",
+  dimensional_photo: "Foto dimensional",
+  destaque_gallery: "Galeria de fotos de destaque",
   faq: "FAQ",
   cta: "Chamada à ação (CTA)",
   divider: "Linha divisória",
@@ -34,12 +37,14 @@ const BLOCK_LABELS: Record<PdpBlock, string> = {
  *  instead of "tamanho da letra" (still the same field server-side, see PdpLayoutCell). */
 const STRUCTURAL_BLOCKS = new Set<PdpBlock>(["divider", "spacer"]);
 
-/** "featured_image"/"ambient_photo" have no "bold" concept (nothing to embolden on an <img>) and
- *  their align/fontSize controls mean something different than for text — align becomes real
- *  left/right/center positioning, fontSize becomes "how tall can the photo get" (in vh, capped so
- *  a huge source photo can't push a mobile viewport into an awkward scroll — see
- *  publisher.agent.ts's IMAGE_MAX_HEIGHT). Still the same two fields server-side. */
-const IMAGE_BLOCKS = new Set<PdpBlock>(["featured_image", "ambient_photo"]);
+/** "featured_image"/"ambient_photo"/"dimensional_photo"/"destaque_gallery" have no "bold" concept
+ *  (nothing to embolden on an <img>) and their align/fontSize controls mean something different
+ *  than for text — align becomes real left/right/center positioning (or, for the gallery, actual
+ *  row justification since it can hold more than one photo), fontSize becomes "how tall can the
+ *  photo/each thumbnail get" (see publisher.agent.ts's IMAGE_MAX_HEIGHT/GALLERY_ITEM_HEIGHT).
+ *  Still the same two fields server-side. */
+const IMAGE_BLOCKS = new Set<PdpBlock>(["featured_image", "principal_photo", "ambient_photo", "dimensional_photo", "destaque_gallery"]);
+const GALLERY_BLOCKS = new Set<PdpBlock>(["destaque_gallery"]);
 
 const ALIGN_LABELS: Record<PdpTextAlign, string> = {
   justify: "Justificado",
@@ -564,7 +569,9 @@ export function PdpConfig() {
                               <select value={cell.fontSize} onChange={(e) => updateCell(ri, ci, { fontSize: e.target.value as PdpFontSize })}>
                                 {PDP_FONT_SIZE_OPTIONS.map((s) => (
                                   <option key={s} value={s}>
-                                    Foto {FONT_SIZE_LABELS[s].toLowerCase()} ({s === "sm" ? "30vh" : s === "md" ? "50vh" : "70vh"})
+                                    {GALLERY_BLOCKS.has(cell.block)
+                                      ? `Miniatura ${FONT_SIZE_LABELS[s].toLowerCase()} (${s === "sm" ? "140px" : s === "md" ? "200px" : "280px"})`
+                                      : `Foto ${FONT_SIZE_LABELS[s].toLowerCase()} (${s === "sm" ? "30vh" : s === "md" ? "50vh" : "70vh"})`}
                                   </option>
                                 ))}
                               </select>

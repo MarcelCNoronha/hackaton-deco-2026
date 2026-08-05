@@ -3,6 +3,19 @@ import { generatedImages } from "../db/schema.js";
 import type { GeminiClient } from "../clients/gemini.client.js";
 import { IMAGE_GENERATION_PRICE_PER_IMAGE } from "../clients/model-recommendations.js";
 import type { ProductRow } from "./catalog-reader.agent.js";
+import { toStoreJpeg } from "../lib/image-processing.js";
+
+export type GeneratableImageKind = "principal" | "lifestyle" | "dimensional" | "feature_callout";
+
+/** kind -> this store's VTEX photo-slot classification — see photoClassificationEnum's doc
+ *  comment. 1:1 for every AI-generated kind (only a downloaded manufacturer_reference photo needs
+ *  a human to pick one, since its kind doesn't imply a slot). */
+export const CLASSIFICATION_BY_KIND: Record<GeneratableImageKind, "principal" | "ambientada" | "dimensional" | "destaque"> = {
+  principal: "principal",
+  lifestyle: "ambientada",
+  dimensional: "dimensional",
+  feature_callout: "destaque",
+};
 
 interface ProductImage {
   ImageUrl: string;
@@ -23,10 +36,25 @@ const INTEGRITY_INSTRUCTION =
   "é o MESMO produto, nunca um produto parecido ou genérico. Apenas cenário, enquadramento e iluminação " +
   "podem mudar.";
 
-const PROMPTS: Record<"lifestyle" | "feature_callout", (title: string, note?: string) => string> = {
+const PROMPTS: Record<GeneratableImageKind, (title: string, note?: string) => string> = {
+  principal: (title, note) =>
+    `Gere a foto principal de e-commerce do produto "${title}": still isolado sobre fundo branco puro, ` +
+    "enquadramento frontal centralizado, iluminação de estúdio uniforme, sem sombras duras nem outros " +
+    "objetos de cena — o mesmo padrão de uma foto principal de catálogo." +
+    INTEGRITY_INSTRUCTION +
+    (note ? ` Detalhe adicional pedido: ${note}` : ""),
   lifestyle: (title, note) =>
     `Gere uma foto realista mostrando o produto "${title}" ambientado em um cenário de uso real e ` +
     "atraente (um ambiente bem decorado condizente com a categoria do produto)." +
+    INTEGRITY_INSTRUCTION +
+    (note ? ` Detalhe adicional pedido: ${note}` : ""),
+  // AI image generation can't render precise measurement numbers reliably — this asks for a
+  // clear scale/proportion reference (e.g. next to a common object) rather than promising exact
+  // annotated dimensions, which the model would likely hallucinate.
+  dimensional: (title, note) =>
+    `Gere uma foto do produto "${title}" que ajude a comunicar seu tamanho/proporção real — mostre o ` +
+    "produto inteiro, enquadramento amplo e nítido, de preferência ao lado de um objeto comum que dê " +
+    "noção de escala (sem inventar números ou medidas na imagem)." +
     INTEGRITY_INSTRUCTION +
     (note ? ` Detalhe adicional pedido: ${note}` : ""),
   feature_callout: (title, note) =>
@@ -47,7 +75,7 @@ const MAX_INTEGRITY_ATTEMPTS = 2;
 export async function generateProductImage(params: {
   gemini: GeminiClient;
   product: ProductRow;
-  kind: "lifestyle" | "feature_callout";
+  kind: GeneratableImageKind;
   note?: string;
 }): Promise<typeof generatedImages.$inferSelect> {
   const { gemini, product, kind, note } = params;
@@ -98,16 +126,19 @@ export async function generateProductImage(params: {
 
   // best is guaranteed set: the loop always runs at least once. Persisted even when never
   // verified — same "always show something, but flag it" discipline as unsupportedClaims for
-  // text — so it's auditable in the panel instead of silently disappearing.
-  const { mimeType, base64 } = best!;
+  // text — so it's auditable in the panel instead of silently disappearing. Normalized to this
+  // store's 1000x1000 JPG convention only now (after the integrity check, not before) — no reason
+  // to spend the resize on an attempt the loop might discard.
+  const jpeg = await toStoreJpeg(Buffer.from(best!.base64, "base64"));
   const [row] = await db
     .insert(generatedImages)
     .values({
       productId: product.id,
       kind,
+      classification: CLASSIFICATION_BY_KIND[kind],
       prompt,
-      mimeType,
-      imageBase64: base64,
+      mimeType: "image/jpeg",
+      imageBase64: jpeg.toString("base64"),
       costUsd: IMAGE_GENERATION_PRICE_PER_IMAGE.toString(),
       integrityVerified,
       integrityNotes,

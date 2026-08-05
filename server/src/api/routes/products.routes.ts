@@ -17,13 +17,16 @@ import { GscClient } from "../../clients/gsc.client.js";
 import { Ga4Client } from "../../clients/ga4.client.js";
 import { IMAGE_GENERATION_MODEL } from "../../clients/model-recommendations.js";
 import { env } from "../../config/env.js";
+import { PHOTO_CLASSIFICATION_LABELS, resolvePhotoLabel } from "../../lib/photo-labels.js";
 
 const generateImageBody = z.object({
-  kind: z.enum(["lifestyle", "feature_callout"]),
+  kind: z.enum(["principal", "lifestyle", "dimensional", "feature_callout"]),
   note: z.string().max(500).optional(),
 });
 
 const manufacturerReferenceBody = z.object({ manufacturerReferenceUrl: z.string().url().nullable() });
+
+const classifyImageBody = z.object({ classification: z.enum(["principal", "ambientada", "dimensional", "destaque"]) });
 
 export async function productsRoutes(app: FastifyInstance) {
   app.addHook("preHandler", requireAuth);
@@ -176,6 +179,61 @@ export async function productsRoutes(app: FastifyInstance) {
     }
   });
 
+  // A manufacturer_reference photo's classification isn't implied by its kind (unlike the 4
+  // AI-generated kinds — see CLASSIFICATION_BY_KIND) since a downloaded photo could fill any of
+  // the 4 slots; this lets a human assign (or reassign) one. Also usable to re-classify an
+  // AI-generated image if its auto-assigned slot isn't what the merchant actually wants.
+  app.patch<{ Params: { id: string } }>("/api/generated-images/:id/classify", async (req, reply) => {
+    const body = classifyImageBody.parse(req.body);
+    const [updated] = await db
+      .update(generatedImages)
+      .set({ classification: body.classification })
+      .where(eq(generatedImages.id, Number(req.params.id)))
+      .returning();
+    if (!updated) return reply.status(404).send({ error: "Imagem não encontrada" });
+    return updated;
+  });
+
+  /** The product's own photos already on the platform (a merchant's direct VTEX upload, most of
+   *  which predate this store's Label convention and so come back unclassified) — shown alongside
+   *  generated-images (AI + manufacturer reference) in the same panel so every photo for a product
+   *  can be classified into one carousel from one place, see RunDetail's "Fotos" section. */
+  app.get<{ Params: { id: string } }>("/api/products/:id/catalog-images", async (req, reply) => {
+    const product = await db.query.products.findFirst({ where: eq(products.id, Number(req.params.id)) });
+    if (!product) return reply.status(404).send({ error: "Produto não encontrado" });
+    try {
+      const catalog = await requireActiveCatalogClient();
+      const detail = await catalog.getProduct(product.vtexProductId);
+      return detail.images;
+    } catch (err) {
+      return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // Re-labels a photo that's already on the platform (see updateImageLabel's doc comment) — VTEX
+  // only, since Shopify has no equivalent field.
+  app.patch<{ Params: { id: string; imageId: string } }>(
+    "/api/products/:id/catalog-images/:imageId/classify",
+    async (req, reply) => {
+      const body = classifyImageBody.parse(req.body);
+      const product = await db.query.products.findFirst({ where: eq(products.id, Number(req.params.id)) });
+      if (!product) return reply.status(404).send({ error: "Produto não encontrado" });
+      try {
+        const catalog = await requireActiveCatalogClient();
+        const label = await resolvePhotoLabel(catalog, product.vtexProductId, body.classification);
+        await catalog.updateImageLabel({
+          externalId: product.vtexProductId,
+          variantId: product.vtexSkuId,
+          imageId: req.params.imageId,
+          label,
+        });
+        return reply.send({ ok: true, label });
+      } catch (err) {
+        return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
   /** Uploads an already-generated image as a real product photo on the active catalog platform —
    *  distinct from generating it (above), which only ever saves it inside CatalogIA. Requires
    *  APP_BASE_URL to be set to a publicly reachable origin (VTEX/Shopify's own servers fetch the
@@ -194,17 +252,24 @@ export async function productsRoutes(app: FastifyInstance) {
           error: "Integridade do produto não confirmada para esta imagem — não pode ser publicada. Gere uma nova imagem.",
         });
       }
+      if (!image.classification) {
+        return reply.status(400).send({
+          error: "Classifique a foto (principal, ambientada, dimensional ou destaque) antes de publicar.",
+        });
+      }
       if (!env.APP_BASE_URL) {
         return reply.status(400).send({ error: "APP_BASE_URL não configurado — necessário pra plataforma buscar a imagem." });
       }
 
       try {
         const catalog = await requireActiveCatalogClient();
+        const label = await resolvePhotoLabel(catalog, product.vtexProductId, image.classification);
         await catalog.addProductImage({
           externalId: product.vtexProductId,
           variantId: product.vtexSkuId,
           imageUrl: `${env.APP_BASE_URL}/api/generated-images/${image.id}/raw`,
-          altText: `${product.title} — ${image.kind === "lifestyle" ? "foto ambientada" : "foto de destaque"}`,
+          altText: `${product.title} — ${PHOTO_CLASSIFICATION_LABELS[image.classification]}`,
+          label,
         });
         const [updated] = await db
           .update(generatedImages)

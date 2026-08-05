@@ -1,6 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import type { RequestLogEntry } from "./http.js";
-import { computeCostUsd } from "./model-recommendations.js";
+import { computeCostUsd, IMAGE_GENERATION_MODEL } from "./model-recommendations.js";
 import {
   buildCategoryFieldsSuffix,
   buildContentProfileSuffix,
@@ -249,9 +249,13 @@ export class GeminiClient implements LlmClient {
           system_instruction: params.systemInstruction,
           input: Array.isArray(params.input) ? params.input : JSON.stringify(params.input),
           response_format: { type: "text", mime_type: "application/json", schema: params.schema },
+          // gemini-2.5-flash-image (the only model this class is ever instantiated with for
+          // image work — see generateProductImage/verifyImageIntegrity) rejects thinking_level
+          // entirely ("Thinking is not enabled for this model"), unlike the text models below
+          // where "minimal" is load-bearing to avoid reasoning eating the whole output budget.
           generation_config: {
             max_output_tokens: params.maxOutputTokens ?? 1500,
-            thinking_level: "minimal",
+            ...(this.model === IMAGE_GENERATION_MODEL ? {} : { thinking_level: "minimal" }),
           },
         }) as unknown as Promise<GeminiInteraction>,
       extract: (interaction) => {
@@ -496,11 +500,10 @@ export class GeminiClient implements LlmClient {
           input: [...imageBlocks, { type: "text", text: params.prompt }],
           // Verified live: an explicit `delivery` value (either "inline" or "uri") is rejected on
           // this model ("Image delivery mode is not supported") — must be omitted entirely, which
-          // then returns inline base64 data by default. `thinking_level` also only accepts
-          // "low"/"high" here, not "minimal" (that's valid for the text models elsewhere in this
-          // file, not the image ones).
+          // then returns inline base64 data by default. `thinking_level` (any value) is also
+          // rejected outright now ("Thinking is not enabled for this model", confirmed live
+          // 2026-08-05) — must be omitted, not just given a lower value.
           response_format: { type: "image", aspect_ratio: "1:1", image_size: "1K" },
-          generation_config: { thinking_level: "low" },
         })) as unknown as GeminiInteraction;
 
         let mimeType = interaction.output_image?.mime_type ?? "image/jpeg";

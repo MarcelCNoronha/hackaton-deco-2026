@@ -47,13 +47,30 @@ export const scoreTargetEnum = pgEnum("score_target", ["original", "proposed"]);
 export const userRoleEnum = pgEnum("user_role", ["admin", "user"]);
 export const appSectionEnum = pgEnum("app_section", ["connections", "publish", "users"]);
 export const generatedImageKindEnum = pgEnum("generated_image_kind", [
+  // How the image was PRODUCED, not what VTEX slot it fills — see photoClassificationEnum below
+  // for that. "principal"/"dimensional" added alongside the original two so all 4 of this store's
+  // photo standards can be AI-generated, not just ambientada/destaque.
+  "principal",
   "lifestyle",
+  "dimensional",
   "feature_callout",
   // A real photo downloaded from a product's manufacturer reference page (see
   // manufacturer-image.agent.ts) — cropped/resized to the store's VTEX upload convention
-  // (1000x1000 JPG), never AI-generated. Distinguished from lifestyle/feature_callout so the UI
-  // can label it correctly and skip charging costUsd (no generation call, just a download+resize).
+  // (1000x1000 JPG), never AI-generated. Distinguished from the AI kinds above so the UI can label
+  // it correctly and skip charging costUsd (no generation call, just a download+resize). Its
+  // classification isn't implied by kind the way the AI ones are (a downloaded reference photo
+  // could be any of the 4 slots) — starts unclassified until a human picks one.
   "manufacturer_reference",
+]);
+/** This store's VTEX image-slot convention (Label field): 1=foto principal, 2=foto ambientada,
+ *  3=foto dimensional, 4+=foto de destaque (multiple allowed, incrementing — see the publish
+ *  route's label-assignment comment). Decoupled from generatedImageKindEnum because a
+ *  manufacturer_reference photo's classification isn't implied by how it was sourced. */
+export const photoClassificationEnum = pgEnum("photo_classification", [
+  "principal",
+  "ambientada",
+  "dimensional",
+  "destaque",
 ]);
 export const categoryContentProfileSourceEnum = pgEnum("category_content_profile_source", [
   "internal",
@@ -122,6 +139,11 @@ export const generatedImages = pgTable("generated_images", {
     .notNull()
     .references(() => products.id),
   kind: generatedImageKindEnum("kind").notNull(),
+  // Which of the 4 VTEX photo slots this fills (see photoClassificationEnum) — set automatically
+  // at creation for the 4 AI-generated kinds (matches kind 1:1), left null for a freshly
+  // downloaded manufacturer_reference photo until a human classifies it (see the
+  // /api/generated-images/:id/classify route). The publish route refuses to publish a null one.
+  classification: photoClassificationEnum("classification"),
   prompt: text("prompt").notNull(),
   // Only set for kind="manufacturer_reference" — the page the photo was downloaded from, kept for
   // transparency/audit (a human reviewing the proposal can go check the original source).

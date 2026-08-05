@@ -109,6 +109,12 @@ export interface CatalogClient {
     imageId: string;
     altText: string;
   }): Promise<void>;
+  /** Re-labels an image already on the platform into one of this store's 4 carousel slots (see
+   *  photoClassificationEnum) without re-uploading it — VTEX only (its "Label" field is what
+   *  publisher.agent.ts's ambient_photo lookup and the carousel ordering both key off). Shopify has
+   *  no equivalent concept; its implementation throws rather than silently no-op-ing a request the
+   *  merchant explicitly asked for. */
+  updateImageLabel(params: { externalId: string; variantId: string; imageId: string; label: string }): Promise<void>;
   /** Publishes the seo_title/meta_description proposals — both platforms have a native field for
    *  these (VTEX: Title/MetaTagDescription on the product record. Shopify: the `seo` input on
    *  productUpdate), unlike structured_data/benefit_bullets which stay in-app only. Either key may
@@ -153,6 +159,8 @@ export interface CatalogClient {
   ): Promise<void>;
   /** Uploads an AI-generated image as a real product photo — `imageUrl` must be a publicly
    *  fetchable URL (both platforms fetch the bytes server-side rather than accepting a direct
-   *  upload here), see the `/api/generated-images/:id/raw` route. */
-  addProductImage(params: { externalId: string; variantId: string; imageUrl: string; altText?: string }): Promise<void>;
+   *  upload here), see the `/api/generated-images/:id/raw` route. `label` is VTEX's own numeric
+   *  image-slot tag (e.g. "2" for "foto ambientada" — see publisher.agent.ts's read side); ignored
+   *  on Shopify, which has no equivalent concept. */
+  addProductImage(params: { externalId: string; variantId: string; imageUrl: string; altText?: string; label?: string }): Promise<void>;
 }

@@ -456,7 +456,14 @@ export class VtexClient implements CatalogClient {
     imageId: string;
     altText: string;
   }): Promise<void> {
-    await this.updateSkuImageAltText(params.variantId, params.imageId, params.altText);
+    await this.updateSkuFile(params.variantId, params.imageId, { text: params.altText });
+  }
+
+  /** Re-labels an image already on the platform (this store's own carousel-slot convention — see
+   *  photoClassificationEnum) without re-uploading it — e.g. a merchant's pre-existing catalog
+   *  photo that was never assigned a Label at all. */
+  async updateImageLabel(params: { externalId: string; variantId: string; imageId: string; label: string }): Promise<void> {
+    await this.updateSkuFile(params.variantId, params.imageId, { label: params.label });
   }
 
   /** `PUT /pvt/product/{id}` is NOT a partial update — VTEX does not merge, it replaces. Fields
@@ -569,7 +576,7 @@ export class VtexClient implements CatalogClient {
   /** Attaches a new SKU image by URL (VTEX fetches the bytes itself from `Url` — no direct binary
    *  upload here, same as the Shopify implementation). Unlike `updateSkuImageAltText` (PUT, edits
    *  an existing image), this is a POST — VTEX creates a new file entry. */
-  async addProductImage(params: { externalId: string; variantId: string; imageUrl: string; altText?: string }): Promise<void> {
+  async addProductImage(params: { externalId: string; variantId: string; imageUrl: string; altText?: string; label?: string }): Promise<void> {
     await requestWithRetry({
       provider: "vtex",
       operation: "addProductImage",
@@ -577,7 +584,7 @@ export class VtexClient implements CatalogClient {
       init: {
         method: "POST",
         headers: this.headers(),
-        body: JSON.stringify({ IsMain: false, Label: params.altText ?? "", Text: params.altText ?? "", Url: params.imageUrl }),
+        body: JSON.stringify({ IsMain: false, Label: params.label ?? "", Text: params.altText ?? "", Url: params.imageUrl }),
       },
       onAttempt: this.onAttempt,
     });
@@ -586,24 +593,24 @@ export class VtexClient implements CatalogClient {
   /** Same "not a partial update" footgun as updateProductFields — confirmed live: sending just
    *  `{Text: altText}` 400s with "Field Url is required". VTEX also never echoes the original
    *  upload URL back on GET (`Url` comes back null, only `FileLocation` does), so the current
-   *  record has to be re-fetched and its real hosted URL reconstructed before writing back,
-   *  preserving `Label`/`IsMain` — an unguarded merge here would otherwise silently wipe this
-   *  store's own image-label convention (e.g. `Label: "2"` for the "foto ambientada" shot). */
-  async updateSkuImageAltText(skuId: string | number, imageId: string, altText: string): Promise<void> {
+   *  record has to be re-fetched and its real hosted URL reconstructed before writing back —
+   *  merges in `patch` (Text and/or Label) over whatever's already there so an unguarded write
+   *  never silently wipes the other field this store's own image-label convention relies on. */
+  private async updateSkuFile(skuId: string | number, imageId: string, patch: { text?: string; label?: string }): Promise<void> {
     const files = await this.fetchSkuFiles(skuId);
     const current = files.find((f) => String(f.Id) === String(imageId));
-    if (!current) throw new Error(`Image ${imageId} not found on SKU ${skuId} — can't update its alt text`);
+    if (!current) throw new Error(`Image ${imageId} not found on SKU ${skuId} — can't update it`);
     await requestWithRetry({
       provider: "vtex",
-      operation: "updateSkuImageAltText",
+      operation: "updateSkuFile",
       url: `${this.baseUrl}/pvt/stockkeepingunit/${skuId}/file/${imageId}`,
       init: {
         method: "PUT",
         headers: this.headers(),
         body: JSON.stringify({
           Url: `https://${this.credentials.account}.${current.FileLocation}`,
-          Text: altText,
-          Label: current.Label ?? "",
+          Text: patch.text ?? current.Text ?? "",
+          Label: patch.label ?? current.Label ?? "",
           IsMain: current.IsMain,
         }),
       },

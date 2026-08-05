@@ -124,15 +124,20 @@ export class ShopifyClient implements CatalogClient {
         }>;
         pageInfo: { hasNextPage: boolean; endCursor: string | null };
       };
+      // Only requested on page 1 — see the $includeCount guard below. computeStatusCounts (an
+      // unfiltered page-1 call) needs the account-wide total to derive "none" the same way VTEX's
+      // Resources header lets it; every other caller pages through without paying for this field.
+      productsCount?: { count: number };
     };
 
     // undefined (page 1, or a page never reached sequentially on this instance yet) means "start
     // from the beginning" — see the field comment on cursorForNextPage above.
     const after = params.page > 1 ? this.cursorForNextPage.get(params.page) : undefined;
+    const includeCount = params.page === 1;
 
     const data = await this.graphql<Resp>(
       "listProducts",
-      `query ListProducts($first: Int!, $query: String, $after: String) {
+      `query ListProducts($first: Int!, $query: String, $after: String, $includeCount: Boolean!) {
         products(first: $first, query: $query, after: $after) {
           nodes {
             id title handle productType vendor featuredImage { url } variants(first: 1) { nodes { sku } }
@@ -140,8 +145,9 @@ export class ShopifyClient implements CatalogClient {
           }
           pageInfo { hasNextPage endCursor }
         }
+        productsCount(query: $query) @include(if: $includeCount) { count }
       }`,
-      { first: params.pageSize, query: filters.join(" ") || null, after: after ?? null },
+      { first: params.pageSize, query: filters.join(" ") || null, after: after ?? null, includeCount },
     );
 
     this.cursorForNextPage.set(
@@ -161,6 +167,7 @@ export class ShopifyClient implements CatalogClient {
         url: this.adminProductUrl(p.id),
       })),
       hasMore: data.products.pageInfo.hasNextPage,
+      total: data.productsCount?.count,
     };
   }
 
@@ -448,7 +455,7 @@ export class ShopifyClient implements CatalogClient {
     }
   }
 
-  async addProductImage(params: { externalId: string; variantId: string; imageUrl: string; altText?: string }): Promise<void> {
+  async addProductImage(params: { externalId: string; variantId: string; imageUrl: string; altText?: string; label?: string }): Promise<void> {
     type Resp = { productCreateMedia: { mediaUserErrors: Array<{ field: string[]; message: string }> } };
     const data = await this.graphql<Resp>(
       "addProductImage",
@@ -508,5 +515,9 @@ export class ShopifyClient implements CatalogClient {
     if (data.fileUpdate.userErrors.length > 0) {
       throw new Error(`Shopify fileUpdate userError: ${data.fileUpdate.userErrors[0].message}`);
     }
+  }
+
+  async updateImageLabel(): Promise<void> {
+    throw new Error("Shopify não tem um campo equivalente ao Label da VTEX — não é possível classificar fotos em slots numerados nesta plataforma.");
   }
 }

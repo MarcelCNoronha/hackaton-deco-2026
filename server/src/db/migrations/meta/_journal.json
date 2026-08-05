@@ -183,6 +183,13 @@
       "when": 1785893494562,
       "tag": "0025_mature_cloak",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1785929552634,
+      "tag": "0026_wise_lucky_pierre",
+      "breakpoints": true
     }
   ]
 }

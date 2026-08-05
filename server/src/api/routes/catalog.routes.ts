@@ -221,10 +221,12 @@ async function listProductsByStatus(
  *  a product had since been re-optimized past. This computes counts with the exact same
  *  per-product logic the pills/listProductsByStatus already use, so "pending"/"published" (the two
  *  that only ever apply to a product with a local row) can never disagree with what filtering
- *  shows. `none` is a best-effort exception: it only counts products already synced locally with
- *  zero runs, not the full live-catalog "Não otimizado" set the pill itself browses (which can
- *  include products never touched/synced at all) — an exact match there would need a live catalog
- *  total-count call, not just this local snapshot. */
+ *  shows. `none` is derived as accountTotal - pending - published (matching the "Não otimizado"
+ *  pill, which browses the full live catalog, not just locally-synced rows) rather than just
+ *  counting local zero-run rows — confirmed live: with most of a real catalog never synced/touched,
+ *  the local-only count read "1" while the account actually had hundreds of un-optimized listings.
+ *  Falls back to the local-only count if the platform can't report an account-wide total (Shopify,
+ *  when its productsCount query somehow comes back empty). */
 async function computeStatusCounts(platform: CatalogPlatform): Promise<{ none: number; pending: number; published: number }> {
   const localRows = await db.query.products.findMany({ where: eq(products.platform, platform) });
   const enrichment = await computeProductEnrichment(localRows.map((row) => row.id));
@@ -234,6 +236,12 @@ async function computeStatusCounts(platform: CatalogPlatform): Promise<{ none: n
     if (status === "published") counts.published++;
     else if (status === "pending") counts.pending++;
     else counts.none++;
+  }
+
+  const catalog = await requireActiveCatalogClient();
+  const { total } = await catalog.listProducts({ page: 1, pageSize: 1 });
+  if (total !== undefined) {
+    counts.none = Math.max(0, total - counts.pending - counts.published);
   }
   return counts;
 }

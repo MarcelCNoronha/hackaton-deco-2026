@@ -57,7 +57,13 @@ const SAMPLE_DATA = {
   ],
   cta: "Adicione ao carrinho e receba em casa em até 5 dias úteis.",
   featuredImage: { url: PLACEHOLDER_IMAGE, caption: "Destaque: acabamento resistente a manchas" },
+  principalPhoto: { url: PLACEHOLDER_IMAGE, caption: "Foto principal do produto" },
   ambientPhoto: { url: PLACEHOLDER_IMAGE, caption: "Produto em ambiente real" },
+  dimensionalPhoto: { url: PLACEHOLDER_IMAGE, caption: "Dimensões do produto" },
+  destaqueGallery: [
+    { url: PLACEHOLDER_IMAGE, caption: "Detalhe do acabamento" },
+    { url: PLACEHOLDER_IMAGE, caption: "Detalhe do mecanismo" },
+  ],
 };
 
 export async function pdpTemplatesRoutes(app: FastifyInstance) {

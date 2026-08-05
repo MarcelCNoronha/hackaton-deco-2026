@@ -152,6 +152,27 @@ function renderFeaturedImageBlock(
   }</figure>`;
 }
 
+const GALLERY_SECTION_BASE_STYLE = "margin:1.25em 0;display:flex;flex-wrap:wrap;gap:0.75em;";
+const GALLERY_ITEM_STYLE = 'style="flex:0 1 auto;max-width:260px;"';
+const GALLERY_CAPTION_STYLE = 'style="font-size:0.85em;margin-top:0.3em;text-align:center;"';
+
+/** "destaque_gallery" is the only block that can back more than one photo at once (Label "4" and
+ *  up — see resolvePhotoLabel) — a plain flex-wrap grid rather than one <figure>, item height and
+ *  row justification only vary in "modo de layout" (see renderLayoutCell), same "no per-block
+ *  config surface elsewhere" reasoning as renderFeaturedImageBlock. */
+function renderGalleryBlock(photos: Array<{ url: string; caption: string }>, itemHeight: string = "200px", justify: string = "flex-start"): string {
+  if (photos.length === 0) return "";
+  const items = photos
+    .map(
+      (p) =>
+        `<figure ${GALLERY_ITEM_STYLE}><img src="${escapeHtml(p.url)}" alt="${escapeHtml(p.caption)}" style="width:100%;height:${itemHeight};object-fit:cover;display:block;border-radius:4px;" />${
+          p.caption ? `<figcaption ${GALLERY_CAPTION_STYLE}>${escapeHtml(p.caption)}</figcaption>` : ""
+        }</figure>`,
+    )
+    .join("");
+  return `<div class="catalogia-destaque-gallery" style="${GALLERY_SECTION_BASE_STYLE}justify-content:${justify};">${items}</div>`;
+}
+
 /** "divider"/"spacer" are purely structural — no product data behind them, so unlike every other
  *  block they always render something, never "" (see PDP_BLOCKS' doc comment). Size only matters
  *  in "modo de layout", where each cell picks its own — elsewhere (fixed block list, {{token}}
@@ -173,10 +194,17 @@ export interface BlockData {
   faq?: Array<{ question: string; answer: string }>;
   cta?: string;
   featuredImage?: { url: string; caption: string };
-  // "ambient_photo" block's source — manufacturer-reference photo first, AI-generated lifestyle
-  // image as fallback (not wired up yet: no proposal field populates this today, so the block
-  // silently renders empty, same as any other block with no data — see PDP_BLOCKS' doc comment).
+  // "principal_photo"/"ambient_photo"/"dimensional_photo" blocks' source — whichever of the
+  // product's own platform photos is currently classified "principal"/"ambientada"/"dimensional"
+  // (Label 1/2/3), resolved live at publish time (see publishProductProposals below) — no
+  // proposal/generation step produces these, they're sourced straight from the platform's own
+  // gallery.
+  principalPhoto?: { url: string; caption: string };
   ambientPhoto?: { url: string; caption: string };
+  dimensionalPhoto?: { url: string; caption: string };
+  // "destaque_gallery" block's source — every platform photo currently classified "destaque"
+  // (Label "4" and up), resolved live at publish time same as ambientPhoto/dimensionalPhoto.
+  destaqueGallery?: Array<{ url: string; caption: string }>;
 }
 
 /** Renders exactly one block, or "" when its data wasn't approved/available for this product —
@@ -197,8 +225,14 @@ function renderBlock(block: PdpBlock, level: DescriptionRichness, data: BlockDat
       return data.cta ? renderCtaBlock(data.cta) : "";
     case "featured_image":
       return data.featuredImage ? renderFeaturedImageBlock(data.featuredImage.url, data.featuredImage.caption) : "";
+    case "principal_photo":
+      return data.principalPhoto ? renderFeaturedImageBlock(data.principalPhoto.url, data.principalPhoto.caption) : "";
     case "ambient_photo":
       return data.ambientPhoto ? renderFeaturedImageBlock(data.ambientPhoto.url, data.ambientPhoto.caption) : "";
+    case "dimensional_photo":
+      return data.dimensionalPhoto ? renderFeaturedImageBlock(data.dimensionalPhoto.url, data.dimensionalPhoto.caption) : "";
+    case "destaque_gallery":
+      return data.destaqueGallery ? renderGalleryBlock(data.destaqueGallery) : "";
     case "divider":
       return renderDividerBlock();
     case "spacer":
@@ -224,7 +258,20 @@ export function renderPdpHtml(blocks: PdpBlock[], level: DescriptionRichness, da
 export function renderPdpHtmlFromTemplate(customHtml: string, level: DescriptionRichness, data: BlockData): string {
   const fragments: Partial<Record<PdpBlock, string>> = Object.fromEntries(
     (
-      ["description", "benefit_bullets", "technical_specs", "faq", "cta", "featured_image", "ambient_photo", "divider", "spacer"] as const
+      [
+        "description",
+        "benefit_bullets",
+        "technical_specs",
+        "faq",
+        "cta",
+        "featured_image",
+        "principal_photo",
+        "ambient_photo",
+        "dimensional_photo",
+        "destaque_gallery",
+        "divider",
+        "spacer",
+      ] as const
     ).map((block) => [block, renderBlock(block, level, data)]),
   );
   return customHtml.replace(/\{\{(\w+)\}\}/g, (match, token: string) =>
@@ -254,20 +301,47 @@ const IMAGE_ALIGN_MARGIN: Record<PdpTextAlign, string> = {
   justify: "margin:0 auto;",
 };
 
+// destaque_gallery's own fontSize/align mapping — smaller absolute px (not vh) since these are
+// grid thumbnails sitting next to each other, not one photo alone in the description; "justify"
+// has a real meaning here (unlike a single image) since it can actually space multiple items out.
+const GALLERY_ITEM_HEIGHT: Record<PdpFontSize, string> = { sm: "140px", md: "200px", lg: "280px" };
+const GALLERY_JUSTIFY: Record<PdpTextAlign, string> = {
+  left: "flex-start",
+  right: "flex-end",
+  center: "center",
+  justify: "space-between",
+};
+
 /** Renders one layout cell:
  *  - "divider"/"spacer" bypass wrapLayoutCell entirely — align/bold don't mean anything for a
  *    plain rule or an empty gap, and a cell's fontSize means "how big a gap" for a spacer instead
  *    of literal text size.
- *  - "featured_image"/"ambient_photo" also bypass it — bold has no meaning on an <img>, align
- *    becomes real left/right/center positioning (via margin, since a block-level image ignores
- *    `text-align` on its wrapper), and fontSize becomes "how tall can this photo get" instead of
- *    literal text size.
+ *  - "featured_image"/"principal_photo"/"ambient_photo"/"dimensional_photo" also bypass it — bold
+ *    has no meaning on an <img>, align becomes real left/right/center positioning (via margin,
+ *    since a block-level image ignores `text-align` on its wrapper), and fontSize becomes "how
+ *    tall can this photo get" instead of literal text size.
+ *  - "destaque_gallery" bypasses it too, same reasoning, but align becomes the grid's
+ *    justify-content (it can hold multiple items, unlike the single-image blocks above) and
+ *    fontSize becomes each thumbnail's height.
  *  - every other block goes through the normal align/weight/size wrapper. */
+const SINGLE_IMAGE_BLOCK_DATA_KEY = {
+  featured_image: "featuredImage",
+  principal_photo: "principalPhoto",
+  ambient_photo: "ambientPhoto",
+  dimensional_photo: "dimensionalPhoto",
+} as const satisfies Partial<Record<PdpBlock, keyof BlockData>>;
+
 function renderLayoutCell(cell: PdpLayoutCell, level: DescriptionRichness, data: BlockData): string {
   if (cell.block === "divider") return renderDividerBlock();
   if (cell.block === "spacer") return renderSpacerBlock(cell.fontSize);
-  if (cell.block === "featured_image" || cell.block === "ambient_photo") {
-    const photo = cell.block === "featured_image" ? data.featuredImage : data.ambientPhoto;
+  if (cell.block === "destaque_gallery") {
+    if (!data.destaqueGallery) return "";
+    return renderGalleryBlock(data.destaqueGallery, GALLERY_ITEM_HEIGHT[cell.fontSize], GALLERY_JUSTIFY[cell.align]);
+  }
+  if (cell.block in SINGLE_IMAGE_BLOCK_DATA_KEY) {
+    const photo = data[SINGLE_IMAGE_BLOCK_DATA_KEY[cell.block as keyof typeof SINGLE_IMAGE_BLOCK_DATA_KEY]] as
+      | { url: string; caption: string }
+      | undefined;
     if (!photo) return "";
     return renderFeaturedImageBlock(photo.url, photo.caption, IMAGE_MAX_HEIGHT[cell.fontSize], IMAGE_ALIGN_MARGIN[cell.align]);
   }
@@ -319,6 +393,259 @@ async function markPublished(proposalId: number): Promise<void> {
   await db.update(enrichmentProposals).set({ status: "published", publishedAt: new Date() }).where(eq(enrichmentProposals.id, proposalId));
 }
 
+const PDP_MERGED_FIELDS = ["description", "benefit_bullets", "technical_specs", "faq", "cta", "featured_image"] as const;
+
+type ProductRow = typeof products.$inferSelect;
+
+/** Writes one product's given proposals to the active catalog platform — shared by
+ *  publishApprovedProposals (the whole-run batch, one product at a time) and republishProposal
+ *  (a single point-fix, which still has to pass in every OTHER merged-field proposal for that
+ *  product or the rebuilt description would silently drop those blocks). `templateFor` is
+ *  injected rather than resolved here so callers can share one cache across products (the batch
+ *  path) or use a one-off cache (the single-proposal path). */
+async function publishProductProposals(
+  catalog: CatalogClient,
+  level: DescriptionRichness,
+  product: ProductRow,
+  proposals: Proposal[],
+  templateFor: (category: string | null) => Promise<ResolvedPdpTemplate>,
+): Promise<{ published: number; failed: number }> {
+  const productId = product.id;
+  let published = 0;
+  let failed = 0;
+
+  {
+    const descriptionProposal = proposals.find((p) => p.field === "description");
+    const bulletsProposal = proposals.find((p) => p.field === "benefit_bullets");
+    const specsProposal = proposals.find((p) => p.field === "technical_specs");
+    const faqProposal = proposals.find((p) => p.field === "faq");
+    const ctaProposal = proposals.find((p) => p.field === "cta");
+    const featuredImageProposal = proposals.find((p) => p.field === "featured_image");
+    const seoTitleProposal = proposals.find((p) => p.field === "seo_title");
+    const metaDescriptionProposal = proposals.find((p) => p.field === "meta_description");
+    const tagsProposal = proposals.find((p) => p.field === "tags");
+    const structuredDataProposal = proposals.find((p) => p.field === "structured_data");
+    const keywordsProposal = proposals.find((p) => p.field === "keywords");
+    const attributesPatchProposal = proposals.find((p) => p.field === "attributes_patch");
+    const handled = new Set([
+      ...PDP_MERGED_FIELDS,
+      "seo_title",
+      "meta_description",
+      "tags",
+      "structured_data",
+      "keywords",
+      "attributes_patch",
+    ]);
+    const rest = proposals.filter((p) => !handled.has(p.field));
+
+    const mergedProposals = [descriptionProposal, bulletsProposal, specsProposal, faqProposal, ctaProposal, featuredImageProposal];
+    if (mergedProposals.some(Boolean)) {
+      try {
+        const template = await templateFor(product.category);
+        const featuredImage = featuredImageProposal
+          ? (JSON.parse(featuredImageProposal.proposedValue) as { url: string; caption: string })
+          : undefined;
+        // No proposal/generation step produces these — they're sourced straight from the
+        // product's own already-hosted photos, no AI call needed. This store's own convention
+        // tags them Label "1" (principal) / "2" (ambientada) / "3" (dimensional) — see
+        // photoClassificationEnum; only bothers fetching the product's images at all when the
+        // resolved template actually places one of these blocks somewhere.
+        let principalPhoto: { url: string; caption: string } | undefined;
+        let ambientPhoto: { url: string; caption: string } | undefined;
+        let dimensionalPhoto: { url: string; caption: string } | undefined;
+        let destaqueGallery: Array<{ url: string; caption: string }> | undefined;
+        const needsPrincipal = templateUsesBlock(template, "principal_photo");
+        const needsAmbient = templateUsesBlock(template, "ambient_photo");
+        const needsDimensional = templateUsesBlock(template, "dimensional_photo");
+        const needsDestaqueGallery = templateUsesBlock(template, "destaque_gallery");
+        if (needsPrincipal || needsAmbient || needsDimensional || needsDestaqueGallery) {
+          try {
+            const detail = await catalog.getProduct(product.vtexProductId);
+            // Not img.altText — that's this store's SEO-slug alt text (all caps, dash-separated),
+            // fine for an <img alt> but not a caption a shopper should actually read.
+            if (needsPrincipal) {
+              const labeled = detail.images.find((img) => img.label === "1");
+              if (labeled) principalPhoto = { url: labeled.url, caption: product.title };
+            }
+            if (needsAmbient) {
+              const labeled = detail.images.find((img) => img.label === "2");
+              if (labeled) ambientPhoto = { url: labeled.url, caption: product.title };
+            }
+            if (needsDimensional) {
+              const labeled = detail.images.find((img) => img.label === "3");
+              if (labeled) dimensionalPhoto = { url: labeled.url, caption: product.title };
+            }
+            if (needsDestaqueGallery) {
+              // Unlike principal/ambient/dimensional (exactly one slot each), "destaque" is the
+              // one classification that allows more than one photo (Label "4" and up — see
+              // resolvePhotoLabel) — every one of them goes into the gallery, not just the first.
+              destaqueGallery = detail.images
+                .filter((img) => img.label && Number.isInteger(Number(img.label)) && Number(img.label) >= 4)
+                .map((img) => ({ url: img.url, caption: product.title }));
+            }
+          } catch (err) {
+            console.error(
+              `Failed to resolve principal_photo/ambient_photo/dimensional_photo/destaque_gallery for product ${productId} — leaving those blocks empty`,
+              err,
+            );
+          }
+        }
+        const finalDescription = renderPdp(template, level, {
+          description: descriptionProposal?.proposedValue ?? product.description ?? undefined,
+          bullets: bulletsProposal ? (JSON.parse(bulletsProposal.proposedValue) as string[]) : undefined,
+          specs: specsProposal ? (JSON.parse(specsProposal.proposedValue) as Array<{ label: string; value: string }>) : undefined,
+          faq: faqProposal ? (JSON.parse(faqProposal.proposedValue) as Array<{ question: string; answer: string }>) : undefined,
+          cta: ctaProposal?.proposedValue,
+          featuredImage,
+          principalPhoto,
+          ambientPhoto,
+          dimensionalPhoto,
+          destaqueGallery,
+        });
+        await catalog.updateProductDescription(product.vtexProductId, finalDescription);
+        for (const p of mergedProposals) {
+          if (!p) continue;
+          await markPublished(p.id);
+          published++;
+        }
+
+        // Best-effort, in addition to the merged-HTML block above: any spec whose label matches a
+        // field the platform's category actually accepts also gets written into the REAL
+        // Specification module ("Características do Produto" on VTEX) — not just the description's
+        // inline table. Never lets a failure here undo the successful description publish just above.
+        if (specsProposal) {
+          try {
+            const specs = JSON.parse(specsProposal.proposedValue) as Array<{ label: string; value: string }>;
+            const { specValues } = await resolveSpecFieldValues(
+              catalog.platform,
+              product.category,
+              specs.map((s) => [s.label, s.value]),
+            );
+            if (specValues.length > 0) await catalog.updateProductSpecificationValues(product.vtexProductId, specValues);
+          } catch (err) {
+            console.error(`Failed to publish technical_specs to the native Specification module for product ${productId}:`, err);
+          }
+        }
+      } catch (err) {
+        console.error(`Failed to publish PDP blocks for product ${productId}:`, err);
+        failed += mergedProposals.filter(Boolean).length;
+      }
+    }
+
+    // seo_title/meta_description share one native platform write (VTEX: same product PUT.
+    // Shopify: same productUpdate `seo` input).
+    if (seoTitleProposal || metaDescriptionProposal) {
+      try {
+        await catalog.updateProductSeo(product.vtexProductId, {
+          title: seoTitleProposal?.proposedValue,
+          metaDescription: metaDescriptionProposal?.proposedValue,
+        });
+        for (const p of [seoTitleProposal, metaDescriptionProposal]) {
+          if (!p) continue;
+          await markPublished(p.id);
+          published++;
+        }
+      } catch (err) {
+        console.error(`Failed to publish seo_title/meta_description for product ${productId}:`, err);
+        failed += [seoTitleProposal, metaDescriptionProposal].filter(Boolean).length;
+      }
+    }
+
+    if (tagsProposal) {
+      try {
+        await catalog.updateProductTags(product.vtexProductId, JSON.parse(tagsProposal.proposedValue) as string[]);
+        await markPublished(tagsProposal.id);
+        published++;
+      } catch (err) {
+        console.error(`Failed to publish tags for product ${productId}:`, err);
+        failed++;
+      }
+    }
+
+    // Our own synthesized data with no pre-existing merchant field — written under a fixed
+    // "catalogia" namespace on Shopify; no-op on VTEX (no metafield concept there).
+    if (structuredDataProposal) {
+      try {
+        await catalog.updateProductMetafields(product.vtexProductId, [
+          { key: "structured_data", value: structuredDataProposal.proposedValue, type: "json", namespace: "catalogia" },
+        ]);
+        await markPublished(structuredDataProposal.id);
+        published++;
+      } catch (err) {
+        console.error(`Failed to publish structured_data for product ${productId}:`, err);
+        failed++;
+      }
+    }
+
+    // VTEX: real native field (`KeyWords`, "Palavras similares" in the admin — confirmed live
+    // against a real account). Shopify: no native equivalent, publishes via the metafield below
+    // instead (see ShopifyClient.updateProductKeywords's doc comment).
+    if (keywordsProposal) {
+      try {
+        const { primary, secondary } = JSON.parse(keywordsProposal.proposedValue) as { primary: string[]; secondary: string[] };
+        await catalog.updateProductKeywords(product.vtexProductId, [...primary, ...secondary].join(", "));
+        await catalog.updateProductMetafields(product.vtexProductId, [
+          { key: "keywords", value: keywordsProposal.proposedValue, type: "json", namespace: "catalogia" },
+        ]);
+        await markPublished(keywordsProposal.id);
+        published++;
+      } catch (err) {
+        console.error(`Failed to publish keywords for product ${productId}:`, err);
+        failed++;
+      }
+    }
+
+    // Attribute normalization/fill — VTEX: any key matching a field the product's category
+    // actually accepts goes to the real Specification module (updateProductSpecificationValues);
+    // anything left over falls through to updateProductMetafields, same as before (Shopify's real
+    // path — matches existing terminology or creates a new field; a no-op on VTEX, which has no
+    // metafield concept, so a key VTEX doesn't recognize as a spec field simply isn't published).
+    if (attributesPatchProposal) {
+      try {
+        const patch = JSON.parse(attributesPatchProposal.proposedValue) as Record<string, string>;
+        const { specValues, rest: unresolved } = await resolveSpecFieldValues(
+          catalog.platform,
+          product.category,
+          Object.entries(patch),
+        );
+        if (specValues.length > 0) await catalog.updateProductSpecificationValues(product.vtexProductId, specValues);
+        if (unresolved.length > 0) {
+          await catalog.updateProductMetafields(
+            product.vtexProductId,
+            unresolved.map(([key, value]) => ({ key, value })),
+          );
+        }
+        await markPublished(attributesPatchProposal.id);
+        published++;
+      } catch (err) {
+        console.error(`Failed to publish attributes_patch for product ${productId}:`, err);
+        failed++;
+      }
+    }
+
+    for (const proposal of rest) {
+      try {
+        if (proposal.field === "alt_text") {
+          const { imageId, altText } = JSON.parse(proposal.proposedValue) as { imageId: string; altText: string };
+          await catalog.updateImageAltText({
+            externalId: product.vtexProductId,
+            variantId: product.vtexSkuId,
+            imageId,
+            altText,
+          });
+        }
+        await markPublished(proposal.id);
+        published++;
+      } catch (err) {
+        console.error(`Failed to publish proposal ${proposal.id}:`, err);
+        failed++;
+      }
+    }
+  }
+
+  return { published, failed };
+}
+
 /** Writes every human-approved proposal of a run back to the active catalog platform (VTEX or
  *  Shopify). Never touches non-approved proposals. */
 export async function publishApprovedProposals(params: {
@@ -352,7 +679,6 @@ export async function publishApprovedProposals(params: {
   let published = 0;
   let failed = 0;
 
-  const PDP_MERGED_FIELDS = ["description", "benefit_bullets", "technical_specs", "faq", "cta", "featured_image"] as const;
   // Resolving a template hits the DB — cache per category since many products in a run usually
   // share one.
   const templateCache = new Map<string, ResolvedPdpTemplate>();
@@ -369,202 +695,66 @@ export async function publishApprovedProposals(params: {
       failed += proposals.length;
       continue;
     }
-
-    const descriptionProposal = proposals.find((p) => p.field === "description");
-    const bulletsProposal = proposals.find((p) => p.field === "benefit_bullets");
-    const specsProposal = proposals.find((p) => p.field === "technical_specs");
-    const faqProposal = proposals.find((p) => p.field === "faq");
-    const ctaProposal = proposals.find((p) => p.field === "cta");
-    const featuredImageProposal = proposals.find((p) => p.field === "featured_image");
-    const seoTitleProposal = proposals.find((p) => p.field === "seo_title");
-    const metaDescriptionProposal = proposals.find((p) => p.field === "meta_description");
-    const tagsProposal = proposals.find((p) => p.field === "tags");
-    const structuredDataProposal = proposals.find((p) => p.field === "structured_data");
-    const keywordsProposal = proposals.find((p) => p.field === "keywords");
-    const attributesPatchProposal = proposals.find((p) => p.field === "attributes_patch");
-    const handled = new Set([
-      ...PDP_MERGED_FIELDS,
-      "seo_title",
-      "meta_description",
-      "tags",
-      "structured_data",
-      "keywords",
-      "attributes_patch",
-    ]);
-    const rest = proposals.filter((p) => !handled.has(p.field));
-
-    const mergedProposals = [descriptionProposal, bulletsProposal, specsProposal, faqProposal, ctaProposal, featuredImageProposal];
-    if (mergedProposals.some(Boolean)) {
-      try {
-        const template = await templateFor(product.category);
-        const featuredImage = featuredImageProposal
-          ? (JSON.parse(featuredImageProposal.proposedValue) as { url: string; caption: string })
-          : undefined;
-        // No proposal/generation step produces this — it's sourced straight from the product's own
-        // already-hosted photos, no AI call needed. This store's own convention tags the lifestyle/
-        // "foto ambientada" shot with image Label "2" (confirmed live); only bothers fetching the
-        // product's images at all when the resolved template actually places this block somewhere.
-        let ambientPhoto: { url: string; caption: string } | undefined;
-        if (templateUsesBlock(template, "ambient_photo")) {
-          try {
-            const detail = await params.catalog.getProduct(product.vtexProductId);
-            const labeled = detail.images.find((img) => img.label === "2");
-            // Not img.altText — that's this store's SEO-slug alt text (all caps, dash-separated),
-            // fine for an <img alt> but not a caption a shopper should actually read.
-            if (labeled) ambientPhoto = { url: labeled.url, caption: product.title };
-          } catch (err) {
-            console.error(`Failed to resolve ambient_photo for product ${productId} — leaving that block empty`, err);
-          }
-        }
-        const finalDescription = renderPdp(template, level, {
-          description: descriptionProposal?.proposedValue ?? product.description ?? undefined,
-          bullets: bulletsProposal ? (JSON.parse(bulletsProposal.proposedValue) as string[]) : undefined,
-          specs: specsProposal ? (JSON.parse(specsProposal.proposedValue) as Array<{ label: string; value: string }>) : undefined,
-          faq: faqProposal ? (JSON.parse(faqProposal.proposedValue) as Array<{ question: string; answer: string }>) : undefined,
-          cta: ctaProposal?.proposedValue,
-          featuredImage,
-          ambientPhoto,
-        });
-        await params.catalog.updateProductDescription(product.vtexProductId, finalDescription);
-        for (const p of mergedProposals) {
-          if (!p) continue;
-          await markPublished(p.id);
-          published++;
-        }
-
-        // Best-effort, in addition to the merged-HTML block above: any spec whose label matches a
-        // field the platform's category actually accepts also gets written into the REAL
-        // Specification module ("Características do Produto" on VTEX) — not just the description's
-        // inline table. Never lets a failure here undo the successful description publish just above.
-        if (specsProposal) {
-          try {
-            const specs = JSON.parse(specsProposal.proposedValue) as Array<{ label: string; value: string }>;
-            const { specValues } = await resolveSpecFieldValues(
-              params.catalog.platform,
-              product.category,
-              specs.map((s) => [s.label, s.value]),
-            );
-            if (specValues.length > 0) await params.catalog.updateProductSpecificationValues(product.vtexProductId, specValues);
-          } catch (err) {
-            console.error(`Failed to publish technical_specs to the native Specification module for product ${productId}:`, err);
-          }
-        }
-      } catch (err) {
-        console.error(`Failed to publish PDP blocks for product ${productId}:`, err);
-        failed += mergedProposals.filter(Boolean).length;
-      }
-    }
-
-    // seo_title/meta_description share one native platform write (VTEX: same product PUT.
-    // Shopify: same productUpdate `seo` input).
-    if (seoTitleProposal || metaDescriptionProposal) {
-      try {
-        await params.catalog.updateProductSeo(product.vtexProductId, {
-          title: seoTitleProposal?.proposedValue,
-          metaDescription: metaDescriptionProposal?.proposedValue,
-        });
-        for (const p of [seoTitleProposal, metaDescriptionProposal]) {
-          if (!p) continue;
-          await markPublished(p.id);
-          published++;
-        }
-      } catch (err) {
-        console.error(`Failed to publish seo_title/meta_description for product ${productId}:`, err);
-        failed += [seoTitleProposal, metaDescriptionProposal].filter(Boolean).length;
-      }
-    }
-
-    if (tagsProposal) {
-      try {
-        await params.catalog.updateProductTags(product.vtexProductId, JSON.parse(tagsProposal.proposedValue) as string[]);
-        await markPublished(tagsProposal.id);
-        published++;
-      } catch (err) {
-        console.error(`Failed to publish tags for product ${productId}:`, err);
-        failed++;
-      }
-    }
-
-    // Our own synthesized data with no pre-existing merchant field — written under a fixed
-    // "catalogia" namespace on Shopify; no-op on VTEX (no metafield concept there).
-    if (structuredDataProposal) {
-      try {
-        await params.catalog.updateProductMetafields(product.vtexProductId, [
-          { key: "structured_data", value: structuredDataProposal.proposedValue, type: "json", namespace: "catalogia" },
-        ]);
-        await markPublished(structuredDataProposal.id);
-        published++;
-      } catch (err) {
-        console.error(`Failed to publish structured_data for product ${productId}:`, err);
-        failed++;
-      }
-    }
-
-    // VTEX: real native field (`KeyWords`, "Palavras similares" in the admin — confirmed live
-    // against a real account). Shopify: no native equivalent, publishes via the metafield below
-    // instead (see ShopifyClient.updateProductKeywords's doc comment).
-    if (keywordsProposal) {
-      try {
-        const { primary, secondary } = JSON.parse(keywordsProposal.proposedValue) as { primary: string[]; secondary: string[] };
-        await params.catalog.updateProductKeywords(product.vtexProductId, [...primary, ...secondary].join(", "));
-        await params.catalog.updateProductMetafields(product.vtexProductId, [
-          { key: "keywords", value: keywordsProposal.proposedValue, type: "json", namespace: "catalogia" },
-        ]);
-        await markPublished(keywordsProposal.id);
-        published++;
-      } catch (err) {
-        console.error(`Failed to publish keywords for product ${productId}:`, err);
-        failed++;
-      }
-    }
-
-    // Attribute normalization/fill — VTEX: any key matching a field the product's category
-    // actually accepts goes to the real Specification module (updateProductSpecificationValues);
-    // anything left over falls through to updateProductMetafields, same as before (Shopify's real
-    // path — matches existing terminology or creates a new field; a no-op on VTEX, which has no
-    // metafield concept, so a key VTEX doesn't recognize as a spec field simply isn't published).
-    if (attributesPatchProposal) {
-      try {
-        const patch = JSON.parse(attributesPatchProposal.proposedValue) as Record<string, string>;
-        const { specValues, rest: unresolved } = await resolveSpecFieldValues(
-          params.catalog.platform,
-          product.category,
-          Object.entries(patch),
-        );
-        if (specValues.length > 0) await params.catalog.updateProductSpecificationValues(product.vtexProductId, specValues);
-        if (unresolved.length > 0) {
-          await params.catalog.updateProductMetafields(
-            product.vtexProductId,
-            unresolved.map(([key, value]) => ({ key, value })),
-          );
-        }
-        await markPublished(attributesPatchProposal.id);
-        published++;
-      } catch (err) {
-        console.error(`Failed to publish attributes_patch for product ${productId}:`, err);
-        failed++;
-      }
-    }
-
-    for (const proposal of rest) {
-      try {
-        if (proposal.field === "alt_text") {
-          const { imageId, altText } = JSON.parse(proposal.proposedValue) as { imageId: string; altText: string };
-          await params.catalog.updateImageAltText({
-            externalId: product.vtexProductId,
-            variantId: product.vtexSkuId,
-            imageId,
-            altText,
-          });
-        }
-        await markPublished(proposal.id);
-        published++;
-      } catch (err) {
-        console.error(`Failed to publish proposal ${proposal.id}:`, err);
-        failed++;
-      }
-    }
+    const result = await publishProductProposals(params.catalog, level, product, proposals, templateFor);
+    published += result.published;
+    failed += result.failed;
   }
 
   return { published, failed };
+}
+
+/** Point-fix republish for ONE proposal — e.g. a human editing a typo directly on an already
+ *  published (or approved) proposal in RunDetail and wanting that single correction sent to the
+ *  platform immediately, without waiting for/re-running the whole run's batch publish. For a
+ *  merged-PDP field (description/benefit_bullets/technical_specs/faq/cta/featured_image) this has
+ *  to rebuild the FULL merged description using every OTHER merged-field proposal this product
+ *  already has approved/edited/published in the same run — publishing just the one corrected field
+ *  in isolation would silently blank out every other block that's currently live. Non-merged
+ *  fields (seo_title, tags, alt_text, ...) don't have that risk but go through the same shared
+ *  per-product function for one code path. */
+export async function republishProposal(params: { catalog: CatalogClient; proposalId: number }): Promise<{ ok: boolean; error?: string }> {
+  const proposal = await db.query.enrichmentProposals.findFirst({ where: eq(enrichmentProposals.id, params.proposalId) });
+  if (!proposal) return { ok: false, error: "Proposta não encontrada" };
+
+  const [run, product] = await Promise.all([
+    db.query.enrichmentRuns.findFirst({ where: eq(enrichmentRuns.id, proposal.runId) }),
+    db.query.products.findFirst({ where: eq(products.id, proposal.productId) }),
+  ]);
+  if (!product) return { ok: false, error: "Produto não encontrado" };
+
+  const level = ((run?.scope as { descriptionRichness?: DescriptionRichness } | null)?.descriptionRichness ?? "plain") as DescriptionRichness;
+
+  // Only a merged-PDP field (see PDP_MERGED_FIELDS) needs its siblings pulled in — the platform
+  // stores that whole group as one field (the description HTML), so correcting just one block
+  // still has to re-render all of them together or the others would silently vanish from the
+  // republished HTML. Every other field publishes independently — resending it alone is the whole
+  // point of a "correção pontual", not an excuse to also re-touch unrelated already-correct fields.
+  const isMergedField = (PDP_MERGED_FIELDS as readonly string[]).includes(proposal.field);
+  let proposalsForProduct: Proposal[] = [proposal];
+  if (isMergedField) {
+    const siblingProposals = await db.query.enrichmentProposals.findMany({
+      where: and(
+        eq(enrichmentProposals.runId, proposal.runId),
+        eq(enrichmentProposals.productId, proposal.productId),
+        inArray(enrichmentProposals.status, ["approved", "edited", "published"]),
+      ),
+    });
+    // The proposal being corrected might not be in that status set yet if this is called before
+    // its own status transitions (e.g. still "pending" the very first time) — always include it,
+    // using whichever copy already carries the freshly-saved proposedValue.
+    proposalsForProduct = siblingProposals.some((p) => p.id === proposal.id) ? siblingProposals : [...siblingProposals, proposal];
+  }
+
+  const templateCache = new Map<string, ResolvedPdpTemplate>();
+  const templateFor = async (category: string | null): Promise<ResolvedPdpTemplate> => {
+    const key = category ?? "";
+    if (!templateCache.has(key)) templateCache.set(key, await resolvePdpTemplate(params.catalog.platform, category, level));
+    return templateCache.get(key)!;
+  };
+
+  const result = await publishProductProposals(params.catalog, level, product, proposalsForProduct, templateFor);
+  if (result.published === 0 && result.failed > 0) {
+    return { ok: false, error: "Falha ao reenviar a correção — veja os logs do servidor." };
+  }
+  return { ok: true };
 }

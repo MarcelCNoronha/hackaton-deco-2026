@@ -1,12 +1,7 @@
-import sharp from "sharp";
 import { db } from "../db/client.js";
 import { generatedImages } from "../db/schema.js";
 import type { GeminiClient } from "../clients/gemini.client.js";
-
-/** The store's own convention for photos uploaded to VTEX — see products.routes.ts's manufacturer-
- *  reference route, where the user confirmed this is the exact target format. */
-const TARGET_SIZE = 1000;
-const JPEG_QUALITY = 90;
+import { toStoreJpeg } from "../lib/image-processing.js";
 
 /** Candidates are tried in order (og:image first — see web-fetch.client.ts) until one actually
  *  downloads and decodes; a small cap since each attempt is a real HTTP fetch, not because we
@@ -38,7 +33,7 @@ export async function extractManufacturerReferenceImage(params: {
       const res = await fetch(imageUrl);
       if (!res.ok) continue;
       const buffer = Buffer.from(await res.arrayBuffer());
-      jpeg = await sharp(buffer).resize(TARGET_SIZE, TARGET_SIZE, { fit: "cover" }).jpeg({ quality: JPEG_QUALITY }).toBuffer();
+      jpeg = await toStoreJpeg(buffer);
     } catch (err) {
       console.error(`[manufacturer-image] candidate ${imageUrl} failed to download/decode for product ${params.productId}:`, err);
       continue;

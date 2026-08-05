@@ -4,6 +4,7 @@ import {
   api,
   ApiError,
   classifyScore,
+  type CatalogImage,
   type CatalogPlatform,
   type CategoryScoreThreshold,
   type ContentScore,
@@ -11,9 +12,19 @@ import {
   type EnrichmentRun,
   type GeneratedImage,
   type ImpactSummary,
+  type PhotoClassification,
   type Product,
   type RunCosts,
 } from "../api/client";
+
+type GeneratableImageKind = "principal" | "lifestyle" | "dimensional" | "feature_callout";
+
+const PHOTO_CLASSIFICATION_LABELS: Record<PhotoClassification, string> = {
+  principal: "Foto principal (1)",
+  ambientada: "Foto ambientada (2)",
+  dimensional: "Foto dimensional (3)",
+  destaque: "Foto de destaque (4+)",
+};
 import { StatTile } from "../components/StatTile";
 import { StatusBadge } from "../components/StatusBadge";
 import { ScoreCompare } from "../components/ScoreCompare";
@@ -166,10 +177,14 @@ export function RunDetail() {
   const [resyncingIds, setResyncingIds] = useState<Set<number>>(new Set());
   const [resyncError, setResyncError] = useState<string | null>(null);
   const [generatedImages, setGeneratedImages] = useState<Record<number, GeneratedImage[]>>({});
+  // The product's own photos already on the platform (outside CatalogIA's generatedImages table) —
+  // most predate this store's Label convention and come back unclassified, see listCatalogImages.
+  const [catalogImages, setCatalogImages] = useState<Record<number, CatalogImage[]>>({});
   const [thresholds, setThresholds] = useState<CategoryScoreThreshold[]>([]);
   const [impactSummary, setImpactSummary] = useState<ImpactSummary | null>(null);
-  const [generatingFor, setGeneratingFor] = useState<Record<number, "lifestyle" | "feature_callout" | undefined>>({});
+  const [generatingFor, setGeneratingFor] = useState<Record<number, GeneratableImageKind | undefined>>({});
   const [imageGenError, setImageGenError] = useState<string | null>(null);
+  const [classifyingId, setClassifyingId] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   async function refresh() {
@@ -234,11 +249,21 @@ export function RunDetail() {
     Promise.all(ids.map((productId) => api.listGeneratedImages(productId).then((images) => [productId, images] as const)))
       .then((pairs) => setGeneratedImages(Object.fromEntries(pairs)))
       .catch((err) => console.error("Failed to load generated images", err));
+    Promise.all(
+      ids.map((productId) =>
+        api
+          .listCatalogImages(productId)
+          .then((images) => [productId, images] as const)
+          .catch(() => [productId, []] as const),
+      ),
+    ).then((pairs) => setCatalogImages(Object.fromEntries(pairs)));
   }, [proposals]);
 
   /** Generates a new marketing image FROM the product's existing photos (never from scratch) —
-   *  "lifestyle" places it in a realistic use setting, "feature_callout" highlights one detail. */
-  async function handleGenerateImage(productId: number, kind: "lifestyle" | "feature_callout") {
+   *  one of the 4 photo standards this store classifies its whole catalog into (see
+   *  PHOTO_CLASSIFICATION_LABELS): principal, ambientada (lifestyle), dimensional, or destaque
+   *  (feature_callout). */
+  async function handleGenerateImage(productId: number, kind: GeneratableImageKind) {
     setImageGenError(null);
     setGeneratingFor((prev) => ({ ...prev, [productId]: kind }));
     try {
@@ -271,16 +296,84 @@ export function RunDetail() {
     }
   }
 
+  /** Assigns which of the 4 carousel slots a generated-here image fills — the 3 AI kinds default
+   *  to a matching classification already (see CLASSIFICATION_BY_KIND server-side), but a
+   *  manufacturer_reference photo starts unclassified, and any of them can be reassigned. Purely
+   *  local metadata until "Publicar na loja" actually sends it — distinct from classifying a photo
+   *  already live on the platform, see handleClassifyCatalogImage. */
+  async function handleClassifyGeneratedImage(productId: number, imageId: number, classification: PhotoClassification) {
+    setImageGenError(null);
+    setClassifyingId(`generated-${imageId}`);
+    try {
+      const updated = await api.classifyGeneratedImage(imageId, classification);
+      setGeneratedImages((prev) => ({
+        ...prev,
+        [productId]: (prev[productId] ?? []).map((img) => (img.id === imageId ? updated : img)),
+      }));
+    } catch (err) {
+      setImageGenError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setClassifyingId(null);
+    }
+  }
+
+  /** Re-labels a photo already on the platform — sends the VTEX write immediately (no separate
+   *  "publish" step, since the photo's already live; only its Label metadata is changing). */
+  async function handleClassifyCatalogImage(productId: number, imageId: string, classification: PhotoClassification) {
+    setImageGenError(null);
+    setClassifyingId(`catalog-${imageId}`);
+    try {
+      const { label } = await api.classifyCatalogImage(productId, imageId, classification);
+      setCatalogImages((prev) => ({
+        ...prev,
+        [productId]: (prev[productId] ?? []).map((img) => (img.id === imageId ? { ...img, label } : img)),
+      }));
+    } catch (err) {
+      setImageGenError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setClassifyingId(null);
+    }
+  }
+
   async function review(proposal: EnrichmentProposal, status: "approved" | "rejected" | "edited") {
     const proposedValue = status === "edited" ? drafts[proposal.id] ?? proposal.proposedValue : undefined;
     await api.reviewProposal(proposal.id, { status, proposedValue });
     refresh();
   }
 
+  const [republishingId, setRepublishingId] = useState<number | null>(null);
+  const [republishError, setRepublishError] = useState<string | null>(null);
+
+  // Point-fix for a proposal that's already approved/published — saves the edited draft and sends
+  // just that correction to the platform right away, instead of routing back through
+  // approve→"Publicar aprovadas" for a small fix a merchant wants live immediately.
+  async function handleRepublish(proposal: EnrichmentProposal) {
+    setRepublishError(null);
+    setRepublishingId(proposal.id);
+    try {
+      await api.republishProposal(proposal.id, drafts[proposal.id]);
+      refresh();
+    } catch (err) {
+      setRepublishError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : String(err));
+    } finally {
+      setRepublishingId(null);
+    }
+  }
+
   async function handlePublish() {
     setPublishError(null);
     try {
       await api.publishRun(runId);
+      refresh();
+    } catch (err) {
+      setPublishError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function handleApproveAll() {
+    setPublishError(null);
+    try {
+      await api.approveAllProposals(runId);
       refresh();
     } catch (err) {
       setPublishError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : String(err));
@@ -335,11 +428,15 @@ export function RunDetail() {
               ? "Otimização ainda em andamento — aguarde terminar de processar todos os produtos antes de publicar, para não deixar parte de fora."
               : `Aprove o conteúdo abaixo antes de publicar de volta na ${PLATFORM_LABELS[platform]}.`}
           </span>
+          <button type="button" onClick={handleApproveAll} disabled={pendingCount === 0 || runInProgress}>
+            Aprovar todos
+          </button>
           <button type="button" onClick={handlePublish} disabled={approvedCount === 0 || runInProgress}>
             Publicar aprovadas na {PLATFORM_LABELS[platform]}
           </button>
         </div>
         {publishError && <div className="banner">{publishError}</div>}
+        {republishError && <div className="banner">{republishError}</div>}
         {resyncError && <div className="banner">{resyncError}</div>}
         {imageGenError && <div className="banner">{imageGenError}</div>}
 
@@ -454,8 +551,16 @@ export function RunDetail() {
 
               <div className="card" style={{ background: "var(--surface-2)", margin: "0 0 1rem" }}>
                 <div className="proposal-header">
-                  <h3 style={{ margin: 0 }}>Fotos geradas por IA</h3>
-                  <div className="actions" style={{ marginTop: 0 }}>
+                  <h3 style={{ margin: 0 }}>Fotos</h3>
+                  <div className="actions" style={{ marginTop: 0, flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => handleGenerateImage(productId, "principal")}
+                      disabled={generatingFor[productId] !== undefined}
+                    >
+                      {generatingFor[productId] === "principal" ? "Gerando…" : "🏷️ Gerar foto principal"}
+                    </button>
                     <button
                       type="button"
                       className="secondary"
@@ -467,6 +572,14 @@ export function RunDetail() {
                     <button
                       type="button"
                       className="secondary"
+                      onClick={() => handleGenerateImage(productId, "dimensional")}
+                      disabled={generatingFor[productId] !== undefined}
+                    >
+                      {generatingFor[productId] === "dimensional" ? "Gerando…" : "📏 Gerar foto dimensional"}
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary"
                       onClick={() => handleGenerateImage(productId, "feature_callout")}
                       disabled={generatingFor[productId] !== undefined}
                     >
@@ -474,31 +587,21 @@ export function RunDetail() {
                     </button>
                   </div>
                 </div>
-                {(generatedImages[productId]?.length ?? 0) === 0 ? (
+                {(generatedImages[productId]?.length ?? 0) === 0 && (catalogImages[productId]?.length ?? 0) === 0 ? (
                   <p className="muted" style={{ margin: 0 }}>
-                    Nenhuma imagem gerada ainda para este produto.
+                    Nenhuma foto encontrada para este produto ainda.
                   </p>
                 ) : (
                   <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
-                    {generatedImages[productId]!.map((image) => (
-                      <div key={image.id} style={{ width: 160 }}>
+                    {generatedImages[productId]?.map((image) => (
+                      <div key={`generated-${image.id}`} style={{ width: 160 }}>
                         <img
                           src={`data:${image.mimeType};base64,${image.imageBase64}`}
-                          alt={
-                            image.kind === "lifestyle"
-                              ? "Foto ambientada gerada por IA"
-                              : image.kind === "feature_callout"
-                                ? "Foto de destaque gerada por IA"
-                                : "Foto extraída da referência do fabricante"
-                          }
+                          alt={image.classification ? PHOTO_CLASSIFICATION_LABELS[image.classification] : "Foto do produto"}
                           style={{ width: "100%", height: 160, objectFit: "cover", borderRadius: "var(--radius-md)" }}
                         />
                         <div className="muted" style={{ fontSize: "0.72rem", marginTop: "0.3rem" }}>
-                          {image.kind === "lifestyle"
-                            ? `Ambientada · ${formatCost(Number(image.costUsd ?? 0))}`
-                            : image.kind === "feature_callout"
-                              ? `Destaque · ${formatCost(Number(image.costUsd ?? 0))}`
-                              : "Foto do fabricante"}
+                          {image.kind === "manufacturer_reference" ? "Foto do fabricante" : `Gerada por IA · ${formatCost(Number(image.costUsd ?? 0))}`}
                         </div>
                         {image.kind === "manufacturer_reference" && image.sourceUrl && (
                           <a
@@ -519,6 +622,21 @@ export function RunDetail() {
                             ⚠ Integridade do produto não confirmada
                           </div>
                         )}
+                        <select
+                          value={image.classification ?? ""}
+                          onChange={(e) => handleClassifyGeneratedImage(productId, image.id, e.target.value as PhotoClassification)}
+                          disabled={classifyingId === `generated-${image.id}`}
+                          style={{ width: "100%", marginTop: "0.3rem", fontSize: "0.72rem" }}
+                        >
+                          <option value="" disabled>
+                            Classificar…
+                          </option>
+                          {(Object.keys(PHOTO_CLASSIFICATION_LABELS) as PhotoClassification[]).map((c) => (
+                            <option key={c} value={c}>
+                              {PHOTO_CLASSIFICATION_LABELS[c]}
+                            </option>
+                          ))}
+                        </select>
                         {image.publishedAt ? (
                           <div style={{ fontSize: "0.72rem", marginTop: "0.3rem", color: "var(--status-good)" }}>
                             ✓ Publicada na loja
@@ -529,11 +647,50 @@ export function RunDetail() {
                             className="link-button"
                             style={{ fontSize: "0.72rem", marginTop: "0.3rem" }}
                             onClick={() => handlePublishImage(productId, image.id)}
-                            disabled={publishingImageId === image.id || !image.integrityVerified}
-                            title={!image.integrityVerified ? "Integridade não confirmada — gere uma nova imagem para publicar." : undefined}
+                            disabled={publishingImageId === image.id || !image.integrityVerified || !image.classification}
+                            title={
+                              !image.integrityVerified
+                                ? "Integridade não confirmada — gere uma nova imagem para publicar."
+                                : !image.classification
+                                  ? "Classifique a foto antes de publicar."
+                                  : undefined
+                            }
                           >
                             {publishingImageId === image.id ? "Publicando…" : "Publicar na loja"}
                           </button>
+                        )}
+                      </div>
+                    ))}
+                    {catalogImages[productId]?.map((image) => (
+                      <div key={`catalog-${image.id}`} style={{ width: 160 }}>
+                        <img
+                          src={image.url}
+                          alt={image.altText ?? "Foto do produto já na loja"}
+                          style={{ width: "100%", height: 160, objectFit: "cover", borderRadius: "var(--radius-md)" }}
+                        />
+                        <div className="muted" style={{ fontSize: "0.72rem", marginTop: "0.3rem" }}>
+                          Já na loja {image.label ? `· Label ${image.label}` : "· sem Label"}
+                        </div>
+                        {platform === "vtex" ? (
+                          <select
+                            value=""
+                            onChange={(e) => handleClassifyCatalogImage(productId, image.id, e.target.value as PhotoClassification)}
+                            disabled={classifyingId === `catalog-${image.id}`}
+                            style={{ width: "100%", marginTop: "0.3rem", fontSize: "0.72rem" }}
+                          >
+                            <option value="" disabled>
+                              {classifyingId === `catalog-${image.id}` ? "Salvando…" : "Classificar…"}
+                            </option>
+                            {(Object.keys(PHOTO_CLASSIFICATION_LABELS) as PhotoClassification[]).map((c) => (
+                              <option key={c} value={c}>
+                                {PHOTO_CLASSIFICATION_LABELS[c]}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <div className="muted" style={{ fontSize: "0.68rem", marginTop: "0.3rem" }}>
+                            Shopify não usa Label
+                          </div>
                         )}
                       </div>
                     ))}
@@ -572,6 +729,13 @@ export function RunDetail() {
                       </button>
                       <button type="button" onClick={() => review(proposal, "rejected")} className="danger">
                         Rejeitar
+                      </button>
+                    </div>
+                  )}
+                  {(proposal.status === "approved" || proposal.status === "published") && (
+                    <div className="actions">
+                      <button type="button" className="secondary" onClick={() => handleRepublish(proposal)} disabled={republishingId === proposal.id}>
+                        {republishingId === proposal.id ? "Enviando…" : "Salvar e reenviar correção"}
                       </button>
                     </div>
                   )}

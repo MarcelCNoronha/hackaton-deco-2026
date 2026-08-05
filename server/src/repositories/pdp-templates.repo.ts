@@ -9,15 +9,23 @@ export const DEFAULT_PDP_CATEGORY = "*";
 /** Every block that can be merged into the description HTML, in the order a merchant might pick —
  *  "featured_image" only ever renders when the run's `descriptionRichness` is
  *  "structured_with_image" AND the LLM actually picked a photo (silently skipped otherwise).
- *  "ambient_photo" is the manufacturer-reference/lifestyle photo a merchant can choose to show
- *  INSTEAD of (or alongside) "technical_specs" in the description — real specs always go to the
- *  Specification module ("Características do Produto") regardless of whether this block is used. */
+ *  "principal_photo"/"ambient_photo"/"dimensional_photo" pull whichever of the product's own
+ *  platform photos is currently classified "principal"/"ambientada"/"dimensional" (this store's
+ *  Label 1/2/3 convention — see photoClassificationEnum) — a merchant can choose to show any of
+ *  them INSTEAD of (or alongside) "technical_specs" in the description; real specs always go to
+ *  the Specification module ("Características do Produto") regardless of whether any of these
+ *  blocks are used. "destaque_gallery" is the multi-photo counterpart — Label "4" and up allows
+ *  more than one photo (see resolvePhotoLabel), so unlike the other 3 it renders ALL of them
+ *  together as a grid, not just one. */
 export const PDP_BLOCKS = [
   "description",
   "benefit_bullets",
   "technical_specs",
   "featured_image",
+  "principal_photo",
   "ambient_photo",
+  "dimensional_photo",
+  "destaque_gallery",
   "faq",
   "cta",
   // Purely structural — no product data behind them, always render regardless of what's

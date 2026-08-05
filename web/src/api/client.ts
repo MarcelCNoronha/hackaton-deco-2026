@@ -198,7 +198,10 @@ export const PDP_BLOCKS = [
   "benefit_bullets",
   "technical_specs",
   "featured_image",
+  "principal_photo",
   "ambient_photo",
+  "dimensional_photo",
+  "destaque_gallery",
   "faq",
   "cta",
   "divider",
@@ -359,14 +362,21 @@ export interface Product {
   lastSyncedAt: string | null;
 }
 
+/** This store's VTEX carousel-slot convention: 1=principal, 2=ambientada, 3=dimensional, 4+
+ *  =destaque (more than one allowed). See PhotoClassification in the server's lib/photo-labels. */
+export type PhotoClassification = "principal" | "ambientada" | "dimensional" | "destaque";
+
 /** An AI-generated marketing image produced FROM the product's existing photos (never from
- *  scratch) — "lifestyle" places it in a realistic use setting, "feature_callout" highlights one
- *  detail. `imageBase64` is raw base64 (no `data:` prefix) — build the src as
+ *  scratch), or a photo extracted from a manufacturer reference page — "kind" is how it was
+ *  PRODUCED, "classification" is which of the 4 carousel slots it fills (independent: a
+ *  manufacturer_reference photo's classification isn't implied by its kind, so it starts null
+ *  until a human picks one). `imageBase64` is raw base64 (no `data:` prefix) — build the src as
  *  `data:${mimeType};base64,${imageBase64}`. */
 export interface GeneratedImage {
   id: number;
   productId: number;
-  kind: "lifestyle" | "feature_callout" | "manufacturer_reference";
+  kind: "principal" | "lifestyle" | "dimensional" | "feature_callout" | "manufacturer_reference";
+  classification: PhotoClassification | null;
   prompt: string;
   /** Only set for kind="manufacturer_reference" — the page the photo was downloaded from. */
   sourceUrl: string | null;
@@ -382,6 +392,15 @@ export interface GeneratedImage {
    *  photo — null means it only ever existed inside CatalogIA. */
   publishedAt: string | null;
   createdAt: string;
+}
+
+/** A photo already on the platform, outside CatalogIA's own generatedImages table — most predate
+ *  this store's Label convention and come back with `label: null` until classified. */
+export interface CatalogImage {
+  id: string;
+  url: string;
+  altText: string | null;
+  label: string | null;
 }
 
 export type RealImpactStatus = "no_url" | "not_published" | "maturing" | "ready";
@@ -654,14 +673,28 @@ export const api = {
   overallImpactSummary: () => request<ImpactSummary>("/impact/summary"),
   reviewProposal: (id: number, body: { status: "approved" | "rejected" | "edited"; proposedValue?: string }) =>
     request<EnrichmentProposal>(`/proposals/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  approveAllProposals: (runId: number) =>
+    request<EnrichmentProposal[]>(`/runs/${runId}/proposals/approve-all`, { method: "POST" }),
+  republishProposal: (id: number, proposedValue?: string) =>
+    request<{ ok: boolean }>(`/proposals/${id}/republish`, { method: "POST", body: JSON.stringify({ proposedValue }) }),
 
   listProducts: () => request<Product[]>("/products"),
   resyncProduct: (id: number) => request<Product>(`/products/${id}/resync`, { method: "POST" }),
   listGeneratedImages: (productId: number) => request<GeneratedImage[]>(`/products/${productId}/generated-images`),
-  generateImage: (productId: number, body: { kind: "lifestyle" | "feature_callout"; note?: string }) =>
+  generateImage: (productId: number, body: { kind: "principal" | "lifestyle" | "dimensional" | "feature_callout"; note?: string }) =>
     request<GeneratedImage>(`/products/${productId}/generated-images`, { method: "POST", body: JSON.stringify(body) }),
+  classifyGeneratedImage: (imageId: number, classification: PhotoClassification) =>
+    request<GeneratedImage>(`/generated-images/${imageId}/classify`, { method: "PATCH", body: JSON.stringify({ classification }) }),
   publishGeneratedImage: (productId: number, imageId: number) =>
     request<GeneratedImage>(`/products/${productId}/generated-images/${imageId}/publish`, { method: "POST" }),
+  /** The product's own photos already on the platform, outside CatalogIA's generatedImages table
+   *  — shown in the same panel so every photo for a product can be classified from one place. */
+  listCatalogImages: (productId: number) => request<CatalogImage[]>(`/products/${productId}/catalog-images`),
+  classifyCatalogImage: (productId: number, imageId: string, classification: PhotoClassification) =>
+    request<{ ok: boolean; label: string }>(`/products/${productId}/catalog-images/${imageId}/classify`, {
+      method: "PATCH",
+      body: JSON.stringify({ classification }),
+    }),
   productRealImpact: (id: number) => request<RealImpact>(`/products/${id}/real-impact`),
   optimizedProductCount: () => request<{ count: number }>("/products/optimized-count"),
   pendingReviewCount: () => request<{ count: number }>("/products/pending-review-count"),
