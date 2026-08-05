@@ -162,6 +162,30 @@ export class VtexClient implements CatalogClient {
     return (await res.json()) as VtexProduct;
   }
 
+  /** The private product endpoint (fetchProduct, `/pvt/product/{id}`) does NOT reliably return a
+   *  `SkuIds` field — confirmed live: a real product with real photos on `{account}.vteximg.com.br`
+   *  still came back with no `SkuIds` key at all in the response. This is the endpoint that
+   *  actually works for resolving a product's SKU id(s), used as getProduct's only source of truth
+   *  now instead of the ad-hoc `product.SkuIds?.[0]` that silently never matched anything. Never
+   *  throws: same "don't fail the whole sync over an image lookup" reasoning as
+   *  fetchProductSpecifications — an empty array just means getProduct's `images` stays empty. */
+  private async fetchSkuIdsByProductId(productId: string | number): Promise<number[]> {
+    try {
+      const res = await requestWithRetry({
+        provider: "vtex",
+        operation: "getSkuIdsByProductId",
+        url: `https://${this.host}/api/catalog_system/pvt/sku/stockkeepingunitByProductId/${productId}`,
+        init: { method: "GET", headers: this.headers() },
+        onAttempt: this.onAttempt,
+      });
+      const skus = ((await res.json()) as Array<{ Id: number }>) ?? [];
+      return skus.map((s) => s.Id);
+    } catch (err) {
+      console.error(`VTEX getSkuIdsByProductId failed for product ${productId} — continuing with no SKU`, err);
+      return [];
+    }
+  }
+
   private async fetchSku(skuId: string | number): Promise<VtexSku> {
     const res = await requestWithRetry({
       provider: "vtex",
@@ -213,8 +237,8 @@ export class VtexClient implements CatalogClient {
    *  treats the first SKU's images as "the" product images, same simplification the pipeline
    *  already relied on before this abstraction existed. */
   async getProduct(externalId: string): Promise<CatalogProductDetail> {
-    const product = await this.fetchProduct(externalId);
-    const skuId = (product as { SkuIds?: number[] }).SkuIds?.[0];
+    const [product, skuIds] = await Promise.all([this.fetchProduct(externalId), this.fetchSkuIdsByProductId(externalId)]);
+    const skuId = skuIds[0];
     const [sku, { attributes, brand, category, url }] = await Promise.all([
       skuId ? this.fetchSku(skuId) : Promise.resolve(undefined),
       this.fetchProductSpecifications(externalId),
