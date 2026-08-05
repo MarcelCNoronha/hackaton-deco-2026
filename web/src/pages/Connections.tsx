@@ -117,7 +117,14 @@ export function Connections() {
   const [brlRateInput, setBrlRateInput] = useState(() => String(getBrlExchangeRate()));
   const [message, setMessage] = useState<string | null>(null);
 
-  const [vtex, setVtex] = useState({ displayName: "VTEX — mundialacabamentos", account: "", environment: "vtexcommercestable", appKey: "", appToken: "" });
+  const [vtex, setVtex] = useState({
+    displayName: "VTEX — mundialacabamentos",
+    account: "",
+    environment: "vtexcommercestable",
+    appKey: "",
+    appToken: "",
+    storefrontDomain: "www.mundialacabamentos.com.br",
+  });
   const [shopify, setShopify] = useState({ displayName: "Shopify", shopDomain: "", accessToken: "" });
   const [anthropic, setAnthropic] = useState({ displayName: "Anthropic (Claude)", apiKey: "" });
   const [openai, setOpenai] = useState({ displayName: "OpenAI (GPT)", apiKey: "" });
@@ -335,6 +342,11 @@ export function Connections() {
               <input placeholder="Environment" value={vtex.environment} onChange={(e) => setVtex({ ...vtex, environment: e.target.value })} />
               <input placeholder="App Key" value={vtex.appKey} onChange={(e) => setVtex({ ...vtex, appKey: e.target.value })} />
               <input placeholder="App Token" type="password" value={vtex.appToken} onChange={(e) => setVtex({ ...vtex, appToken: e.target.value })} />
+              <input
+                placeholder="Domínio da loja (opcional, ex: www.minhaloja.com.br)"
+                value={vtex.storefrontDomain}
+                onChange={(e) => setVtex({ ...vtex, storefrontDomain: e.target.value })}
+              />
               <CredentialHelpLink provider="vtex" />
               <button type="submit">Salvar e testar</button>
             </form>

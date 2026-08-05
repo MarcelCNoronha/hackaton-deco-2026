@@ -517,7 +517,14 @@ export const api = {
     request<ProviderRecommendations | Record<LlmProvider, ProviderRecommendations>>(
       provider ? `/models?provider=${provider}` : "/models",
     ),
-  connectVtex: (body: { displayName: string; account: string; environment: string; appKey: string; appToken: string }) =>
+  connectVtex: (body: {
+    displayName: string;
+    account: string;
+    environment: string;
+    appKey: string;
+    appToken: string;
+    storefrontDomain?: string;
+  }) =>
     request<{ ok: boolean; error?: string }>("/connections/vtex", { method: "POST", body: JSON.stringify(body) }),
   connectShopify: (body: { displayName: string; shopDomain: string; accessToken: string }) =>
     request<{ ok: boolean; error?: string }>("/connections/shopify", { method: "POST", body: JSON.stringify(body) }),
@@ -658,6 +665,10 @@ export const api = {
   productRealImpact: (id: number) => request<RealImpact>(`/products/${id}/real-impact`),
   optimizedProductCount: () => request<{ count: number }>("/products/optimized-count"),
   pendingReviewCount: () => request<{ count: number }>("/products/pending-review-count"),
+  /** Same per-product "latest run" classification the status filter pills use — see
+   *  computeStatusCounts' doc comment for why this replaced optimizedProductCount/
+   *  pendingReviewCount on the Products page specifically (those two disagreed with the pills). */
+  catalogStatusCounts: () => request<{ none: number; pending: number; published: number }>("/catalog/products/status-counts"),
 
   getSpendLimits: () => request<ProviderSpend[]>("/spend-limits"),
   setSpendLimit: (provider: LlmProvider, limitUsd: number | null) =>

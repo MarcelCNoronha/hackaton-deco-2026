@@ -23,7 +23,7 @@ interface Props {
     imageKinds: ImageGenKind[];
     descriptionRichness: DescriptionRichness;
     communicationTone: CommunicationTone;
-  }) => void;
+  }) => Promise<void>;
 }
 
 const ALT_TEXT_LABEL_FALLBACK = "Alt-text de imagens";
@@ -80,6 +80,11 @@ export function OptimizationFieldSelector({ productCount, confirmLabel, onCancel
   const [note, setNote] = useState("");
   const [loadingEstimate, setLoadingEstimate] = useState(true);
   const [estimateError, setEstimateError] = useState<string | null>(null);
+  // Clicking "Confirmar" used to close this modal and return control to the caller instantly,
+  // with the actual API call finishing invisibly in the background — nothing on screen changed
+  // until (if) a row elsewhere updated, so a click could look like it did nothing at all. Kept
+  // local (not caller state) so it disables/relabels the button the instant it's clicked.
+  const [submitting, setSubmitting] = useState(false);
 
   const descriptionRichness = LEVEL_RICHNESS[level];
 
@@ -115,14 +120,19 @@ export function OptimizationFieldSelector({ productCount, confirmLabel, onCancel
   const total = (estimates ?? []).reduce((sum, e) => (checked[e.field] ? sum + e.estimatedCostUsd : sum), 0);
   const canConfirm = ALL_ENRICHMENT_FIELDS.some((field) => checked[field]) || checked.alt_text;
 
-  function handleConfirm() {
-    onConfirm({
-      fields: ALL_ENRICHMENT_FIELDS.filter((field) => checked[field]),
-      includeAltText: checked.alt_text,
-      imageKinds: IMAGE_GEN_KINDS.map((i) => i.kind).filter((kind) => checked[kind]),
-      descriptionRichness,
-      communicationTone: tone,
-    });
+  async function handleConfirm() {
+    setSubmitting(true);
+    try {
+      await onConfirm({
+        fields: ALL_ENRICHMENT_FIELDS.filter((field) => checked[field]),
+        includeAltText: checked.alt_text,
+        imageKinds: IMAGE_GEN_KINDS.map((i) => i.kind).filter((kind) => checked[kind]),
+        descriptionRichness,
+        communicationTone: tone,
+      });
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   function renderRow(field: EstimableField, fallbackLabel: string) {
@@ -219,11 +229,11 @@ export function OptimizationFieldSelector({ productCount, confirmLabel, onCancel
         <div className="actions" style={{ marginTop: "1rem", justifyContent: "space-between" }}>
           <strong>Total estimado: {loadingEstimate ? "…" : formatCost(total)}</strong>
           <div style={{ display: "flex", gap: "0.5rem" }}>
-            <button type="button" className="secondary" onClick={onCancel}>
+            <button type="button" className="secondary" onClick={onCancel} disabled={submitting}>
               Cancelar
             </button>
-            <button type="button" onClick={handleConfirm} disabled={!canConfirm}>
-              {confirmLabel}
+            <button type="button" onClick={handleConfirm} disabled={!canConfirm || submitting}>
+              {submitting ? "Otimizando…" : confirmLabel}
             </button>
           </div>
         </div>

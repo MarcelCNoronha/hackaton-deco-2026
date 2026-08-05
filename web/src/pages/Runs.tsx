@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   api,
   type CatalogFilterOptions,
@@ -28,9 +28,9 @@ function toneStyle(tone: "good" | "warning" | "critical"): React.CSSProperties {
 type StatusGroup = "none" | "pending" | "published";
 
 const STATUS_GROUP_LABELS: Record<StatusGroup, string> = {
-  none: "Não otimizado",
-  pending: "A validar",
-  published: "Pronta e enviada",
+  none: "Otimizar",
+  pending: "Validar",
+  published: "Otimizado",
 };
 
 function statusGroupOf(item: CatalogProductSummary): StatusGroup {
@@ -53,9 +53,14 @@ function formatResetIn(resetAt: string): string {
 }
 
 export function Runs() {
-  const [optimizedCount, setOptimizedCount] = useState(0);
-  const [pendingReviewCount, setPendingReviewCount] = useState(0);
-  const [avgPrecision, setAvgPrecision] = useState<number | null>(null);
+  const navigate = useNavigate();
+  // Same 3 groups as STATUS_GROUP_LABELS/the filter pills, from the one endpoint that shares their
+  // exact classification logic — see api.catalogStatusCounts' doc comment.
+  const [statusCounts, setStatusCounts] = useState<{ none: number; pending: number; published: number }>({
+    none: 0,
+    pending: 0,
+    published: 0,
+  });
 
   const [search, setSearch] = useState("");
   const [categoryId, setCategoryId] = useState("");
@@ -121,24 +126,10 @@ export function Runs() {
     setExhaustedQuotas(quotas.filter((q) => q.enabled && q.exhausted));
   }
 
-  async function refreshOptimizedCount() {
-    setOptimizedCount((await api.optimizedProductCount()).count);
+  async function refreshStatusCounts() {
+    setStatusCounts(await api.catalogStatusCounts());
   }
 
-  async function refreshPendingReviewCount() {
-    setPendingReviewCount((await api.pendingReviewCount()).count);
-  }
-
-  /** "Taxa de precisão" — average final content score across completed runs (already computed
-   *  per run by the quality-gate loop, see enrichment-run.orchestrator.ts's avgFinalContentScore).
-   *  Reuses the existing runs list endpoint rather than adding a dedicated aggregate one. */
-  async function refreshAvgPrecision() {
-    const runs = await api.listRuns();
-    const scores = runs
-      .map((r) => (r.summary as { avgFinalContentScore?: number } | null)?.avgFinalContentScore)
-      .filter((v): v is number => typeof v === "number");
-    setAvgPrecision(scores.length ? scores.reduce((sum, v) => sum + v, 0) / scores.length : null);
-  }
 
   async function loadFilters() {
     try {
@@ -180,9 +171,7 @@ export function Runs() {
 
   useEffect(() => {
     function refreshStats() {
-      refreshOptimizedCount().catch((err) => console.error("Failed to refresh stats", err));
-      refreshPendingReviewCount().catch((err) => console.error("Failed to refresh stats", err));
-      refreshAvgPrecision().catch((err) => console.error("Failed to refresh stats", err));
+      refreshStatusCounts().catch((err) => console.error("Failed to refresh stats", err));
       refreshQuotaAlerts().catch((err) => console.error("Failed to refresh stats", err));
     }
     refreshStats();
@@ -237,34 +226,49 @@ export function Runs() {
     setPendingSingle(externalId);
   }
 
-  function confirmSingleOptimize(
+  /** Awaited by OptimizationFieldSelector's confirm button (see its `submitting` state) — the
+   *  modal stays open showing "Otimizando…" for exactly as long as this promise is pending, then
+   *  a successful run takes the user straight to its progress instead of leaving them back on a
+   *  product list with no visible sign anything happened. */
+  async function confirmSingleOptimize(
     fields: EnrichmentField[],
     includeAltText: boolean,
     imageKinds: ImageGenKind[],
     descriptionRichness: DescriptionRichness,
     communicationTone: CommunicationTone,
-  ) {
+  ): Promise<void> {
     const externalId = pendingSingle;
-    setPendingSingle(null);
-    if (!externalId || optimizingRef.current.has(externalId)) return;
+    if (!externalId || optimizingRef.current.has(externalId)) {
+      setPendingSingle(null);
+      return;
+    }
     optimizingRef.current.add(externalId);
     setOptimizingIds(new Set(optimizingRef.current));
     setRunError(null);
-    api
-      .createRun({ candidateProductIds: [externalId], fields, includeAltText, imageKinds, descriptionRichness, communicationTone })
-      .then(() => {
-        refreshOptimizedCount();
-        loadProducts(page);
-      })
-      .catch((err) => setRunError(err instanceof Error ? err.message : String(err)))
-      .finally(() => {
-        optimizingRef.current.delete(externalId);
-        setOptimizingIds((prev) => {
-          const next = new Set(prev);
-          next.delete(externalId);
-          return next;
-        });
+    try {
+      const { runId } = await api.createRun({
+        candidateProductIds: [externalId],
+        fields,
+        includeAltText,
+        imageKinds,
+        descriptionRichness,
+        communicationTone,
       });
+      setPendingSingle(null);
+      refreshStatusCounts();
+      loadProducts(page);
+      navigate(`/runs/${runId}`);
+    } catch (err) {
+      setPendingSingle(null);
+      setRunError(err instanceof Error ? err.message : String(err));
+    } finally {
+      optimizingRef.current.delete(externalId);
+      setOptimizingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(externalId);
+        return next;
+      });
+    }
   }
 
   function handleCreateRun() {
@@ -272,14 +276,16 @@ export function Runs() {
     setPendingBulk(true);
   }
 
-  function confirmBulkOptimize(
+  /** Same "await it from the modal, then take the user to see it running" reasoning as
+   *  confirmSingleOptimize above — a bulk run still gets exactly one runId covering every
+   *  targeted product, so the same `/runs/:id` destination applies. */
+  async function confirmBulkOptimize(
     fields: EnrichmentField[],
     includeAltText: boolean,
     imageKinds: ImageGenKind[],
     descriptionRichness: DescriptionRichness,
     communicationTone: CommunicationTone,
-  ) {
-    setPendingBulk(false);
+  ): Promise<void> {
     setCreating(true);
     setRunError(null);
     const body = selectAllMatching
@@ -302,17 +308,21 @@ export function Runs() {
           communicationTone,
         };
 
-    api
-      .createRun(body)
-      .then(() => {
-        setSelectedIds(new Set());
-        setSelectAllMatching(false);
-        setTopN("");
-        refreshOptimizedCount();
-        loadProducts(page);
-      })
-      .catch((err) => setRunError(err instanceof Error ? err.message : String(err)))
-      .finally(() => setCreating(false));
+    try {
+      const { runId } = await api.createRun(body);
+      setPendingBulk(false);
+      setSelectedIds(new Set());
+      setSelectAllMatching(false);
+      setTopN("");
+      refreshStatusCounts();
+      loadProducts(page);
+      navigate(`/runs/${runId}`);
+    } catch (err) {
+      setPendingBulk(false);
+      setRunError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCreating(false);
+    }
   }
 
   const visibleItems = listResult?.items.filter((item) => statusFilter.has(statusGroupOf(item))) ?? [];
@@ -340,9 +350,9 @@ export function Runs() {
 
       <div className="page-content">
         <div className="stat-row">
-          <StatTile label="Total Otimizados" value={optimizedCount} />
-          <StatTile label="A Validar" value={pendingReviewCount} />
-          <StatTile label="Taxa de Precisão" value={avgPrecision !== null ? `${Math.round(avgPrecision)}%` : "—"} />
+          <StatTile label={STATUS_GROUP_LABELS.none} value={statusCounts.none} />
+          <StatTile label={STATUS_GROUP_LABELS.pending} value={statusCounts.pending} />
+          <StatTile label={STATUS_GROUP_LABELS.published} value={statusCounts.published} />
           <div className="stat-tile status-filter-tile">
             <span className="stat-label">Filtro de Status</span>
             <div className="status-filter-pills">
@@ -472,10 +482,10 @@ export function Runs() {
                         <button
                           type="button"
                           className="link-button"
-                          style={{ fontSize: "0.72rem", background: "transparent", border: "none", padding: 0, display: "block", marginTop: "0.2rem" }}
+                          style={{ fontSize: "0.75rem", marginTop: "0.35rem" }}
                           onClick={() => openReferenceEditor(item.externalId, item.manufacturerReferenceUrl)}
                         >
-                          {item.manufacturerReferenceUrl ? "🏭 Referência definida" : "🏭 Definir referência do fabricante"}
+                          🏭 {item.manufacturerReferenceUrl ? "Referência definida" : "Definir referência do fabricante"}
                         </button>
                       )}
                     </div>
