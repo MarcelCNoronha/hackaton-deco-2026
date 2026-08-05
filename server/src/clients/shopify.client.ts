@@ -244,7 +244,7 @@ export class ShopifyClient implements CatalogClient {
       url: this.adminProductUrl(data.product.id),
       imageUrl: images[0]?.image?.url ?? null,
       variantId: data.product.variants.nodes[0]?.id ?? "",
-      images: images.map((m) => ({ id: m.id, url: m.image!.url, altText: m.alt })),
+      images: images.map((m) => ({ id: m.id, url: m.image!.url, altText: m.alt, label: null })),
       attributes,
     };
   }

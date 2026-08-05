@@ -35,8 +35,26 @@ export interface VtexSku {
   NameComplete?: string;
   /** Merchant-assigned reference code — what a merchant actually calls "the SKU". */
   RefId?: string;
-  Images?: Array<{ ImageUrl: string; ImageName?: string; ImageText?: string }>;
   [key: string]: unknown;
+}
+
+/** `/pvt/stockkeepingunit/{id}/file` response shape — the private SKU endpoint itself
+ *  (`/pvt/stockkeepingunit/{id}`, see VtexSku) never returns an `Images` field despite that being
+ *  the long-standing assumption in this file; confirmed live against a real SKU with 3 real
+ *  photos, none of which showed up on that endpoint at all. This is the endpoint that actually
+ *  returns them. `FileLocation` omits the account subdomain (`vteximg.com.br/arquivos/...`,
+ *  not `{account}.vteximg.com.br/...`) — see fetchSkuFiles. `Label` is a free-text tag the
+ *  merchant sets per photo in the admin; this store's own convention uses "2" for the
+ *  lifestyle/"foto ambientada" shot, confirmed live (see manufacturer-image.agent.ts's future
+ *  ambient-photo sourcing). */
+interface VtexSkuFile {
+  Id: number;
+  ArchiveId: number;
+  Name: string;
+  IsMain: boolean;
+  Text?: string;
+  Label?: string;
+  FileLocation: string;
 }
 
 interface VtexSearchProduct {
@@ -197,6 +215,24 @@ export class VtexClient implements CatalogClient {
     return (await res.json()) as VtexSku;
   }
 
+  /** See VtexSkuFile's doc comment — the real source of a SKU's photos. Never throws: same
+   *  "don't fail the whole sync over an image lookup" reasoning as fetchProductSpecifications. */
+  private async fetchSkuFiles(skuId: string | number): Promise<VtexSkuFile[]> {
+    try {
+      const res = await requestWithRetry({
+        provider: "vtex",
+        operation: "getSkuFiles",
+        url: `${this.baseUrl}/pvt/stockkeepingunit/${skuId}/file`,
+        init: { method: "GET", headers: this.headers() },
+        onAttempt: this.onAttempt,
+      });
+      return ((await res.json()) as VtexSkuFile[]) ?? [];
+    } catch (err) {
+      console.error(`VTEX getSkuFiles failed for SKU ${skuId} — continuing with no images`, err);
+      return [];
+    }
+  }
+
   /** The private Catalog API (fetchProduct/fetchSku) never returns category-level specification
    *  values ("Características"/"Especificações" in the admin — real specs like Material, Acabamento,
    *  dimensões) nor the brand NAME (only fetchProduct's numeric BrandId) — only the public Search
@@ -239,11 +275,14 @@ export class VtexClient implements CatalogClient {
   async getProduct(externalId: string): Promise<CatalogProductDetail> {
     const [product, skuIds] = await Promise.all([this.fetchProduct(externalId), this.fetchSkuIdsByProductId(externalId)]);
     const skuId = skuIds[0];
-    const [sku, { attributes, brand, category, url }] = await Promise.all([
+    const [sku, files, { attributes, brand, category, url }] = await Promise.all([
       skuId ? this.fetchSku(skuId) : Promise.resolve(undefined),
+      skuId ? this.fetchSkuFiles(skuId) : Promise.resolve([]),
       this.fetchProductSpecifications(externalId),
     ]);
-    const images = (sku?.Images ?? []) as Array<{ Id?: string | number; ImageUrl: string; ImageText?: string }>;
+    // FileLocation omits the account subdomain (see VtexSkuFile's doc comment) — this is the
+    // same {account}.vteximg.com.br host every other VTEX-hosted image on this store already uses.
+    const images = [...files].sort((a, b) => (a.IsMain === b.IsMain ? 0 : a.IsMain ? -1 : 1));
 
     return {
       externalId: String(product.Id),
@@ -263,12 +302,15 @@ export class VtexClient implements CatalogClient {
       // entirely (see fetchProductSpecifications) — still better than no link at all, but wrong
       // for any store using a custom domain, which is the common case.
       url: url ?? (product.LinkId ? `https://${this.host}/${product.LinkId}/p` : null),
-      imageUrl: images[0]?.ImageUrl ?? null,
+      imageUrl: images[0] ? `https://${this.credentials.account}.${images[0].FileLocation}` : null,
       variantId: sku ? String(sku.Id) : "",
-      images: images.map((img, i) => ({
-        id: String(img.Id ?? i),
-        url: img.ImageUrl,
-        altText: img.ImageText ?? null,
+      images: images.map((img) => ({
+        id: String(img.Id),
+        url: `https://${this.credentials.account}.${img.FileLocation}`,
+        altText: img.Text?.trim() || null,
+        // This store's own convention for the lifestyle/"foto ambientada" shot — see
+        // VtexSkuFile's doc comment. Null on any account that doesn't use this convention.
+        label: img.Label ?? null,
       })),
       attributes,
     };

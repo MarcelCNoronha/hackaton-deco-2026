@@ -25,7 +25,16 @@ export interface CatalogProductDetail extends CatalogProductSummary {
   /** Internal variant/SKU identifier used for API calls (image updates, etc) — NOT the merchant
    *  SKU code, see `sku` for that. VTEX: numeric SkuId. Shopify: variant GID. */
   variantId: string;
-  images: Array<{ id: string; url: string; altText: string | null }>;
+  images: Array<{
+    id: string;
+    url: string;
+    altText: string | null;
+    /** VTEX only — the merchant-set image "Label" tag (admin: Mídias > editar metadados). This
+     *  store's own convention uses "2" for the lifestyle/"foto ambientada" shot, confirmed live —
+     *  see vtex.client.ts's VtexSkuFile doc comment. Always null on Shopify (no equivalent field)
+     *  and on any VTEX account that doesn't use this convention. */
+    label: string | null;
+  }>;
   attributes: Record<string, unknown>;
 }
 
