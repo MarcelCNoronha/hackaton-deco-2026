@@ -17,12 +17,22 @@ export interface PdpTemplate {
   category: string;
   level: DescriptionRichness;
   blocks: PdpBlock[];
+  /** "Modo avançado" — free-form HTML with {{placeholder}} tokens (see schema.ts's doc comment on
+   *  pdpTemplates.customHtml). Null means "simple mode" — `blocks` decides the structure instead. */
+  customHtml: string | null;
   /** "specific" — this exact category has its own saved row for this level. "default" — no
-   *  category-specific row exists, so `blocks` is inherited from the catalog-wide `'*'` row (or the
-   *  hardcoded factory default if even that doesn't exist yet). Only meaningful for the admin
-   *  editor (PdpConfig.tsx) — resolvePdpTemplate (the publish-time path) doesn't need to know which
-   *  case it hit, just the final blocks. */
+   *  category-specific row exists, so `blocks`/`customHtml` are inherited from the catalog-wide
+   *  `'*'` row (or the hardcoded factory default if even that doesn't exist yet). Only meaningful
+   *  for the admin editor (PdpConfig.tsx) — resolvePdpTemplate (the publish-time path) doesn't need
+   *  to know which case it hit, just the final blocks/customHtml. */
   source: "specific" | "default";
+}
+
+/** What a resolved template needs at publish/preview time — same {blocks, customHtml} pair as
+ *  PdpTemplate, just without the admin-only `source`/`category`/`platform`/`level` bookkeeping. */
+export interface ResolvedPdpTemplate {
+  blocks: PdpBlock[];
+  customHtml: string | null;
 }
 
 /** Same order the pipeline has always merged these in (see HACKATHON.md) — used whenever no
@@ -48,7 +58,14 @@ export async function getPdpTemplates(platform: CatalogPlatform, category: strin
   return levels.map((level) => {
     const specificRow = rows.find((r) => r.level === level && r.category === category);
     if (specificRow) {
-      return { platform, category, level, blocks: specificRow.blocks as PdpBlock[], source: "specific" as const };
+      return {
+        platform,
+        category,
+        level,
+        blocks: specificRow.blocks as PdpBlock[],
+        customHtml: specificRow.customHtml,
+        source: "specific" as const,
+      };
     }
     const fallbackRow =
       category !== DEFAULT_PDP_CATEGORY ? rows.find((r) => r.level === level && r.category === DEFAULT_PDP_CATEGORY) : undefined;
@@ -57,6 +74,7 @@ export async function getPdpTemplates(platform: CatalogPlatform, category: strin
       category,
       level,
       blocks: (fallbackRow?.blocks as PdpBlock[] | undefined) ?? defaultBlocksFor(level),
+      customHtml: fallbackRow?.customHtml ?? null,
       source: "default" as const,
     };
   });
@@ -68,7 +86,7 @@ export async function resolvePdpTemplate(
   platform: CatalogPlatform,
   category: string | null,
   level: DescriptionRichness,
-): Promise<PdpBlock[]> {
+): Promise<ResolvedPdpTemplate> {
   // Always query — a product with no resolved category (common: Shopify with an empty
   // productType, VTEX when the category lookup failed) still must see the merchant's configured
   // '*' catalog-wide default instead of silently falling through to the hardcoded factory
@@ -79,7 +97,10 @@ export async function resolvePdpTemplate(
   const specific = category ? rows.find((r) => r.category === category) : undefined;
   const fallback = rows.find((r) => r.category === DEFAULT_PDP_CATEGORY);
   const row = specific ?? fallback;
-  return (row?.blocks as PdpBlock[] | undefined) ?? defaultBlocksFor(level);
+  return {
+    blocks: (row?.blocks as PdpBlock[] | undefined) ?? defaultBlocksFor(level),
+    customHtml: row?.customHtml ?? null,
+  };
 }
 
 export async function setPdpTemplate(params: {
@@ -87,12 +108,23 @@ export async function setPdpTemplate(params: {
   category: string;
   level: DescriptionRichness;
   blocks: PdpBlock[];
+  /** Omit/null to stay in (or revert to) simple mode; a non-empty string switches this
+   *  (platform, category, level) to advanced mode — see schema.ts's doc comment. */
+  customHtml?: string | null;
 }): Promise<void> {
+  const customHtml = params.customHtml?.trim() || null;
   await db
     .insert(pdpTemplates)
-    .values({ platform: params.platform, category: params.category, level: params.level, blocks: params.blocks, updatedAt: new Date() })
+    .values({
+      platform: params.platform,
+      category: params.category,
+      level: params.level,
+      blocks: params.blocks,
+      customHtml,
+      updatedAt: new Date(),
+    })
     .onConflictDoUpdate({
       target: [pdpTemplates.platform, pdpTemplates.category, pdpTemplates.level],
-      set: { blocks: params.blocks, updatedAt: new Date() },
+      set: { blocks: params.blocks, customHtml, updatedAt: new Date() },
     });
 }

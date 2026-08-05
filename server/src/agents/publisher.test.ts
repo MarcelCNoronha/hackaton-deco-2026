@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderPdpHtml } from "./publisher.agent.js";
+import { renderPdp, renderPdpHtml, renderPdpHtmlFromTemplate } from "./publisher.agent.js";
 
 describe("renderPdpHtml", () => {
   it("escapes HTML-significant characters so a malicious/odd attribute value can't inject markup", () => {
@@ -54,5 +54,54 @@ describe("renderPdpHtml", () => {
     expect(plain).not.toContain("<table>");
     expect(plain).toContain("Material: Cerâmica");
     expect(structured).toContain("<table>");
+  });
+});
+
+describe("renderPdpHtmlFromTemplate ('modo avançado')", () => {
+  it("substitutes each {{placeholder}} with that block's rendered HTML, wherever it appears in the custom markup", () => {
+    const template = '<div class="custom"><header>{{cta}}</header><main>{{description}}</main></div>';
+    const html = renderPdpHtmlFromTemplate(template, "plain", {
+      description: "Descrição do produto.",
+      cta: "Compre agora",
+    });
+    expect(html).toContain('<div class="custom">');
+    expect(html.indexOf("Compre agora")).toBeLessThan(html.indexOf("Descrição do produto"));
+  });
+
+  it("replaces a placeholder with nothing (not an empty shell) when its data wasn't provided", () => {
+    const html = renderPdpHtmlFromTemplate("<section>{{faq}}</section><footer>{{cta}}</footer>", "structured", {
+      cta: "Compre agora",
+    });
+    expect(html).not.toContain("catalogia-faq");
+    expect(html).toBe("<section></section><footer><p class=\"catalogia-cta\"><strong>Compre agora</strong></p></footer>");
+  });
+
+  it("leaves an unrecognized {{token}} untouched instead of silently deleting it", () => {
+    const html = renderPdpHtmlFromTemplate("<p>{{not_a_real_block}}</p>", "plain", {});
+    expect(html).toBe("<p>{{not_a_real_block}}</p>");
+  });
+
+  it("still escapes HTML-significant characters inside a substituted block, same as simple mode", () => {
+    const html = renderPdpHtmlFromTemplate("<div>{{description}}</div>", "plain", {
+      description: "<script>alert(1)</script>",
+    });
+    expect(html).not.toContain("<script>alert");
+    expect(html).toContain("&lt;script&gt;");
+  });
+});
+
+describe("renderPdp (mode dispatch)", () => {
+  it("uses the blocks list when customHtml is null", () => {
+    const html = renderPdp({ blocks: ["description"], customHtml: null }, "plain", { description: "Olá." });
+    expect(html).toBe(renderPdpHtml(["description"], "plain", { description: "Olá." }));
+  });
+
+  it("uses the custom template when customHtml is set, ignoring the blocks list entirely", () => {
+    const html = renderPdp({ blocks: ["cta"], customHtml: "<div>{{description}}</div>" }, "plain", {
+      description: "Olá.",
+      cta: "Compre agora",
+    });
+    expect(html).not.toContain("Compre agora");
+    expect(html).toContain("Olá.");
   });
 });

@@ -1,0 +1,1 @@
+ALTER TABLE "pdp_templates" ADD COLUMN "custom_html" text;

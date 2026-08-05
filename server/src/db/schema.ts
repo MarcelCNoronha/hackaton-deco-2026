@@ -255,6 +255,14 @@ export const pdpTemplates = pgTable("pdp_templates", {
   category: text("category").notNull(),
   level: pdpTemplateLevelEnum("level").notNull(),
   blocks: jsonb("blocks").notNull().default(sql`'[]'::jsonb`),
+  // Optional "modo avançado": free-form HTML with {{description}}/{{benefit_bullets}}/
+  // {{technical_specs}}/{{faq}}/{{cta}}/{{featured_image}} placeholders, for a merchant who wants
+  // full control of markup/layout instead of just reordering the fixed block list above. When set
+  // (non-null/non-empty), takes priority over `blocks` at both preview and publish time — each
+  // placeholder still renders through the exact same per-block function (renderDescriptionBlock
+  // etc. in publisher.agent.ts), so content escaping/level-awareness never differs between the two
+  // modes, only how the pieces get assembled. Null means "simple mode" (blocks list decides).
+  customHtml: text("custom_html"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
   pk: primaryKey({ columns: [table.platform, table.category, table.level] }),

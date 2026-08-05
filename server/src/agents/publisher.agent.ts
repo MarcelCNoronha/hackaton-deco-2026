@@ -3,9 +3,18 @@ import { db } from "../db/client.js";
 import { enrichmentProposals, enrichmentRuns, products } from "../db/schema.js";
 import type { CatalogClient } from "../clients/catalog-types.js";
 import type { DescriptionRichness } from "../clients/llm-types.js";
-import { resolvePdpTemplate, type PdpBlock } from "../repositories/pdp-templates.repo.js";
+import { resolvePdpTemplate, type PdpBlock, type ResolvedPdpTemplate } from "../repositories/pdp-templates.repo.js";
 import { getCategoryFields } from "../repositories/category-spec-fields.repo.js";
 import type { CatalogPlatform } from "../clients/catalog-types.js";
+
+/** Some VTEX categories have a Specification field literally named "Descrição" — a leftover/legacy
+ *  spec slot, entirely distinct from the product's real native Description (the one
+ *  updateProductDescription actually publishes to the storefront) despite the identical name.
+ *  Confirmed live: it already had a stale copy of an old description sitting in it, unrelated to
+ *  what customers see. Never auto-resolved by name for that reason — the real description already
+ *  has its own dedicated, correct publish path; matching this one by coincidence of name would
+ *  silently write into a dead field a merchant could mistake for the real thing. */
+const RESERVED_SPEC_FIELD_NAMES = new Set(["descrição", "descricao"]);
 
 /** Resolves label→fieldId against the product's category's synced spec fields (empty/no-op on
  *  Shopify, which has no such registry — see category-spec-fields.repo.ts). Case-insensitive since
@@ -19,7 +28,7 @@ async function resolveSpecFieldValues(
   const specValues: Array<{ fieldId: string; value: string }> = [];
   const rest: Array<[string, string]> = [];
   for (const [label, value] of entries) {
-    const field = fields?.find((f) => f.name.toLowerCase() === label.toLowerCase());
+    const field = fields?.find((f) => f.name.toLowerCase() === label.toLowerCase() && !RESERVED_SPEC_FIELD_NAMES.has(f.name.toLowerCase()));
     if (field) specValues.push({ fieldId: field.id, value });
     else rest.push([label, value]);
   }
@@ -104,6 +113,33 @@ export function renderPdpHtml(blocks: PdpBlock[], level: DescriptionRichness, da
   return parts.join("");
 }
 
+/** "Modo avançado" (see pdpTemplates.customHtml's doc comment) — same per-block renderers as
+ *  renderPdpHtml above (same escaping, same level-awareness), just assembled by substituting
+ *  {{placeholder}} tokens into merchant-authored HTML instead of concatenating a fixed block list
+ *  in order. A placeholder with no matching data (e.g. {{featured_image}} when nothing was
+ *  approved) is replaced with an empty string — same "skip silently, never an empty shell" rule as
+ *  the simple-mode renderer, just token-by-token instead of block-by-block. */
+export function renderPdpHtmlFromTemplate(customHtml: string, level: DescriptionRichness, data: BlockData): string {
+  const fragments: Record<PdpBlock, string> = {
+    description: data.description ? renderDescriptionBlock(data.description) : "",
+    benefit_bullets: data.bullets ? renderBulletsBlock(data.bullets, level) : "",
+    technical_specs: data.specs ? renderSpecsBlock(data.specs, level) : "",
+    faq: data.faq ? renderFaqBlock(data.faq, level) : "",
+    cta: data.cta ? renderCtaBlock(data.cta) : "",
+    featured_image: data.featuredImage ? renderFeaturedImageBlock(data.featuredImage.url, data.featuredImage.caption) : "",
+  };
+  return customHtml.replace(/\{\{(\w+)\}\}/g, (match, token: string) =>
+    Object.prototype.hasOwnProperty.call(fragments, token) ? fragments[token as PdpBlock] : match,
+  );
+}
+
+/** Picks whichever of the two renderers above applies — the one call site both publisher.agent.ts
+ *  and the "Configuração de PDP" preview route need, so neither has to duplicate the
+ *  customHtml-vs-blocks branch itself. */
+export function renderPdp(template: { blocks: PdpBlock[]; customHtml: string | null }, level: DescriptionRichness, data: BlockData): string {
+  return template.customHtml ? renderPdpHtmlFromTemplate(template.customHtml, level, data) : renderPdpHtml(template.blocks, level, data);
+}
+
 async function markPublished(proposalId: number): Promise<void> {
   await db.update(enrichmentProposals).set({ status: "published", publishedAt: new Date() }).where(eq(enrichmentProposals.id, proposalId));
 }
@@ -144,8 +180,8 @@ export async function publishApprovedProposals(params: {
   const PDP_MERGED_FIELDS = ["description", "benefit_bullets", "technical_specs", "faq", "cta", "featured_image"] as const;
   // Resolving a template hits the DB — cache per category since many products in a run usually
   // share one.
-  const templateCache = new Map<string, PdpBlock[]>();
-  async function templateFor(category: string | null): Promise<PdpBlock[]> {
+  const templateCache = new Map<string, ResolvedPdpTemplate>();
+  async function templateFor(category: string | null): Promise<ResolvedPdpTemplate> {
     const key = category ?? "";
     if (!templateCache.has(key)) templateCache.set(key, await resolvePdpTemplate(params.catalog.platform, category, level));
     return templateCache.get(key)!;
@@ -185,11 +221,11 @@ export async function publishApprovedProposals(params: {
     const mergedProposals = [descriptionProposal, bulletsProposal, specsProposal, faqProposal, ctaProposal, featuredImageProposal];
     if (mergedProposals.some(Boolean)) {
       try {
-        const blocks = await templateFor(product.category);
+        const template = await templateFor(product.category);
         const featuredImage = featuredImageProposal
           ? (JSON.parse(featuredImageProposal.proposedValue) as { url: string; caption: string })
           : undefined;
-        const finalDescription = renderPdpHtml(blocks, level, {
+        const finalDescription = renderPdp(template, level, {
           description: descriptionProposal?.proposedValue ?? product.description ?? undefined,
           bullets: bulletsProposal ? (JSON.parse(bulletsProposal.proposedValue) as string[]) : undefined,
           specs: specsProposal ? (JSON.parse(specsProposal.proposedValue) as Array<{ label: string; value: string }>) : undefined,

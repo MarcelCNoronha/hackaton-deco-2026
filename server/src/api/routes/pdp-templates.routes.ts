@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { getCatalogPlatform } from "../../repositories/catalog-settings.repo.js";
 import { getPdpTemplates, setPdpTemplate, PDP_BLOCKS, DEFAULT_PDP_CATEGORY, type PdpBlock } from "../../repositories/pdp-templates.repo.js";
-import { renderPdpHtml } from "../../agents/publisher.agent.js";
+import { renderPdp } from "../../agents/publisher.agent.js";
 import { requireSection } from "../../auth/guards.js";
 
 const levelEnum = z.enum(["plain", "structured", "structured_with_image"]);
@@ -12,6 +12,9 @@ const templateBody = z.object({
   level: levelEnum,
   blocks: z.array(blockEnum).refine((blocks) => new Set(blocks).size === blocks.length, "Blocos duplicados"),
   category: z.string().min(1).optional(),
+  // Non-empty switches this (platform, category, level) to "modo avançado" — see
+  // pdpTemplates.customHtml's doc comment. Empty/omitted keeps (or reverts to) simple mode.
+  customHtml: z.string().nullable().optional(),
 });
 
 /** Generic placeholder content — the preview isn't tied to a real product, so this stands in for
@@ -58,24 +61,29 @@ export async function pdpTemplatesRoutes(app: FastifyInstance) {
     return { platform, category, templates: await getPdpTemplates(platform, category) };
   });
 
-  /** Renders a live preview with placeholder content — using the EXACT same renderPdpHtml as the
-   *  real publish path, so what's shown here never drifts from what publishing would actually
-   *  produce. Takes blocks/level straight from the (possibly unsaved) editor state, not from the
-   *  DB, so the user sees the effect of an edit before clicking "Salvar". */
+  /** Renders a live preview with placeholder content — using the EXACT same renderPdp (blocks OR
+   *  customHtml, whichever the editor is currently in) as the real publish path, so what's shown
+   *  here never drifts from what publishing would actually produce. Takes blocks/level/customHtml
+   *  straight from the (possibly unsaved) editor state, not from the DB, so the user sees the
+   *  effect of an edit before clicking "Salvar". */
   app.post("/api/pdp-templates/preview", async (req, reply) => {
-    const body = z.object({ level: levelEnum, blocks: z.array(blockEnum) }).parse(req.body);
-    const html = renderPdpHtml(body.blocks as PdpBlock[], body.level, SAMPLE_DATA);
+    const body = z.object({ level: levelEnum, blocks: z.array(blockEnum), customHtml: z.string().nullable().optional() }).parse(req.body);
+    const html = renderPdp({ blocks: body.blocks as PdpBlock[], customHtml: body.customHtml?.trim() || null }, body.level, SAMPLE_DATA);
     return reply.send({ html });
   });
 
   app.put("/api/pdp-templates", async (req, reply) => {
     const body = templateBody.parse(req.body);
-    if (!body.blocks.includes("description")) {
+    const customHtml = body.customHtml?.trim() || null;
+    // Only enforced in simple mode — in "modo avançado" the merchant's own HTML decides the
+    // structure, {{description}} isn't required to appear in it (though publishing without ANY
+    // description content would be an odd choice, it's the merchant's call, not ours to block).
+    if (!customHtml && !body.blocks.includes("description")) {
       return reply.status(400).send({ error: "O bloco 'description' é obrigatório em qualquer estrutura de PDP." });
     }
     const platform = await getCatalogPlatform();
     const category = body.category ?? DEFAULT_PDP_CATEGORY;
-    await setPdpTemplate({ platform, category, level: body.level, blocks: body.blocks });
+    await setPdpTemplate({ platform, category, level: body.level, blocks: body.blocks, customHtml });
     return { platform, category, templates: await getPdpTemplates(platform, category) };
   });
 }
