@@ -31,6 +31,62 @@ function stripHtml(html: string): string {
     .trim();
 }
 
+/** Just the entity-decode half of stripHtml, exposed on its own — needed to un-escape a JSON-LD
+ *  `description` field BEFORE stripping its (now real) tags, see extractJsonLdProductText. Doing
+ *  it in the other order (stripHtml first) is a no-op: at that point the tags are still literal
+ *  "&lt;h2&gt;" text, not real `<h2>` elements the tag-stripping regex would ever match. */
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    // Numeric character references — common for accented Portuguese characters (ã, é, ç…) when a
+    // JSON-LD description got entity-encoded by whatever generated the page, confirmed live.
+    .replace(/&#(\d+);/g, (_, code: string) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+}
+
+/** Modern hydration-based storefronts (VTEX IO, Shopify, etc.) often render their real product
+ *  description client-side — the raw HTML we fetch (no headless browser, see fetchRawHtml) then
+ *  has almost nothing but nav/title text, confirmed live: a real reference product page's visible
+ *  text came to barely 100 words, well under what a shopper actually sees on the rendered page.
+ *  Most of these same stores DO still emit a `<script type="application/ld+json">` schema.org
+ *  Product block for search-engine rich results though — a web STANDARD, not platform-specific —
+ *  and its `description` field turned out to hold the exact same rich HTML a shopper sees, just
+ *  JSON-string-escaped then HTML-entity-escaped on top of that. stripHtml alone never sees this:
+ *  it discards every `<script>` wholesale (correctly, for arbitrary JS) — this parses the ld+json
+ *  ones specifically instead of throwing them away, and is merged back into the final text in
+ *  toFetchedPageText. Never throws: a page with malformed/absent ld+json just contributes nothing
+ *  extra, same "best-effort" discipline as the rest of this file. */
+function extractJsonLdProductText(html: string): string {
+  const parts: string[] = [];
+  for (const match of html.matchAll(/<script[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(match[1]);
+    } catch {
+      continue;
+    }
+    const roots = Array.isArray(parsed) ? parsed : [parsed];
+    for (const root of roots) {
+      const graph = (root as { "@graph"?: unknown[] } | null)?.["@graph"];
+      for (const node of graph ?? [root]) {
+        const product = node as { "@type"?: string | string[]; name?: string; brand?: { name?: string }; description?: string } | null;
+        const type = product?.["@type"];
+        const isProduct = type === "Product" || (Array.isArray(type) && type.includes("Product"));
+        if (!isProduct || !product) continue;
+        const description = typeof product.description === "string" ? stripHtml(decodeHtmlEntities(product.description)) : "";
+        const line = [product.name, product.brand?.name, description].filter(Boolean).join(". ");
+        if (line) parts.push(line);
+      }
+    }
+  }
+  return parts.join("\n\n");
+}
+
 async function fetchRawHtml(url: string): Promise<string> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -47,8 +103,13 @@ async function fetchRawHtml(url: string): Promise<string> {
   return res.text();
 }
 
-function toFetchedPageText(html: string): FetchedPageText {
-  const text = stripHtml(html.slice(0, MAX_FETCH_BYTES));
+/** Exported for unit testing (see web-fetch.client.test.ts) — pure/synchronous, no network call,
+ *  same reasoning as this codebase's other exported pure renderers (e.g. renderPdpHtml). */
+export function toFetchedPageText(html: string): FetchedPageText {
+  const truncated = html.slice(0, MAX_FETCH_BYTES);
+  // JSON-LD first — it's the richer, cleaner source when present (see extractJsonLdProductText);
+  // the visible-text fallback still runs unconditionally since JSON-LD is often absent or thin.
+  const text = [extractJsonLdProductText(truncated), stripHtml(truncated)].filter(Boolean).join("\n\n");
   const wordCount = text.split(/\s+/).filter(Boolean).length;
   return {
     text,
