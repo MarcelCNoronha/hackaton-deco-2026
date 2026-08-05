@@ -379,7 +379,9 @@ export async function publishApprovedProposals(params: {
           try {
             const detail = await params.catalog.getProduct(product.vtexProductId);
             const labeled = detail.images.find((img) => img.label === "2");
-            if (labeled) ambientPhoto = { url: labeled.url, caption: labeled.altText ?? product.title };
+            // Not img.altText — that's this store's SEO-slug alt text (all caps, dash-separated),
+            // fine for an <img alt> but not a caption a shopper should actually read.
+            if (labeled) ambientPhoto = { url: labeled.url, caption: product.title };
           } catch (err) {
             console.error(`Failed to resolve ambient_photo for product ${productId} — leaving that block empty`, err);
           }
