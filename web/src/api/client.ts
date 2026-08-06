@@ -866,6 +866,7 @@ export const api = {
       kind: "principal" | "lifestyle" | "dimensional" | "feature_callout";
       note?: string;
       runId?: number;
+      baseImageUrl?: string;
       referenceCrop?: ReferenceImageCrop;
     },
   ) =>

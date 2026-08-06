@@ -117,52 +117,51 @@ function cropPointFromPointer(event: PointerEvent<HTMLDivElement>) {
   };
 }
 
-function ReferenceCropSelector({
-  productId,
+/** Lets the operator pick which of a product's real photos an image generation should use as its
+ *  base reference, and — only when `allowCrop` (the "foto de destaque" kind) — drag out a crop
+ *  rectangle on that photo to pin the exact detail the generation must focus on. Fully controlled:
+ *  switching the base image is the caller's job to pair with clearing any crop, since a crop rect
+ *  only makes sense against the image it was drawn on. */
+function PhotoReferencePicker({
   images,
-  value,
-  onChange,
+  baseImageUrl,
+  onBaseImageChange,
+  crop,
+  onCropChange,
+  allowCrop,
 }: {
-  productId: number;
   images: ProductImage[];
-  value?: ReferenceImageCrop;
-  onChange: (crop: ReferenceImageCrop | undefined) => void;
+  baseImageUrl: string;
+  onBaseImageChange: (url: string) => void;
+  crop?: ReferenceImageCrop;
+  onCropChange?: (crop: ReferenceImageCrop | undefined) => void;
+  allowCrop: boolean;
 }) {
-  const imageUrls = images.map((img) => img.ImageUrl);
-  const imagesKey = imageUrls.join("\n");
-  const [activeImageUrl, setActiveImageUrl] = useState(value?.imageUrl ?? imageUrls[0] ?? "");
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
 
-  useEffect(() => {
-    setActiveImageUrl((current) => {
-      if (current && imageUrls.includes(current)) return current;
-      if (value?.imageUrl && imageUrls.includes(value.imageUrl)) return value.imageUrl;
-      return imageUrls[0] ?? "";
-    });
-  }, [productId, imagesKey, value?.imageUrl]);
+  if (images.length === 0 || !baseImageUrl) return null;
 
-  if (images.length === 0 || !activeImageUrl) return null;
-
-  const activeCrop = value?.imageUrl === activeImageUrl ? value : undefined;
+  const activeCrop = allowCrop && crop?.imageUrl === baseImageUrl ? crop : undefined;
 
   function startSelection(event: PointerEvent<HTMLDivElement>) {
+    if (!allowCrop || !onCropChange) return;
     event.preventDefault();
     const point = cropPointFromPointer(event);
     setDragStart(point);
     event.currentTarget.setPointerCapture(event.pointerId);
-    onChange(selectionFromPoints(activeImageUrl, point, point));
+    onCropChange(selectionFromPoints(baseImageUrl, point, point));
   }
 
   function updateSelection(event: PointerEvent<HTMLDivElement>) {
-    if (!dragStart) return;
+    if (!allowCrop || !onCropChange || !dragStart) return;
     event.preventDefault();
-    onChange(selectionFromPoints(activeImageUrl, dragStart, cropPointFromPointer(event)));
+    onCropChange(selectionFromPoints(baseImageUrl, dragStart, cropPointFromPointer(event)));
   }
 
   function finishSelection(event: PointerEvent<HTMLDivElement>) {
-    if (!dragStart) return;
+    if (!allowCrop || !onCropChange || !dragStart) return;
     event.preventDefault();
-    onChange(selectionFromPoints(activeImageUrl, dragStart, cropPointFromPointer(event)));
+    onCropChange(selectionFromPoints(baseImageUrl, dragStart, cropPointFromPointer(event)));
     setDragStart(null);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
@@ -170,10 +169,10 @@ function ReferenceCropSelector({
   }
 
   return (
-    <div style={{ display: "flex", gap: "0.8rem", flexWrap: "wrap", alignItems: "flex-start", marginBottom: "0.9rem" }}>
+    <div style={{ display: "flex", gap: "0.8rem", flexWrap: "wrap", alignItems: "flex-start" }}>
       <div style={{ width: "min(100%, 320px)" }}>
         <div className="muted" style={{ fontSize: "0.78rem", marginBottom: "0.35rem" }}>
-          Recorte para foto de destaque
+          {allowCrop ? "Recorte para foto de destaque" : "Foto base"}
         </div>
         <div
           onPointerDown={startSelection}
@@ -187,12 +186,12 @@ function ReferenceCropSelector({
             borderRadius: "var(--radius-md)",
             overflow: "hidden",
             background: "var(--page-plane)",
-            cursor: "crosshair",
+            cursor: allowCrop ? "crosshair" : "default",
             touchAction: "none",
           }}
-          title="Arraste para marcar o detalhe que deve orientar a foto de destaque."
+          title={allowCrop ? "Arraste para marcar o detalhe que deve orientar a foto de destaque." : undefined}
         >
-          <img src={activeImageUrl} alt="Referencia do produto" draggable={false} style={{ width: "100%", display: "block", userSelect: "none" }} />
+          <img src={baseImageUrl} alt="Referencia do produto" draggable={false} style={{ width: "100%", display: "block", userSelect: "none" }} />
           {activeCrop && (
             <div
               style={{
@@ -216,15 +215,7 @@ function ReferenceCropSelector({
             <span className="muted" style={{ display: "block", fontSize: "0.78rem", marginBottom: "0.25rem" }}>
               Foto de referencia
             </span>
-            <select
-              value={activeImageUrl}
-              onChange={(event) => {
-                const nextUrl = event.target.value;
-                setActiveImageUrl(nextUrl);
-                if (value?.imageUrl !== nextUrl) onChange(undefined);
-              }}
-              style={{ width: "100%" }}
-            >
+            <select value={baseImageUrl} onChange={(event) => onBaseImageChange(event.target.value)} style={{ width: "100%" }}>
               {images.map((img, index) => (
                 <option key={`${img.Id ?? img.ImageUrl}-${index}`} value={img.ImageUrl}>
                   {img.ImageText || `Foto ${index + 1}`}
@@ -233,13 +224,120 @@ function ReferenceCropSelector({
             </select>
           </label>
         )}
-        <div style={{ display: "flex", gap: "0.45rem", alignItems: "center", flexWrap: "wrap" }}>
-          <span className="pill">{activeCrop ? "Recorte selecionado" : "Sem recorte"}</span>
-          {activeCrop && (
-            <button type="button" className="link-button" onClick={() => onChange(undefined)}>
-              Limpar recorte
-            </button>
-          )}
+        {allowCrop && (
+          <div style={{ display: "flex", gap: "0.45rem", alignItems: "center", flexWrap: "wrap" }}>
+            <span className="pill">{activeCrop ? "Recorte selecionado" : "Sem recorte"}</span>
+            {activeCrop && (
+              <button type="button" className="link-button" onClick={() => onCropChange?.(undefined)}>
+                Limpar recorte
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const IMAGE_KIND_LABELS: Record<GeneratableImageKind, string> = {
+  principal: "Gerar foto principal",
+  lifestyle: "Gerar foto ambientada",
+  dimensional: "Gerar foto dimensional",
+  feature_callout: "Gerar foto de destaque",
+};
+
+type ImageModalTarget = {
+  productId: number;
+  kind: GeneratableImageKind;
+  /** Present when opened from "Refazer" on an existing generation — locks the kind and requires
+   *  an instruction, since a blind retry with no guidance would likely reproduce the same result. */
+  retryImage?: GeneratedImage;
+};
+
+function ImageGenerationModal({
+  target,
+  images,
+  submitting,
+  error,
+  onCancel,
+  onSubmit,
+}: {
+  target: ImageModalTarget;
+  images: ProductImage[];
+  submitting: boolean;
+  error: string | null;
+  onCancel: () => void;
+  onSubmit: (baseImageUrl: string, crop: ReferenceImageCrop | undefined, note: string) => void;
+}) {
+  const allowCrop = target.kind === "feature_callout";
+  const requireNote = Boolean(target.retryImage);
+  const [baseImageUrl, setBaseImageUrl] = useState(images[0]?.ImageUrl ?? "");
+  const [crop, setCrop] = useState<ReferenceImageCrop | undefined>(undefined);
+  const [note, setNote] = useState("");
+
+  useEffect(() => {
+    setBaseImageUrl(images[0]?.ImageUrl ?? "");
+    setCrop(undefined);
+    setNote("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target.productId, target.kind, target.retryImage?.id]);
+
+  const noteTrimmed = note.trim();
+  const canSubmit = Boolean(baseImageUrl) && (!requireNote || Boolean(noteTrimmed));
+
+  return (
+    <div className="modal-overlay" role="dialog" aria-modal="true" onClick={submitting ? undefined : onCancel}>
+      <div className="modal-box card" style={{ maxWidth: 640 }} onClick={(event) => event.stopPropagation()}>
+        <h2 style={{ marginTop: 0 }}>
+          {IMAGE_KIND_LABELS[target.kind]}
+          {target.retryImage ? " — Refazer" : ""}
+        </h2>
+        {images.length === 0 ? (
+          <p className="muted">Este produto não tem fotos cadastradas para usar como referência.</p>
+        ) : (
+          <>
+            <PhotoReferencePicker
+              images={images}
+              baseImageUrl={baseImageUrl}
+              onBaseImageChange={(url) => {
+                setBaseImageUrl(url);
+                setCrop(undefined);
+              }}
+              crop={crop}
+              onCropChange={setCrop}
+              allowCrop={allowCrop}
+            />
+            <label style={{ display: "block", margin: "0.9rem 0 0" }}>
+              <span className="muted" style={{ display: "block", fontSize: "0.78rem", marginBottom: "0.3rem" }}>
+                Instruções{requireNote ? "" : " (opcional)"}
+              </span>
+              <textarea
+                value={note}
+                onChange={(event) => setNote(event.target.value)}
+                maxLength={500}
+                rows={3}
+                placeholder="Ex.: manter exatamente 2 hastes; não inserir itens decorativos perto do produto"
+                style={IMAGE_NOTE_TEXTAREA_STYLE}
+              />
+            </label>
+          </>
+        )}
+        {error && (
+          <div className="banner" style={{ marginTop: "0.75rem" }}>
+            {error}
+          </div>
+        )}
+        <div className="actions" style={{ marginTop: "1rem", justifyContent: "flex-end" }}>
+          <button type="button" className="secondary" onClick={onCancel} disabled={submitting}>
+            Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={() => onSubmit(baseImageUrl, allowCrop ? crop : undefined, noteTrimmed)}
+            disabled={submitting || !canSubmit}
+          >
+            {submitting ? "Gerando…" : "Gerar imagem"}
+          </button>
         </div>
       </div>
     </div>
@@ -402,11 +500,10 @@ export function RunDetail() {
   const [thresholds, setThresholds] = useState<CategoryScoreThreshold[]>([]);
   const [impactSummary, setImpactSummary] = useState<ImpactSummary | null>(null);
   const [generatingFor, setGeneratingFor] = useState<Record<number, GeneratableImageKind | undefined>>({});
-  const [imageGenerationNotes, setImageGenerationNotes] = useState<Record<number, string>>({});
-  const [imageReferenceCrops, setImageReferenceCrops] = useState<Record<number, ReferenceImageCrop | undefined>>({});
-  const [imageRetryNotes, setImageRetryNotes] = useState<Record<number, string>>({});
-  const [retryingImageId, setRetryingImageId] = useState<number | null>(null);
   const [imageGenError, setImageGenError] = useState<string | null>(null);
+  const [imageModal, setImageModal] = useState<ImageModalTarget | null>(null);
+  const [imageModalSubmitting, setImageModalSubmitting] = useState(false);
+  const [imageModalError, setImageModalError] = useState<string | null>(null);
   const [classifyingId, setClassifyingId] = useState<string | null>(null);
   const runImageNoteDirtyRef = useRef(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -512,50 +609,44 @@ export function RunDetail() {
     setRunImageNote(value);
   }
 
+  /** Generates one image and returns an error message on failure (null on success) — the modal
+   *  shows that message inline instead of the page-level banner, since it's already the surface
+   *  the operator is looking at when the request fails. */
   async function handleGenerateImage(
     productId: number,
     kind: GeneratableImageKind,
-    noteOverride?: string,
-    referenceCropOverride?: ReferenceImageCrop,
-  ): Promise<boolean> {
-    setImageGenError(null);
+    options: { note?: string; baseImageUrl?: string; referenceCrop?: ReferenceImageCrop },
+  ): Promise<string | null> {
     setGeneratingFor((prev) => ({ ...prev, [productId]: kind }));
     try {
-      const note = (noteOverride ?? imageGenerationNotes[productId] ?? "").trim();
-      const referenceCrop = kind === "feature_callout" ? referenceCropOverride ?? imageReferenceCrops[productId] : undefined;
-      const image = await api.generateImage(productId, { kind, runId, note: note || undefined, referenceCrop });
+      const note = (options.note ?? "").trim();
+      const image = await api.generateImage(productId, {
+        kind,
+        runId,
+        note: note || undefined,
+        baseImageUrl: options.baseImageUrl || undefined,
+        referenceCrop: kind === "feature_callout" ? options.referenceCrop : undefined,
+      });
       setGeneratedImages((prev) => ({ ...prev, [productId]: [image, ...(prev[productId] ?? [])] }));
       // The run may already be done (poll loop stopped) — costs otherwise wouldn't reflect this
       // generation's price until something else happens to trigger a refresh.
       api.runCosts(runId).then(setCosts);
-      return true;
+      return null;
     } catch (err) {
-      setImageGenError(err instanceof Error ? err.message : String(err));
-      return false;
+      return err instanceof Error ? err.message : String(err);
     } finally {
       setGeneratingFor((prev) => ({ ...prev, [productId]: undefined }));
     }
   }
 
-  async function handleRegenerateImage(productId: number, image: GeneratedImage) {
-    if (!isGeneratableImageKind(image.kind)) return;
-    const note = (imageRetryNotes[image.id] ?? "").trim();
-    if (!note) {
-      setImageGenError("Informe uma instrucao para orientar a nova geracao.");
-      return;
-    }
-    setRetryingImageId(image.id);
-    try {
-      const ok = await handleGenerateImage(
-        productId,
-        image.kind,
-        note,
-        image.kind === "feature_callout" ? imageReferenceCrops[productId] : undefined,
-      );
-      if (ok) setImageRetryNotes((prev) => ({ ...prev, [image.id]: "" }));
-    } finally {
-      setRetryingImageId(null);
-    }
+  async function handleImageModalSubmit(baseImageUrl: string, crop: ReferenceImageCrop | undefined, note: string) {
+    if (!imageModal) return;
+    setImageModalSubmitting(true);
+    setImageModalError(null);
+    const err = await handleGenerateImage(imageModal.productId, imageModal.kind, { note, baseImageUrl, referenceCrop: crop });
+    setImageModalSubmitting(false);
+    if (err) setImageModalError(err);
+    else setImageModal(null);
   }
 
   const [publishingImageId, setPublishingImageId] = useState<number | null>(null);
@@ -919,7 +1010,7 @@ export function RunDetail() {
                     <button
                       type="button"
                       className="secondary"
-                      onClick={() => handleGenerateImage(productId, "principal")}
+                      onClick={() => setImageModal({ productId, kind: "principal" })}
                       disabled={generatingFor[productId] !== undefined}
                     >
                       {generatingFor[productId] === "principal" ? "Gerando…" : "🏷️ Gerar foto principal"}
@@ -927,7 +1018,7 @@ export function RunDetail() {
                     <button
                       type="button"
                       className="secondary"
-                      onClick={() => handleGenerateImage(productId, "lifestyle")}
+                      onClick={() => setImageModal({ productId, kind: "lifestyle" })}
                       disabled={generatingFor[productId] !== undefined}
                     >
                       {generatingFor[productId] === "lifestyle" ? "Gerando…" : "🖼️ Gerar foto ambientada"}
@@ -935,7 +1026,7 @@ export function RunDetail() {
                     <button
                       type="button"
                       className="secondary"
-                      onClick={() => handleGenerateImage(productId, "dimensional")}
+                      onClick={() => setImageModal({ productId, kind: "dimensional" })}
                       disabled={generatingFor[productId] !== undefined}
                     >
                       {generatingFor[productId] === "dimensional" ? "Gerando…" : "📏 Gerar foto dimensional"}
@@ -943,9 +1034,8 @@ export function RunDetail() {
                     <button
                       type="button"
                       className="secondary"
-                      onClick={() => handleGenerateImage(productId, "feature_callout", undefined, imageReferenceCrops[productId])}
+                      onClick={() => setImageModal({ productId, kind: "feature_callout" })}
                       disabled={generatingFor[productId] !== undefined}
-                      title={imageReferenceCrops[productId] ? "Usa o recorte selecionado como referencia visual extra." : undefined}
                     >
                       {generatingFor[productId] === "feature_callout" ? "Gerando…" : "🎯 Gerar foto de destaque"}
                     </button>
@@ -962,25 +1052,6 @@ export function RunDetail() {
                     )}
                   </div>
                 </div>
-                <label style={{ display: "block", margin: "0 0 0.75rem" }}>
-                  <span className="muted" style={{ display: "block", fontSize: "0.78rem", marginBottom: "0.3rem" }}>
-                    Instrucao adicional para a proxima imagem deste produto
-                  </span>
-                  <textarea
-                    value={imageGenerationNotes[productId] ?? ""}
-                    onChange={(e) => setImageGenerationNotes((prev) => ({ ...prev, [productId]: e.target.value }))}
-                    maxLength={500}
-                    rows={2}
-                    placeholder="Ex.: manter exatamente 2 hastes; nao inserir itens decorativos perto do produto"
-                    style={IMAGE_NOTE_TEXTAREA_STYLE}
-                  />
-                </label>
-                <ReferenceCropSelector
-                  productId={productId}
-                  images={referenceImages}
-                  value={imageReferenceCrops[productId]}
-                  onChange={(crop) => setImageReferenceCrops((prev) => ({ ...prev, [productId]: crop }))}
-                />
                 {(() => {
                   // One combined, ordered view of every photo for this product regardless of
                   // source (generated-here vs already-on-the-platform) — sorted by classification
@@ -1090,27 +1161,18 @@ export function RunDetail() {
                           )}
                           {isGeneratableImageKind(image.kind) && (
                             <div style={{ marginTop: "0.45rem", paddingTop: "0.45rem", borderTop: "1px solid var(--border)" }}>
-                              <textarea
-                                value={imageRetryNotes[image.id] ?? ""}
-                                onChange={(e) => setImageRetryNotes((prev) => ({ ...prev, [image.id]: e.target.value }))}
-                                maxLength={500}
-                                rows={2}
-                                placeholder="Instrucao para refazer esta imagem"
-                                style={{ ...IMAGE_NOTE_TEXTAREA_STYLE, fontSize: "0.72rem", padding: "0.4rem 0.5rem" }}
-                              />
                               <button
                                 type="button"
                                 className="link-button"
-                                style={{ fontSize: "0.72rem", marginTop: "0.25rem" }}
-                                onClick={() => handleRegenerateImage(productId, image)}
-                                disabled={
-                                  retryingImageId === image.id ||
-                                  generatingFor[productId] !== undefined ||
-                                  !(imageRetryNotes[image.id] ?? "").trim()
-                                }
+                                style={{ fontSize: "0.72rem" }}
+                                onClick={() => {
+                                  const kind = image.kind;
+                                  if (isGeneratableImageKind(kind)) setImageModal({ productId, kind, retryImage: image });
+                                }}
+                                disabled={generatingFor[productId] !== undefined}
                                 title="Gera uma nova imagem mantendo esta aqui para comparacao."
                               >
-                                {retryingImageId === image.id ? "Gerando..." : "Refazer"}
+                                Refazer
                               </button>
                             </div>
                           )}
@@ -1247,6 +1309,20 @@ export function RunDetail() {
 
         {productIds.length === 0 && <div className="empty-state">Nenhuma proposta gerada ainda para esta otimização.</div>}
       </div>
+      {imageModal && (
+        <ImageGenerationModal
+          target={imageModal}
+          images={orderedReferenceImages(products.find((p) => p.id === imageModal.productId))}
+          submitting={imageModalSubmitting}
+          error={imageModalError}
+          onCancel={() => {
+            if (imageModalSubmitting) return;
+            setImageModal(null);
+            setImageModalError(null);
+          }}
+          onSubmit={handleImageModalSubmit}
+        />
+      )}
     </>
   );
 }

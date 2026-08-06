@@ -507,7 +507,10 @@ export class GeminiClient implements LlmClient {
 
         const interaction = (await this.client.interactions.create({
           model: this.model,
-          input: [...imageBlocks, ...inlineImageBlocks, { type: "text", text: params.prompt }],
+          // inlineImageBlocks (the operator-chosen reference crop, when present) go FIRST — the
+          // prompt tells the model the crop is the priority reference by position, and a live test
+          // showed the model favoring whichever image came first over prose framing alone.
+          input: [...inlineImageBlocks, ...imageBlocks, { type: "text", text: params.prompt }],
           // Verified live: an explicit `delivery` value (either "inline" or "uri") is rejected on
           // this model ("Image delivery mode is not supported") — must be omitted entirely, which
           // then returns inline base64 data by default. `thinking_level` (any value) is also

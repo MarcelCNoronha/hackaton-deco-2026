@@ -41,6 +41,10 @@ const referenceCropSchema = z
 const generateImageBody = z.object({
   kind: z.enum(["principal", "lifestyle", "dimensional", "feature_callout"]),
   note: z.string().max(500).optional(),
+  // Which of the product's own photos to use as the base reference — chosen by the operator in
+  // the generation modal. Validated against the product's real images in the agent (not here,
+  // which has no product loaded yet).
+  baseImageUrl: z.string().url().optional(),
   referenceCrop: referenceCropSchema.optional(),
   // Which run's "Custo da otimização" this generation's cost should count toward — optional since
   // this endpoint doesn't strictly require a run context, but RunDetail (the only caller today)
@@ -222,7 +226,14 @@ export async function productsRoutes(app: FastifyInstance) {
       const note = [imageGenerationNoteFromScope(run?.scope), body.note?.trim()]
         .filter((value): value is string => Boolean(value))
         .join(" ");
-      const row = await generateProductImage({ gemini, product, kind: body.kind, note: note || undefined, referenceCrop: body.referenceCrop });
+      const row = await generateProductImage({
+        gemini,
+        product,
+        kind: body.kind,
+        note: note || undefined,
+        baseImageUrl: body.baseImageUrl,
+        referenceCrop: body.referenceCrop,
+      });
       return reply.status(201).send(row);
     } catch (err) {
       return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });

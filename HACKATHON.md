@@ -972,6 +972,34 @@ Implementado:
 - O prompt final de imagem combina, nesta ordem: regras da categoria, orientacao da run e instrucao
   pontual da geracao/refacao.
 
+### Geração de imagem consolidada em modal, e recorte de fato priorizado (2026-08-06)
+
+Achado ao vivo: mesmo com o recorte de referência já implementado (ver "Reiteracao manual..."
+acima) e reforçado num commit anterior no mesmo dia ("Tighten crop-guided feature image focus"), o
+usuário testou de novo e mostrou o caso — recorte desenhado sobre a área do plugue/cabo do produto,
+mas a imagem gerada focou em outro detalhe (o suporte superior). O prompt já dizia que o recorte era
+"a referência prioritária", mas as duas imagens eram enviadas ao Gemini na ordem [foto completa,
+recorte, texto] — a instrução em prosa dizia "priorize a segunda imagem", uma instrução contra a
+própria ordem de apresentação. Corrigido invertendo a ordem real de envio em
+`gemini.client.ts#generateProductImage` (recorte primeiro, foto completa depois) e reescrevendo
+`REFERENCE_CROP_INSTRUCTION`/`REFERENCE_CROP_REQUIRED_NOTE` em `image-generation.agent.ts` para
+descrever "primeira imagem = recorte, foco obrigatório" / "segunda imagem = produto completo, só
+para cor/material/forma" — texto e ordem agora concordam.
+
+Ao mesmo tempo, pedido do usuário pra consolidar a UX: cada um dos 4 geradores de foto (`Gerar foto
+principal/ambientada/dimensional/de destaque`) e o botão `Refazer` de uma imagem já gerada agora
+abrem um modal (`ImageGenerationModal` em `RunDetail.tsx`) em vez de usar campos soltos no painel
+Fotos. O modal deixa escolher a **foto base** entre as fotos reais do produto (antes, para
+principal/ambientada/dimensional, a foto de referência era sempre escolhida automaticamente pelo
+padrão de nome `principal|main|hero`, sem opção manual) e escrever a **instrução** daquela geração
+específica — o recorte por arraste só aparece no modal da foto de destaque, como já era. Isso
+eliminou dois campos que ficavam sempre visíveis no painel mesmo sem uso ativo: a caixa "Instrução
+adicional para a próxima imagem deste produto" e a caixa de recorte permanente — cada instrução
+agora vive só no momento da geração a que se refere. Backend: `POST
+/api/products/:id/generated-images` ganhou `baseImageUrl` opcional (validado contra as imagens
+cadastradas do produto, como já era feito pro `referenceCrop`), aceito pelos 4 tipos de geração, não
+só o de destaque.
+
 ## Formação de equipes
 
 - 1 a 5 pessoas por equipe (pode ser solo)

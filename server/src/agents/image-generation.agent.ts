@@ -110,11 +110,12 @@ const MAX_INTEGRITY_ATTEMPTS = 2;
 const REFERENCE_CROP_FETCH_TIMEOUT_MS = 15_000;
 const REFERENCE_CROP_MAX_BYTES = 12 * 1024 * 1024;
 const REFERENCE_CROP_INSTRUCTION =
-  " A segunda imagem de referencia enviada ao modelo e um RECORTE escolhido pelo operador. Ela e a referencia visual PRIORITARIA para a foto de destaque. " +
-  "Nao gere uma foto aberta do produto inteiro quando houver recorte: a imagem final deve ser um close-up centrado no detalhe selecionado, com esse detalhe " +
-  "ocupando a maior parte do quadro (aproximadamente 70% a 90%). Use a foto completa apenas para preservar a identidade exata do produto.";
+  " A PRIMEIRA imagem de referencia enviada ao modelo e um RECORTE escolhido pelo operador: e o enfoque OBRIGATORIO e UNICO da cena. Gere um close-up " +
+  "centrado exatamente nesse detalhe, com ele ocupando a maior parte do quadro (aproximadamente 70% a 90%). A SEGUNDA imagem mostra o produto completo e " +
+  "serve APENAS para confirmar cor/material/forma exatos — nao gere uma foto aberta do produto inteiro nem baseie o enquadramento nela.";
 const REFERENCE_CROP_REQUIRED_NOTE =
-  "A foto de destaque deve focar no recorte selecionado pelo operador: gere um close-up do detalhe escolhido, nao uma foto aberta do produto inteiro.";
+  "A foto de destaque deve focar exatamente no recorte selecionado pelo operador (primeira imagem de referencia): gere um close-up desse detalhe " +
+  "especificamente, nunca uma foto aberta do produto inteiro.";
 
 function productImageUrls(product: ProductRow): Set<string> {
   const images = (product.images as ProductImage[]) ?? [];
@@ -142,16 +143,27 @@ export async function generateProductImage(params: {
   product: ProductRow;
   kind: GeneratableImageKind;
   note?: string;
+  /** Which of the product's own photos to use as the base reference — operator-chosen from the
+   *  generation modal. Falls back to the automatic principal-pattern pick when omitted. */
+  baseImageUrl?: string;
   referenceCrop?: ReferenceImageCrop;
 }): Promise<typeof generatedImages.$inferSelect> {
-  const { gemini, product, kind, note } = params;
+  const { gemini, product, kind, note, baseImageUrl } = params;
   const referenceCrop = kind === "feature_callout" ? params.referenceCrop : undefined;
   const images = (product.images as ProductImage[]) ?? [];
   if (images.length === 0) {
     throw new Error("Este produto não tem nenhuma imagem cadastrada para usar como referência.");
   }
 
-  const referenceImageUrls = selectReferenceImageUrls(images);
+  let referenceImageUrls: string[];
+  if (baseImageUrl) {
+    if (!productImageUrls(product).has(baseImageUrl)) {
+      throw new Error("A imagem base precisa ser uma imagem cadastrada neste produto.");
+    }
+    referenceImageUrls = [baseImageUrl];
+  } else {
+    referenceImageUrls = selectReferenceImageUrls(images);
+  }
   if (referenceImageUrls.length === 0) {
     throw new Error("Este produto nÃ£o tem nenhuma imagem cadastrada para usar como referÃªncia.");
   }
