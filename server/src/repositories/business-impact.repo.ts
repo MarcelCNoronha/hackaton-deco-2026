@@ -422,9 +422,9 @@ export async function getBusinessImpactSummary(params: {
   );
 
   const [gscRows, ga4PageRows, ga4ItemRows, productCosts] = await Promise.all([
-    params.gsc?.queryByPageAndDate({ startDate, endDate }) ?? Promise.resolve([]),
-    params.ga4?.runProductPageDailyReport({ startDate, endDate }) ?? Promise.resolve([]),
-    params.ga4?.runItemDailyReport({ startDate, endDate }).catch(() => []) ?? Promise.resolve([]),
+    params.gsc ? params.gsc.queryByPageAndDate({ startDate, endDate }).catch(() => []) : Promise.resolve([]),
+    params.ga4 ? params.ga4.runProductPageDailyReport({ startDate, endDate }).catch(() => []) : Promise.resolve([]),
+    params.ga4 ? params.ga4.runItemDailyReport({ startDate, endDate }).catch(() => []) : Promise.resolve([]),
     costByProduct(analyzableProducts.map((row) => row.product.id)),
   ]);
 

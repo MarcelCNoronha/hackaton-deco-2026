@@ -103,10 +103,10 @@ export async function getProductRealImpact(params: {
   const path = pathnameOf(product.url);
 
   const [gscBefore, gscAfter, ga4Before, ga4After] = await Promise.all([
-    isMature ? (gsc?.queryByPage({ startDate: fmt(beforeStart), endDate: fmt(beforeEnd) }) ?? Promise.resolve([])) : Promise.resolve([]),
-    isMature ? (gsc?.queryByPage({ startDate: fmt(afterStart), endDate: fmt(afterEnd) }) ?? Promise.resolve([])) : Promise.resolve([]),
-    ga4?.runProductPageReport({ startDate: fmt(beforeStart), endDate: fmt(beforeEnd) }) ?? Promise.resolve([]),
-    ga4?.runProductPageReport({ startDate: fmt(afterStart), endDate: fmt(afterEnd) }) ?? Promise.resolve([]),
+    isMature && gsc ? gsc.queryByPage({ startDate: fmt(beforeStart), endDate: fmt(beforeEnd) }).catch(() => []) : Promise.resolve([]),
+    isMature && gsc ? gsc.queryByPage({ startDate: fmt(afterStart), endDate: fmt(afterEnd) }).catch(() => []) : Promise.resolve([]),
+    ga4 ? ga4.runProductPageReport({ startDate: fmt(beforeStart), endDate: fmt(beforeEnd) }).catch(() => []) : Promise.resolve([]),
+    ga4 ? ga4.runProductPageReport({ startDate: fmt(afterStart), endDate: fmt(afterEnd) }).catch(() => []) : Promise.resolve([]),
   ]);
 
   const findGsc = (rows: GscSearchAnalyticsRow[]) => rows.find((r) => pathnameOf(r.keys[0]) === path) ?? null;
