@@ -361,40 +361,41 @@ function ImageGenerationModal({
                 style={IMAGE_NOTE_TEXTAREA_STYLE}
               />
             </label>
-            <div style={{ marginTop: "0.9rem", paddingTop: "0.75rem", borderTop: "1px solid var(--border)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "0.6rem" }}>
-                <div>
-                  <span className="muted" style={{ display: "block", fontSize: "0.78rem" }}>
-                    Orientação para imagens desta otimização
+            <details style={{ marginTop: "0.9rem", paddingTop: "0.75rem", borderTop: "1px solid var(--border)" }} open={Boolean(savedRunNote.trim())}>
+              <summary className="muted" style={{ fontSize: "0.78rem", cursor: "pointer" }}>
+                Orientação para imagens desta otimização{savedRunNote.trim() ? "" : " (opcional)"}
+              </summary>
+              <div style={{ marginTop: "0.5rem" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "0.6rem" }}>
+                  <span className="muted" style={{ display: "block", fontSize: "0.72rem" }}>
+                    Vale para novas imagens e refações desta otimização inteira, além da instrução acima —
+                    somada à regra da categoria.
                   </span>
-                  <span className="muted" style={{ display: "block", fontSize: "0.72rem", marginTop: "0.15rem" }}>
-                    Vale para novas imagens e refações desta otimização, somada à regra da categoria.
-                  </span>
+                  <button
+                    type="button"
+                    className="link-button"
+                    style={{ fontSize: "0.75rem", whiteSpace: "nowrap" }}
+                    onClick={onSaveRunNote}
+                    disabled={runNoteSaving || runNote.trim() === savedRunNote}
+                  >
+                    {runNoteSaving ? "Salvando…" : "Salvar orientação"}
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  className="link-button"
-                  style={{ fontSize: "0.75rem", whiteSpace: "nowrap" }}
-                  onClick={onSaveRunNote}
-                  disabled={runNoteSaving || runNote.trim() === savedRunNote}
-                >
-                  {runNoteSaving ? "Salvando…" : "Salvar orientação"}
-                </button>
+                <textarea
+                  value={runNote}
+                  onChange={(event) => onRunNoteChange(event.target.value)}
+                  maxLength={500}
+                  rows={2}
+                  placeholder="Ex.: manter exatamente 2 hastes; não adicionar suporte extra; usar ambiente claro"
+                  style={{ ...IMAGE_NOTE_TEXTAREA_STYLE, marginTop: "0.4rem" }}
+                />
+                {runNoteError && (
+                  <div className="banner" style={{ marginTop: "0.5rem" }}>
+                    {runNoteError}
+                  </div>
+                )}
               </div>
-              <textarea
-                value={runNote}
-                onChange={(event) => onRunNoteChange(event.target.value)}
-                maxLength={500}
-                rows={2}
-                placeholder="Ex.: manter exatamente 2 hastes; não adicionar suporte extra; usar ambiente claro"
-                style={{ ...IMAGE_NOTE_TEXTAREA_STYLE, marginTop: "0.4rem" }}
-              />
-              {runNoteError && (
-                <div className="banner" style={{ marginTop: "0.5rem" }}>
-                  {runNoteError}
-                </div>
-              )}
-            </div>
+            </details>
           </>
         )}
         {error && (
