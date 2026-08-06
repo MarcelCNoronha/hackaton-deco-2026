@@ -493,17 +493,6 @@ export interface ProviderSpend {
   spentUsd: number;
 }
 
-export interface FreeQuotaStatus {
-  provider: LlmProvider;
-  enabled: boolean;
-  quotaUsd: number;
-  resetIntervalHours: number;
-  periodStartAt: string;
-  resetAt: string;
-  periodSpentUsd: number;
-  exhausted: boolean;
-}
-
 export type AppSection = "connections" | "publish" | "users";
 
 export interface AuthUser {
@@ -727,10 +716,6 @@ export const api = {
   getSpendLimits: () => request<ProviderSpend[]>("/spend-limits"),
   setSpendLimit: (provider: LlmProvider, limitUsd: number | null) =>
     request<{ ok: boolean }>("/spend-limits", { method: "PUT", body: JSON.stringify({ provider, limitUsd }) }),
-
-  getFreeQuotas: () => request<FreeQuotaStatus[]>("/free-quotas"),
-  setFreeQuota: (provider: LlmProvider, config: { enabled: boolean; quotaUsd: number; resetIntervalHours: number }) =>
-    request<{ ok: boolean }>("/free-quotas", { method: "PUT", body: JSON.stringify({ provider, ...config }) }),
 
   login: (email: string, password: string) =>
     request<LoginResult>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),

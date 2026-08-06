@@ -426,9 +426,9 @@ export const catalogSettings = pgTable("catalog_settings", {
 
 /** Per-provider monthly spending cap (USD) — a row only exists once a limit has been set for that
  *  provider via the Connections panel; no row means no limit configured. Resets on the 1st of each
- *  calendar month (periodStartAt tracks the current month's start, lazily advanced on read — same
- *  no-cron-needed pattern as providerFreeQuotas). Enforced as a circuit breaker: once a provider's
- *  spend for the current month reaches its limit, new runs that would use it are blocked. */
+ *  calendar month (periodStartAt tracks the current month's start, lazily advanced on read). Enforced
+ *  as a circuit breaker: once a provider's spend for the current month reaches its limit, new runs
+ *  that would use it are blocked. */
 export const providerSpendLimits = pgTable("provider_spend_limits", {
   provider: llmProviderEnum("provider").primaryKey(),
   limitUsd: numeric("limit_usd").notNull(),
@@ -436,10 +436,9 @@ export const providerSpendLimits = pgTable("provider_spend_limits", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-/** Free-tier quota per provider (e.g. "only use Gemini's free daily allowance") — distinct from
- *  providerSpendLimits (an all-time hard cap): this tracks spend within a *rolling period* that
- *  auto-resets every `reset_interval_hours`, mirroring how providers' own free tiers reset. Reads
- *  lazily advance `period_start_at` forward by whole intervals instead of needing a cron job. */
+/** Legacy free-tier quota config. The UI and run gate were removed in 2026-08-06 because provider
+ *  free allowances are not reliably expressed in USD. Kept in schema so old databases still match
+ *  the historical migrations; runtime cost control now uses providerSpendLimits only. */
 export const providerFreeQuotas = pgTable("provider_free_quotas", {
   provider: llmProviderEnum("provider").primaryKey(),
   enabled: boolean("enabled").notNull().default(false),

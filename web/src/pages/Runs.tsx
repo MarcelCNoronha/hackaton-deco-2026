@@ -9,7 +9,6 @@ import {
   type CommunicationTone,
   type DescriptionRichness,
   type EnrichmentField,
-  type FreeQuotaStatus,
   type ImageGenKind,
 } from "../api/client";
 import { StatTile } from "../components/StatTile";
@@ -38,20 +37,6 @@ function statusGroupOf(item: CatalogProductSummary): StatusGroup {
   return item.optimizationStatus === "published" ? "published" : "pending";
 }
 
-const PROVIDER_NAMES: Record<string, string> = {
-  anthropic: "Claude",
-  openai: "GPT",
-  gemini: "Gemini",
-};
-
-function formatResetIn(resetAt: string): string {
-  const ms = Math.max(0, new Date(resetAt).getTime() - Date.now());
-  const hours = Math.floor(ms / 3_600_000);
-  const minutes = Math.floor((ms % 3_600_000) / 60_000);
-  const resetTime = new Date(resetAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-  return `${hours}h${minutes.toString().padStart(2, "0")}min (às ${resetTime})`;
-}
-
 export function Runs() {
   const navigate = useNavigate();
   // Same 3 groups as STATUS_GROUP_LABELS/the filter pills, from the one endpoint that shares their
@@ -78,7 +63,6 @@ export function Runs() {
   const [topN, setTopN] = useState("");
   const [creating, setCreating] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
-  const [exhaustedQuotas, setExhaustedQuotas] = useState<FreeQuotaStatus[]>([]);
   const [optimizingIds, setOptimizingIds] = useState<Set<string>>(new Set());
   // React state updates aren't applied synchronously, so a fast double-click can fire the
   // handler twice before the `disabled` attribute actually reaches the DOM — this ref is mutated
@@ -119,11 +103,6 @@ export function Runs() {
     } finally {
       setSavingReferenceId(null);
     }
-  }
-
-  async function refreshQuotaAlerts() {
-    const quotas = await api.getFreeQuotas();
-    setExhaustedQuotas(quotas.filter((q) => q.enabled && q.exhausted));
   }
 
   async function refreshStatusCounts() {
@@ -172,7 +151,6 @@ export function Runs() {
   useEffect(() => {
     function refreshStats() {
       refreshStatusCounts().catch((err) => console.error("Failed to refresh stats", err));
-      refreshQuotaAlerts().catch((err) => console.error("Failed to refresh stats", err));
     }
     refreshStats();
     loadFilters();
@@ -329,18 +307,6 @@ export function Runs() {
 
   return (
     <>
-      {exhaustedQuotas.length > 0 && (
-        <div className="floating-alerts">
-          {exhaustedQuotas.map((q) => (
-            <div key={q.provider} className="floating-alert">
-              <strong>Franquia {PROVIDER_NAMES[q.provider] ?? q.provider} esgotada</strong>
-              <div className="muted" style={{ marginTop: "0.25rem" }}>
-                Reseta em {formatResetIn(q.resetAt)}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
       <div className="page-header">
         <div>
           <h1>Produtos</h1>

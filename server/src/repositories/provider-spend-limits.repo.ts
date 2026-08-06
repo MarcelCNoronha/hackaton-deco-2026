@@ -19,9 +19,8 @@ function firstOfMonthUtc(date: Date): Date {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
 }
 
-/** Lazily advances a stale period to the start of the current calendar month (no cron needed) —
- *  same no-background-job rollover pattern as providerFreeQuotas, but aligned to calendar months
- *  instead of a fixed hour interval, since a "spend limit" is conventionally a monthly budget. */
+/** Lazily advances a stale period to the start of the current calendar month, so monthly spend
+ *  limits reset without a background job. */
 async function currentPeriodStart(provider: LlmProvider, periodStartAt: Date): Promise<Date> {
   const currentMonthStart = firstOfMonthUtc(new Date());
   if (periodStartAt.getTime() >= currentMonthStart.getTime()) return periodStartAt;

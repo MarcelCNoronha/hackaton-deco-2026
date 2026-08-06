@@ -226,7 +226,7 @@ specs, FAQ, dados estruturados) + alt-text de imagem, sem opção de escolher. A
 "Otimizar"/"Refazer" de uma linha quanto o botão em massa abrem um modal
 (`OptimizationFieldSelector.tsx`) antes de criar o run:
 
-- Lista os 6 campos com checkbox + custo estimado em USD/BRL, calculado com o preço real do
+- Lista os 6 campos com checkbox + custo estimado em USD, calculado com o preço real do
   modelo atualmente roteado (`GET /api/runs/field-estimates?productCount=N`,
   `field-cost-estimates.ts`) — não é um valor fixo, reflete o roteamento atual de modelos.
 - "descrição" continua sendo sempre gerada internamente pela chamada ao LLM mesmo se
@@ -288,18 +288,13 @@ specs, FAQ, dados estruturados) + alt-text de imagem, sem opção de escolher. A
   guia visual pro Gemini saber exatamente em qual ponto do produto focar, em vez de depender só de
   descrição em texto.
 
-- **Ajustes na tela de Integrações (`web/src/pages/Connections.tsx`)** — pedido em 2026-08-05, não
-  implementado:
-  - **Melhorar "Roteamento de modelos"** — sem escopo definido ainda, só anotado que precisa
-    revisão.
-  - **"Limites de gasto mensal por provedor"** — trazer/exibir o saldo restante de cada provedor
-    de LLM (Anthropic/OpenAI/Gemini), não só o limite configurado por nós.
-  - **Remover "Franquia gratuita por provedor"** — decisão do usuário: não faz sentido manter essa
-    seção.
-  - **Remover "Moeda de exibição"** — decisão do usuário: o valor convertido fica impreciso por
-    depender de cotação (câmbio), não vale a pena manter.
-  - **Reordenar os conectores**: mover o conector do Google (Search Console + GA4) pra baixo do
-    conector da plataforma de catálogo (VTEX/Shopify) na mesma tela.
+- ~~**Ajustes na tela de Integrações (`web/src/pages/Connections.tsx`)**~~ — **implementado em
+  2026-08-06**. A tela agora segue o fluxo real do backoffice: plataforma de catálogo primeiro,
+  Google Search Console/GA4 logo abaixo (métricas depois do catálogo), provedores de IA depois,
+  roteamento em linhas operacionais sem card dentro de card, alerta quando evaluator usa o mesmo
+  modelo do gerador, e limites mensais com gasto/restante por provedor. Removidos da experiência:
+  "Franquia gratuita por provedor" (incluindo o bloqueio oculto de criação de run) e "Moeda de
+  exibição"; custo de IA volta a ser sempre USD, a moeda real de cobrança dos provedores.
 
 - ~~**Descrição em HTML rico de verdade (padrão gsuplementos)**~~ — **implementado em
   2026-08-03/04** como os níveis Bom/Excelente (`DescriptionRichness`), ver seção "Score

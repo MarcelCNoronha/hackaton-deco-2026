@@ -15,7 +15,6 @@ import { pdpTemplatesRoutes } from "./routes/pdp-templates.routes.js";
 import { categoryProfilesRoutes } from "./routes/category-profiles.routes.js";
 import { catalogRoutes } from "./routes/catalog.routes.js";
 import { spendLimitsRoutes } from "./routes/spend-limits.routes.js";
-import { freeQuotaRoutes } from "./routes/free-quota.routes.js";
 import { authRoutes } from "./routes/auth.routes.js";
 import { accountRoutes } from "./routes/account.routes.js";
 import { usersRoutes } from "./routes/users.routes.js";
@@ -60,7 +59,6 @@ await app.register(pdpTemplatesRoutes);
 await app.register(categoryProfilesRoutes);
 await app.register(catalogRoutes);
 await app.register(spendLimitsRoutes);
-await app.register(freeQuotaRoutes);
 
 app
   .listen({ port: env.PORT, host: "0.0.0.0" })

@@ -7,20 +7,12 @@ import { createEnrichmentRun } from "../../orchestrator/enrichment-run.orchestra
 import { enqueueEnrichmentRun, enqueuePublishRun } from "../../queue/queues.js";
 import { getModelRouting } from "../../repositories/model-routing.repo.js";
 import { findExceededProviders } from "../../repositories/provider-spend-limits.repo.js";
-import { findExhaustedFreeQuotaProviders } from "../../repositories/provider-free-quota.repo.js";
 import { requireAuth, requireSection } from "../../auth/guards.js";
 import { estimateFieldCosts, estimateLevelCost, LEVEL_PACKAGES, type OptimizationLevel } from "../../agents/field-cost-estimates.js";
 import { ALL_ENRICHMENT_FIELDS, type EnrichmentField } from "../../clients/llm-types.js";
 
 const DESCRIPTION_RICHNESS_VALUES = ["plain", "structured", "structured_with_image"] as const;
 const COMMUNICATION_TONE_VALUES = ["premium", "tecnico", "casual", "auto"] as const;
-
-function formatResetIn(resetAt: string): string {
-  const ms = Math.max(0, new Date(resetAt).getTime() - Date.now());
-  const hours = Math.floor(ms / 3_600_000);
-  const minutes = Math.floor((ms % 3_600_000) / 60_000);
-  return `${hours}h${minutes.toString().padStart(2, "0")}min`;
-}
 
 const createRunBody = z
   .object({
@@ -56,14 +48,6 @@ export async function runsRoutes(app: FastifyInstance) {
       const detail = exceeded.map((p) => `${p.provider} ($${p.spentUsd.toFixed(2)} / $${p.limitUsd!.toFixed(2)} neste mês)`).join(", ");
       return reply.status(402).send({
         error: `Limite de gasto mensal atingido para: ${detail}. Ajuste o limite ou troque o roteamento de modelos no painel de Integrações.`,
-      });
-    }
-
-    const exhaustedQuota = await findExhaustedFreeQuotaProviders(providersNeeded);
-    if (exhaustedQuota.length > 0) {
-      const detail = exhaustedQuota.map((q) => `${q.provider} (reseta em ${formatResetIn(q.resetAt)})`).join(", ");
-      return reply.status(402).send({
-        error: `Franquia gratuita esgotada para: ${detail}. Aguarde o reset ou troque o roteamento de modelos no painel de Integrações.`,
       });
     }
 

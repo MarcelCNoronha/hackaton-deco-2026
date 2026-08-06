@@ -825,6 +825,42 @@ tbody tr:last-child td {
   gap: 0.6rem;
 }
 
+.routing-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.routing-row,
+.provider-spend-row {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.9rem 1rem;
+}
+
+.provider-spend-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.9rem;
+}
+
+.provider-spend-row input {
+  width: 100%;
+  margin-top: 0.7rem;
+}
+
+.provider-spend-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.8rem;
+  margin-top: 0.55rem;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
 .pill {
   display: inline-flex;
   padding: 0.15rem 0.55rem;
