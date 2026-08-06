@@ -6,6 +6,35 @@ Contexto confirmado pelo usuario:
 - E um backoffice usado por pessoas confiaveis.
 - O objetivo desta nota e separar riscos reais de producao, hardening de seguranca e pontos que podem afetar desempenho.
 
+## Pausa / retomada em 2026-08-07
+
+Estado antes de parar:
+
+- Codigo enviado em `main`: commit `7dcef99 Add image regeneration instructions`.
+- Deploy de producao concluido com sucesso.
+- VPS validada com `IMAGE_TAG=sha-7dcef99`.
+- Containers `app`, `web` e `worker` rodando; `/health` publico respondeu 200 e API interna respondeu `{"ok":true}`.
+- Build local validado:
+  - `server`: `npm run build`;
+  - `server`: `npm test` com 63 testes passando;
+  - `web`: `npm run build`.
+
+Fluxo novo implementado:
+
+- `RunDetail`: imagem gerada por IA agora tem `Aceitar e publicar` e `Refazer`.
+- `Refazer` exige instrucao pontual e cria uma nova imagem, mantendo a antiga para comparacao/exclusao.
+- A run ganhou `imageGenerationNote` no `scope`, editavel pela tela da run.
+- Endpoint novo: `PATCH /api/runs/:id/image-generation-note`.
+- Geracao manual e geracao do worker combinam: regra da categoria + orientacao da run + instrucao pontual.
+- Seletor de otimizacao permite definir orientacao de imagens antes de criar a run.
+
+O que falta amanha:
+
+- Teste manual em producao na run `12`: abrir a imagem incorreta, escrever a correcao (ex.: manter quantidade exata de hastes), clicar `Refazer`, comparar a nova com a antiga e excluir a errada.
+- Validar o fluxo de `Aceitar e publicar` com cuidado na VTEX quando a imagem correta estiver pronta.
+- Se a geracao falhar, checar primeiro conexao/billing/quota da chave Gemini de producao antes de mexer em codigo.
+- Depois disso, seguir para as proximas evolucoes do `HACKATHON.md`.
+
 ## Resultado da validacao local
 
 - `server`: `npm run build` passou.
