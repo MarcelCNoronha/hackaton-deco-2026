@@ -58,9 +58,8 @@ export function Impact() {
         <div>
           <h1>Impacto (antes/depois)</h1>
           <p className="muted">
-            Consulta em tempo real ao Search Console e ao GA4 — sem cópia local. O corte "antes/depois" é a
-            primeira publicação do produto; o Google leva cerca de 14 dias para refletir a mudança, então a
-            comparação só fica disponível depois desse prazo.
+            Consulta em tempo real ao Search Console e ao GA4, sem cópia local. O corte "antes/depois" é a primeira
+            publicação do produto: GA4 pode dar leitura preliminar em 3 dias; GSC/SEO entra como leitura madura após 14 dias.
           </p>
         </div>
       </div>

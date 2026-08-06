@@ -9,6 +9,7 @@ import { getEarliestPublishedAt } from "../repositories/real-impact.repo.js";
  *  list's impactReadiness badge (catalog.routes.ts) uses the exact same threshold instead of a
  *  second, possibly-drifting copy of "14". */
 export const MATURATION_DAYS = 14;
+export const PRELIMINARY_IMPACT_DAYS = 3;
 /** Width of each comparison window (days) — matches Analyst's own lookback default. */
 const WINDOW_DAYS = 28;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -17,7 +18,7 @@ function fmt(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-export type RealImpactStatus = "no_url" | "not_published" | "maturing" | "ready";
+export type RealImpactStatus = "no_url" | "not_published" | "maturing" | "preliminary" | "ready";
 
 export interface RealImpactWindow {
   startDate: string;
@@ -37,8 +38,10 @@ export interface RealImpactResult {
   status: RealImpactStatus;
   publishedAt?: string;
   daysSincePublish?: number;
-  /** Only set when status is "maturing". */
+  /** Only set when status is "maturing"; counts until the first GA4 preliminary reading. */
   daysUntilReady?: number;
+  /** Only set when status is "preliminary"; counts until the full GSC/SEO mature reading. */
+  daysUntilMature?: number;
   before?: RealImpactWindow;
   after?: RealImpactWindow;
   deltas?: {
@@ -81,26 +84,27 @@ export async function getProductRealImpact(params: {
 
   const now = new Date();
   const daysSincePublish = Math.floor((now.getTime() - publishedAt.getTime()) / MS_PER_DAY);
-  if (daysSincePublish < MATURATION_DAYS) {
+  if (daysSincePublish < PRELIMINARY_IMPACT_DAYS) {
     return {
       status: "maturing",
       publishedAt: publishedAt.toISOString(),
       daysSincePublish,
-      daysUntilReady: MATURATION_DAYS - daysSincePublish,
+      daysUntilReady: PRELIMINARY_IMPACT_DAYS - daysSincePublish,
     };
   }
 
   const publishedDay = new Date(Date.UTC(publishedAt.getUTCFullYear(), publishedAt.getUTCMonth(), publishedAt.getUTCDate()));
   const beforeStart = new Date(publishedDay.getTime() - WINDOW_DAYS * MS_PER_DAY);
   const beforeEnd = new Date(publishedDay.getTime() - MS_PER_DAY);
-  const afterStart = new Date(publishedDay.getTime() + MATURATION_DAYS * MS_PER_DAY);
+  const isMature = daysSincePublish >= MATURATION_DAYS;
+  const afterStart = new Date(publishedDay.getTime() + (isMature ? MATURATION_DAYS : PRELIMINARY_IMPACT_DAYS) * MS_PER_DAY);
   const afterEnd = new Date(Math.min(now.getTime(), afterStart.getTime() + (WINDOW_DAYS - 1) * MS_PER_DAY));
 
   const path = pathnameOf(product.url);
 
   const [gscBefore, gscAfter, ga4Before, ga4After] = await Promise.all([
-    gsc?.queryByPage({ startDate: fmt(beforeStart), endDate: fmt(beforeEnd) }) ?? Promise.resolve([]),
-    gsc?.queryByPage({ startDate: fmt(afterStart), endDate: fmt(afterEnd) }) ?? Promise.resolve([]),
+    isMature ? (gsc?.queryByPage({ startDate: fmt(beforeStart), endDate: fmt(beforeEnd) }) ?? Promise.resolve([])) : Promise.resolve([]),
+    isMature ? (gsc?.queryByPage({ startDate: fmt(afterStart), endDate: fmt(afterEnd) }) ?? Promise.resolve([])) : Promise.resolve([]),
     ga4?.runProductPageReport({ startDate: fmt(beforeStart), endDate: fmt(beforeEnd) }) ?? Promise.resolve([]),
     ga4?.runProductPageReport({ startDate: fmt(afterStart), endDate: fmt(afterEnd) }) ?? Promise.resolve([]),
   ]);
@@ -141,9 +145,10 @@ export async function getProductRealImpact(params: {
   };
 
   return {
-    status: "ready",
+    status: isMature ? "ready" : "preliminary",
     publishedAt: publishedAt.toISOString(),
     daysSincePublish,
+    daysUntilMature: isMature ? undefined : MATURATION_DAYS - daysSincePublish,
     before,
     after,
     deltas: {

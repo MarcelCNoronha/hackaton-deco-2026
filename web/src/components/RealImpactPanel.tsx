@@ -27,29 +27,38 @@ export function RealImpactPanel({ impact }: { impact: RealImpact }) {
     return (
       <div className="empty-state">
         Publicado ha {impact.daysSincePublish} {impact.daysSincePublish === 1 ? "dia" : "dias"}. Faltam{" "}
-        {impact.daysUntilReady} {impact.daysUntilReady === 1 ? "dia" : "dias"} para a comparacao ficar disponivel.
+        {impact.daysUntilReady} {impact.daysUntilReady === 1 ? "dia" : "dias"} para a leitura preliminar de GA4 ficar disponivel.
       </div>
     );
   }
 
   const { before, after, deltas } = impact;
   if (!before || !after || !deltas) return null;
+  const isPreliminary = impact.status === "preliminary";
 
   return (
     <div>
       <p className="muted" style={{ marginTop: 0, fontSize: "0.82rem" }}>
+        {isPreliminary ? "Leitura preliminar GA4. " : "Leitura madura GA4 + GSC. "}
         Antes: {before.startDate} a {before.endDate} · Depois: {after.startDate} a {after.endDate}. Consulta em tempo
         real ao Google, sem armazenar copia local.
+        {isPreliminary && impact.daysUntilMature !== undefined
+          ? ` GSC/SEO entra em ${impact.daysUntilMature} ${impact.daysUntilMature === 1 ? "dia" : "dias"}.`
+          : ""}
       </p>
       <div className="stat-row">
-        <StatTile label="Impressoes (GSC)" value={pct(deltas.impressionsPct)} deltaGood={(deltas.impressionsPct ?? 0) >= 0} />
-        <StatTile
-          label="Posicao media (GSC)"
-          value={deltas.positionDelta === null ? "-" : deltas.positionDelta.toFixed(1)}
-          delta={deltas.positionDelta === null ? undefined : deltas.positionDelta <= 0 ? "melhorou" : "piorou"}
-          deltaGood={(deltas.positionDelta ?? 0) <= 0}
-        />
-        <StatTile label="CTR (GSC)" value={pct(deltas.ctrDeltaPct)} deltaGood={(deltas.ctrDeltaPct ?? 0) >= 0} />
+        {!isPreliminary && (
+          <>
+            <StatTile label="Impressoes (GSC)" value={pct(deltas.impressionsPct)} deltaGood={(deltas.impressionsPct ?? 0) >= 0} />
+            <StatTile
+              label="Posicao media (GSC)"
+              value={deltas.positionDelta === null ? "-" : deltas.positionDelta.toFixed(1)}
+              delta={deltas.positionDelta === null ? undefined : deltas.positionDelta <= 0 ? "melhorou" : "piorou"}
+              deltaGood={(deltas.positionDelta ?? 0) <= 0}
+            />
+            <StatTile label="CTR (GSC)" value={pct(deltas.ctrDeltaPct)} deltaGood={(deltas.ctrDeltaPct ?? 0) >= 0} />
+          </>
+        )}
         <StatTile label="Sessoes (GA4)" value={pct(deltas.sessionsPct)} deltaGood={(deltas.sessionsPct ?? 0) >= 0} />
         <StatTile
           label="Sessoes engajadas (GA4)"

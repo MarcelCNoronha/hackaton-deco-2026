@@ -221,10 +221,15 @@ resolvidos pelo codigo atual.
 - Analytics agregado Google + otimizacoes:
   - implementado em 2026-08-06 na pagina Impacto;
   - foco principal: acessos e retorno financeiro;
-  - mede consolidado e produto a produto usando primeira publicacao como pivo, 14 dias de maturacao
-    e janela de 28 dias antes/depois;
-  - GSC: impressoes, cliques, CTR, posicao media;
-  - GA4: sessoes, sessoes engajadas, compras, taxa de compra e receita;
+  - mede consolidado e produto a produto usando primeira publicacao como pivo;
+  - leitura preliminar apos 3 dias: GA4/acessos/receita para decidir cedo se o anuncio esta
+    respondendo;
+  - leitura madura apos 14 dias: GSC/SEO entra no agregado sem misturar dado organico ainda frio;
+  - janela de comparacao: 28 dias antes contra ate 28 dias depois;
+  - GSC maduro: impressoes, cliques, CTR, posicao media;
+  - GA4 preliminar/maduro: sessoes, sessoes engajadas, compras, taxa de compra e receita;
+  - o detalhe individual do produto segue a mesma regra: antes de 3 dias fica aguardando, de 3 a
+    13 dias mostra GA4 preliminar, e a partir de 14 dias mostra GA4 + GSC;
   - receita prioriza item-level (`itemRevenue`/`itemsPurchased`) quando `itemId` casa com SKU/ID do
     produto, com fallback para receita por pagina quando o e-commerce por item nao estiver
     disponivel.

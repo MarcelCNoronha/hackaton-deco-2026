@@ -1,5 +1,5 @@
 import { and, inArray, isNotNull, sql } from "drizzle-orm";
-import { MATURATION_DAYS } from "../agents/impact.agent.js";
+import { MATURATION_DAYS, PRELIMINARY_IMPACT_DAYS } from "../agents/impact.agent.js";
 import type { Ga4Client, Ga4DailyItemReportRow, Ga4DailyPageReportRow } from "../clients/ga4.client.js";
 import type { GscClient, GscDailyPageRow } from "../clients/gsc.client.js";
 import { db } from "../db/client.js";
@@ -12,7 +12,8 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 type RevenueSource = "item" | "page" | "none";
 type BusinessImpactStatus = "missing_google" | "no_published_products" | "no_mature_products" | "no_google_data" | "ready";
-type BusinessImpactConfidence = "waiting" | "low_data" | "partial" | "complete";
+type BusinessImpactConfidence = "waiting" | "preliminary" | "low_data" | "partial" | "complete";
+type BusinessImpactStage = "preliminary" | "mature";
 
 export interface BusinessImpactWindow {
   impressions: number;
@@ -58,6 +59,8 @@ export interface BusinessImpactProduct {
   category: string | null;
   brand: string | null;
   publishedAt: string;
+  stage: BusinessImpactStage;
+  gscMature: boolean;
   beforeStartDate: string;
   beforeEndDate: string;
   afterStartDate: string;
@@ -76,6 +79,7 @@ export interface BusinessImpactSummary {
   confidence: BusinessImpactConfidence;
   generatedAt: string;
   windowDays: number;
+  preliminaryDays: number;
   maturationDays: number;
   revenueCurrency: string;
   revenueSource: RevenueSource | "mixed";
@@ -83,6 +87,7 @@ export interface BusinessImpactSummary {
     published: number;
     missingUrl: number;
     maturing: number;
+    preliminary: number;
     mature: number;
     measured: number;
     fullAfterWindow: number;
@@ -98,9 +103,11 @@ export interface BusinessImpactSummary {
 
 type ProductRow = typeof products.$inferSelect;
 
-interface MatureProduct {
+interface AnalyzableProduct {
   product: ProductRow;
   publishedAt: Date;
+  stage: BusinessImpactStage;
+  gscMature: boolean;
   beforeStart: Date;
   beforeEnd: Date;
   afterStart: Date;
@@ -327,6 +334,7 @@ function buildEmptySummary(status: BusinessImpactStatus, counts?: Partial<Busine
     confidence: status === "no_mature_products" ? "waiting" : "low_data",
     generatedAt: new Date().toISOString(),
     windowDays: BUSINESS_IMPACT_WINDOW_DAYS,
+    preliminaryDays: PRELIMINARY_IMPACT_DAYS,
     maturationDays: MATURATION_DAYS,
     revenueCurrency: "BRL",
     revenueSource: "none",
@@ -334,6 +342,7 @@ function buildEmptySummary(status: BusinessImpactStatus, counts?: Partial<Busine
       published: 0,
       missingUrl: 0,
       maturing: 0,
+      preliminary: 0,
       mature: 0,
       measured: 0,
       fullAfterWindow: 0,
@@ -361,7 +370,7 @@ export async function getBusinessImpactSummary(params: {
   if (publishedProducts.length === 0) return buildEmptySummary("no_published_products");
 
   const today = startOfUtcDay(new Date());
-  const matureProducts: MatureProduct[] = [];
+  const analyzableProducts: AnalyzableProduct[] = [];
   let missingUrl = 0;
   let maturing = 0;
 
@@ -374,16 +383,21 @@ export async function getBusinessImpactSummary(params: {
     }
 
     const publishedDay = startOfUtcDay(publishedAt);
-    const afterStart = addDays(publishedDay, MATURATION_DAYS);
-    if (afterStart.getTime() > today.getTime()) {
+    const preliminaryStart = addDays(publishedDay, PRELIMINARY_IMPACT_DAYS);
+    const matureStart = addDays(publishedDay, MATURATION_DAYS);
+    if (preliminaryStart.getTime() > today.getTime()) {
       maturing += 1;
       continue;
     }
 
+    const stage: BusinessImpactStage = matureStart.getTime() <= today.getTime() ? "mature" : "preliminary";
+    const afterStart = stage === "mature" ? matureStart : preliminaryStart;
     const afterEnd = minDate(today, addDays(afterStart, BUSINESS_IMPACT_WINDOW_DAYS - 1));
-    matureProducts.push({
+    analyzableProducts.push({
       product,
       publishedAt,
+      stage,
+      gscMature: stage === "mature",
       beforeStart: addDays(publishedDay, -BUSINESS_IMPACT_WINDOW_DAYS),
       beforeEnd: addDays(publishedDay, -1),
       afterStart,
@@ -392,7 +406,7 @@ export async function getBusinessImpactSummary(params: {
     });
   }
 
-  if (matureProducts.length === 0) {
+  if (analyzableProducts.length === 0) {
     return buildEmptySummary("no_mature_products", {
       published: publishedProducts.length,
       missingUrl,
@@ -400,14 +414,18 @@ export async function getBusinessImpactSummary(params: {
     });
   }
 
-  const startDate = fmt(matureProducts.reduce((min, row) => (row.beforeStart < min ? row.beforeStart : min), matureProducts[0].beforeStart));
-  const endDate = fmt(matureProducts.reduce((max, row) => (row.afterEnd > max ? row.afterEnd : max), matureProducts[0].afterEnd));
+  const startDate = fmt(
+    analyzableProducts.reduce((min, row) => (row.beforeStart < min ? row.beforeStart : min), analyzableProducts[0].beforeStart),
+  );
+  const endDate = fmt(
+    analyzableProducts.reduce((max, row) => (row.afterEnd > max ? row.afterEnd : max), analyzableProducts[0].afterEnd),
+  );
 
   const [gscRows, ga4PageRows, ga4ItemRows, productCosts] = await Promise.all([
     params.gsc?.queryByPageAndDate({ startDate, endDate }) ?? Promise.resolve([]),
     params.ga4?.runProductPageDailyReport({ startDate, endDate }) ?? Promise.resolve([]),
     params.ga4?.runItemDailyReport({ startDate, endDate }).catch(() => []) ?? Promise.resolve([]),
-    costByProduct(matureProducts.map((row) => row.product.id)),
+    costByProduct(analyzableProducts.map((row) => row.product.id)),
   ]);
 
   const gscByDatePath = new Map<string, GscDailyPageRow>();
@@ -423,7 +441,7 @@ export async function getBusinessImpactSummary(params: {
   }
 
   const productIdByItemKey = new Map<string, number>();
-  for (const { product } of matureProducts) {
+  for (const { product } of analyzableProducts) {
     for (const key of productIdentityKeys(product)) productIdByItemKey.set(key, product.id);
   }
 
@@ -451,8 +469,9 @@ export async function getBusinessImpactSummary(params: {
   let fullAfterWindow = 0;
   let partialAfterWindow = 0;
   let itemMatched = 0;
+  let measuredPreliminary = 0;
 
-  for (const row of matureProducts) {
+  for (const row of analyzableProducts) {
     const path = pathOnly(row.product.url);
     if (!path) continue;
 
@@ -461,14 +480,14 @@ export async function getBusinessImpactSummary(params: {
 
     for (let date = row.beforeStart; date.getTime() <= row.beforeEnd.getTime(); date = addDays(date, 1)) {
       const dateKey = fmt(date);
-      addGsc(beforeAcc, gscByDatePath.get(mapKey(dateKey, path)));
+      if (row.gscMature) addGsc(beforeAcc, gscByDatePath.get(mapKey(dateKey, path)));
       addGa4Page(beforeAcc, ga4PageByDatePath.get(mapKey(dateKey, path)));
       addGa4Item(beforeAcc, ga4ItemByProductDate.get(productDateKey(row.product.id, dateKey)));
     }
 
     for (let date = row.afterStart; date.getTime() <= row.afterEnd.getTime(); date = addDays(date, 1)) {
       const dateKey = fmt(date);
-      addGsc(afterAcc, gscByDatePath.get(mapKey(dateKey, path)));
+      if (row.gscMature) addGsc(afterAcc, gscByDatePath.get(mapKey(dateKey, path)));
       addGa4Page(afterAcc, ga4PageByDatePath.get(mapKey(dateKey, path)));
       addGa4Item(afterAcc, ga4ItemByProductDate.get(productDateKey(row.product.id, dateKey)));
     }
@@ -488,7 +507,10 @@ export async function getBusinessImpactSummary(params: {
     const before = finalizeWindow(beforeAcc, revenueSource);
     const after = finalizeWindow(afterAcc, revenueSource);
     const hasGoogleData = hasData(before) || hasData(after);
-    if (hasGoogleData) measured += 1;
+    if (hasGoogleData) {
+      measured += 1;
+      if (row.stage === "preliminary") measuredPreliminary += 1;
+    }
     if (row.afterWindowDays >= BUSINESS_IMPACT_WINDOW_DAYS) fullAfterWindow += 1;
     else partialAfterWindow += 1;
 
@@ -504,6 +526,8 @@ export async function getBusinessImpactSummary(params: {
       category: row.product.category,
       brand: row.product.brand,
       publishedAt: row.publishedAt.toISOString(),
+      stage: row.stage,
+      gscMature: row.gscMature,
       beforeStartDate: fmt(row.beforeStart),
       beforeEndDate: fmt(row.beforeEnd),
       afterStartDate: fmt(row.afterStart),
@@ -524,14 +548,25 @@ export async function getBusinessImpactSummary(params: {
   const before = finalizeWindow(beforeTotalAcc, aggregateRevenueSource === "item" ? "item" : aggregateRevenueSource === "page" ? "page" : "page");
   const after = finalizeWindow(afterTotalAcc, aggregateRevenueSource === "item" ? "item" : aggregateRevenueSource === "page" ? "page" : "page");
   const status: BusinessImpactStatus = measured > 0 ? "ready" : "no_google_data";
+  const preliminary = analyzableProducts.filter((row) => row.stage === "preliminary").length;
+  const mature = analyzableProducts.length - preliminary;
   const confidence: BusinessImpactConfidence =
-    measured === 0 ? "low_data" : measured < 3 ? "low_data" : partialAfterWindow > 0 ? "partial" : "complete";
+    measured === 0
+      ? "low_data"
+      : measuredPreliminary > 0
+        ? "preliminary"
+        : measured < 3
+          ? "low_data"
+          : partialAfterWindow > 0
+            ? "partial"
+            : "complete";
 
   return {
     status,
     confidence,
     generatedAt: new Date().toISOString(),
     windowDays: BUSINESS_IMPACT_WINDOW_DAYS,
+    preliminaryDays: PRELIMINARY_IMPACT_DAYS,
     maturationDays: MATURATION_DAYS,
     revenueCurrency: "BRL",
     revenueSource: aggregateRevenueSource,
@@ -539,7 +574,8 @@ export async function getBusinessImpactSummary(params: {
       published: publishedProducts.length,
       missingUrl,
       maturing,
-      mature: matureProducts.length,
+      preliminary,
+      mature,
       measured,
       fullAfterWindow,
       partialAfterWindow,

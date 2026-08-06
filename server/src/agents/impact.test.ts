@@ -45,8 +45,8 @@ describe("getProductRealImpact", () => {
     expect(result).toEqual({ status: "not_published" });
   });
 
-  it("returns maturing with a countdown when published fewer than 14 days ago", async () => {
-    const publishedAt = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
+  it("returns maturing with a countdown when published fewer than 3 days ago", async () => {
+    const publishedAt = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000);
     mockedGetEarliestPublishedAt.mockResolvedValue(publishedAt);
 
     const result = await getProductRealImpact({
@@ -56,8 +56,30 @@ describe("getProductRealImpact", () => {
     });
 
     expect(result.status).toBe("maturing");
+    expect(result.daysSincePublish).toBe(1);
+    expect(result.daysUntilReady).toBe(2);
+  });
+
+  it("returns a preliminary GA4-only comparison before the GSC maturation window", async () => {
+    const publishedAt = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
+    mockedGetEarliestPublishedAt.mockResolvedValue(publishedAt);
+
+    const gscQuery = vi.fn().mockResolvedValue([{ keys: ["https://loja.com/produto-1"], impressions: 100, clicks: 5, ctr: 0.05, position: 12 }]);
+    const ga4 = fakeGa4([{ pagePath: "/produto-1", sessions: 40, engagedSessions: 20, conversionRate: 0.05, purchases: 2, revenue: 100 }]);
+
+    const result = await getProductRealImpact({
+      gsc: { queryByPage: gscQuery } as unknown as GscClient,
+      ga4,
+      product: fakeProduct("https://loja.com/produto-1"),
+    });
+
+    expect(result.status).toBe("preliminary");
     expect(result.daysSincePublish).toBe(5);
-    expect(result.daysUntilReady).toBe(9);
+    expect(result.daysUntilMature).toBe(9);
+    expect(gscQuery).not.toHaveBeenCalled();
+    expect(result.before?.impressions).toBeNull();
+    expect(result.before?.sessions).toBe(40);
+    expect(result.after?.sessions).toBe(40);
   });
 
   it("returns a ready comparison with computed deltas once matured, matching by URL pathname", async () => {

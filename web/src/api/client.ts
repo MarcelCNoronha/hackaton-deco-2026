@@ -408,7 +408,7 @@ export interface CatalogImage {
   label: string | null;
 }
 
-export type RealImpactStatus = "no_url" | "not_published" | "maturing" | "ready";
+export type RealImpactStatus = "no_url" | "not_published" | "maturing" | "preliminary" | "ready";
 
 export interface RealImpactWindow {
   startDate: string;
@@ -431,6 +431,7 @@ export interface RealImpact {
   publishedAt?: string;
   daysSincePublish?: number;
   daysUntilReady?: number;
+  daysUntilMature?: number;
   before?: RealImpactWindow;
   after?: RealImpactWindow;
   deltas?: {
@@ -485,8 +486,9 @@ export interface ImpactSummary {
 }
 
 export type BusinessImpactStatus = "missing_google" | "no_published_products" | "no_mature_products" | "no_google_data" | "ready";
-export type BusinessImpactConfidence = "waiting" | "low_data" | "partial" | "complete";
+export type BusinessImpactConfidence = "waiting" | "preliminary" | "low_data" | "partial" | "complete";
 export type BusinessImpactRevenueSource = "item" | "page" | "none" | "mixed";
+export type BusinessImpactStage = "preliminary" | "mature";
 
 export interface BusinessImpactWindow {
   impressions: number;
@@ -532,6 +534,8 @@ export interface BusinessImpactProduct {
   category: string | null;
   brand: string | null;
   publishedAt: string;
+  stage: BusinessImpactStage;
+  gscMature: boolean;
   beforeStartDate: string;
   beforeEndDate: string;
   afterStartDate: string;
@@ -550,6 +554,7 @@ export interface BusinessImpactSummary {
   confidence: BusinessImpactConfidence;
   generatedAt: string;
   windowDays: number;
+  preliminaryDays: number;
   maturationDays: number;
   revenueCurrency: string;
   revenueSource: BusinessImpactRevenueSource;
@@ -557,6 +562,7 @@ export interface BusinessImpactSummary {
     published: number;
     missingUrl: number;
     maturing: number;
+    preliminary: number;
     mature: number;
     measured: number;
     fullAfterWindow: number;

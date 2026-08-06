@@ -267,13 +267,16 @@ specs, FAQ, dados estruturados) + alt-text de imagem, sem opção de escolher. A
 - ~~**Analytics agregado combinando Google + otimizações**~~ — **implementado em 2026-08-06** com
   foco no que o usuário pediu como principal: **acessos e retorno financeiro**. A página Impacto
   agora tem um painel agregado e uma tabela produto a produto. A regra usa a primeira publicação
-  real do produto como pivô, espera 14 dias de maturação do Google, compara 28 dias antes contra
-  até 28 dias depois, e mede GSC (impressões, cliques, CTR, posição média) + GA4 (sessões, sessões
-  engajadas, compras, taxa de compra e receita). Para evitar N chamadas por produto, o backend
-  busca relatórios diários por página/item em janelas amplas e calcula localmente cada produto. A
-  receita usa `itemRevenue`/`itemsPurchased` quando o GA4 consegue casar `itemId` com SKU/ID do
-  produto; quando não há e-commerce por item, cai para receita por página como sinal secundário.
-  O painel também marca confiança da amostra (poucos dados, janela parcial, completa) para não
+  real do produto como pivô e tem duas camadas: **leitura preliminar em 3 dias** para GA4/acessos/
+  receita, e **leitura madura em 14 dias** para GSC/SEO. A comparação segue 28 dias antes contra
+  até 28 dias depois. Em produtos preliminares, o painel não mistura GSC no agregado; GSC só entra
+  quando o produto vira maduro. O detalhe individual segue a mesma régua: antes de 3 dias aguarda,
+  de 3 a 13 dias mostra GA4 preliminar, e a partir de 14 dias mostra GA4 + GSC. Para evitar N
+  chamadas por produto, o backend busca relatórios diários por página/item em janelas amplas e
+  calcula localmente cada produto. A receita usa
+  `itemRevenue`/`itemsPurchased` quando o GA4 consegue casar `itemId` com SKU/ID do produto; quando
+  não há e-commerce por item, cai para receita por página como sinal secundário. O painel também
+  marca confiança da amostra (sinal preliminar, poucos dados, janela parcial, completa) para não
   vender certeza antes de o histórico maturar.
 
 - **Geração de vídeo curto** — adiado para 2026-08-04 ("vamos fazer amanhã"). Ainda não
