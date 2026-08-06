@@ -37,6 +37,7 @@ const manufacturerReferenceBody = z.object({ manufacturerReferenceUrl: z.string(
 const classifyImageBody = z.object({ classification: z.enum(["principal", "ambientada", "dimensional", "destaque"]).nullable() });
 
 const republishBody = z.object({ runId: z.number() });
+const publishImageBody = z.object({ force: z.boolean().optional() }).default({});
 
 function imageGenerationNoteFromScope(scope: unknown): string | undefined {
   if (!scope || typeof scope !== "object" || Array.isArray(scope)) return undefined;
@@ -344,11 +345,12 @@ export async function productsRoutes(app: FastifyInstance) {
   app.post<{ Params: { id: string; imageId: string } }>(
     "/api/products/:id/generated-images/:imageId/publish",
     async (req, reply) => {
+      const body = publishImageBody.parse(req.body ?? {});
       const product = await db.query.products.findFirst({ where: eq(products.id, Number(req.params.id)) });
       if (!product) return reply.status(404).send({ error: "Produto não encontrado" });
       const image = await db.query.generatedImages.findFirst({ where: eq(generatedImages.id, Number(req.params.imageId)) });
       if (!image || image.productId !== product.id) return reply.status(404).send({ error: "Imagem não encontrada" });
-      if (!image.integrityVerified) {
+      if (!image.integrityVerified && !body.force) {
         // Enforced here, not just as a UI warning — "nunca publicar uma imagem enganosa" holds
         // even if a human clicks past the warning shown in RunDetail.
         return reply.status(400).send({

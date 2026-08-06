@@ -854,8 +854,8 @@ export const api = {
   // real Label on the platform, not just the local metadata (see the route's doc comment).
   classifyGeneratedImage: (imageId: number, classification: PhotoClassification | null) =>
     request<GeneratedImage>(`/generated-images/${imageId}/classify`, { method: "PATCH", body: JSON.stringify({ classification }) }),
-  publishGeneratedImage: (productId: number, imageId: number) =>
-    request<GeneratedImage>(`/products/${productId}/generated-images/${imageId}/publish`, { method: "POST" }),
+  publishGeneratedImage: (productId: number, imageId: number, body?: { force?: boolean }) =>
+    request<GeneratedImage>(`/products/${productId}/generated-images/${imageId}/publish`, { method: "POST", body: JSON.stringify(body ?? {}) }),
   /** Deletes a generated/reference photo from the panel so unwanted or never-classified
    *  generations don't pile up — if it was already published, the real photo is removed from the
    *  platform too, not just locally. */

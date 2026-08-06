@@ -379,7 +379,7 @@ export function RunDetail() {
     setImageGenError(null);
     setPublishingImageId(image.id);
     try {
-      const updated = await api.publishGeneratedImage(productId, image.id);
+      const updated = await api.publishGeneratedImage(productId, image.id, { force: !image.integrityVerified });
       setGeneratedImages((prev) => ({
         ...prev,
         [productId]: (prev[productId] ?? []).map((img) => (img.id === image.id ? updated : img)),
