@@ -126,6 +126,21 @@ function normalizeVtexCategoryFacetValue(categoryId: string): string {
   return categoryId.trim().replace(/^\/+|\/+$/g, "");
 }
 
+export function normalizeVtexStorefrontUrl(url: string | null, credentials: VtexCredentials): string | null {
+  const storefrontDomain = credentials.storefrontDomain?.trim();
+  if (!url || !storefrontDomain) return url;
+
+  try {
+    const parsed = new URL(url);
+    const rawHost = `${credentials.account}.${credentials.environment}.com.br`;
+    if (parsed.hostname !== rawHost) return url;
+    parsed.hostname = storefrontDomain;
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
 export function buildVtexCategoryFilterOptions(tree: VtexCategoryTreeNode[]): Array<{ id: string; name: string }> {
   const categories: Array<{ id: string; name: string }> = [];
   const walk = (nodes: VtexCategoryTreeNode[], parentPath: string | null, parentIds: string[]) => {
@@ -317,7 +332,7 @@ export class VtexClient implements CatalogClient {
         // reporting the raw `{account}.{environment}.com.br` domain even for a product on an
         // account with a working custom domain (the storefront itself is reachable there), so it
         // can't be trusted as "the real shopper-facing URL". See VtexCredentials.storefrontDomain.
-        url: item?.linkText ? `https://${this.storefrontHost}/${item.linkText}/p` : (item?.link ?? null),
+        url: item?.linkText ? `https://${this.storefrontHost}/${item.linkText}/p` : normalizeVtexStorefrontUrl(item?.link ?? null, this.credentials),
       };
     } catch (err) {
       console.error(`VTEX getProductSpecifications failed for product ${productId} — continuing with empty attributes`, err);
@@ -403,7 +418,7 @@ export class VtexClient implements CatalogClient {
         sku: extractVtexReferenceId(p.items?.[0]?.referenceId),
         // See fetchProductSpecifications' comment — `link` isn't trustworthy, storefrontHost + the
         // reliable `linkText` is.
-        url: p.linkText ? `https://${this.storefrontHost}/${p.linkText}/p` : (p.link ?? null),
+        url: p.linkText ? `https://${this.storefrontHost}/${p.linkText}/p` : normalizeVtexStorefrontUrl(p.link ?? null, this.credentials),
       })),
       hasMore: items.length === params.pageSize,
       total,

@@ -7,7 +7,7 @@ import { getConnectionCredentials } from "../../repositories/connections.repo.js
 import { getCatalogPlatform, setCatalogPlatform } from "../../repositories/catalog-settings.repo.js";
 import { getEarliestPublishedAtByProduct } from "../../repositories/real-impact.repo.js";
 import { MATURATION_DAYS } from "../../agents/impact.agent.js";
-import { VtexClient, type VtexCredentials } from "../../clients/vtex.client.js";
+import { normalizeVtexStorefrontUrl, VtexClient, type VtexCredentials } from "../../clients/vtex.client.js";
 import { ShopifyClient, type ShopifyCredentials } from "../../clients/shopify.client.js";
 import type { CatalogClient, CatalogListResult, CatalogPlatform } from "../../clients/catalog-types.js";
 import { makeRequestLogger } from "../../repositories/logs.repo.js";
@@ -176,6 +176,7 @@ async function listProductsByStatus(
   pageSize: number,
 ): Promise<CatalogListResult> {
   const localRows = await db.query.products.findMany({ where: eq(products.platform, platform) });
+  const vtexCredentials = platform === "vtex" ? await getConnectionCredentials<"vtex">("vtex") : null;
   const enrichment = await computeProductEnrichment(localRows.map((row) => row.id));
 
   const matching = localRows
@@ -196,7 +197,7 @@ async function listProductsByStatus(
         category: row.category,
         collection: row.collection,
         brand: row.brand,
-        url: row.url,
+        url: vtexCredentials ? normalizeVtexStorefrontUrl(row.url, vtexCredentials) : row.url,
         productId: row.id,
         sku: row.sku,
         lastRunId: e.lastRunId,
