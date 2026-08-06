@@ -367,14 +367,22 @@ export function RunDetail() {
 
   /** Uploads an already-generated image as a real product photo on the active platform — distinct
    *  from generating it (which only ever saves inside CatalogIA until this is called). */
-  async function handlePublishImage(productId: number, imageId: number) {
+  async function handlePublishImage(productId: number, image: GeneratedImage) {
+    if (
+      !image.integrityVerified &&
+      !window.confirm(
+        "A integridade desta imagem nao foi confirmada automaticamente. Se voce revisou visualmente e a imagem esta correta, pode publicar mesmo assim. Continuar?",
+      )
+    ) {
+      return;
+    }
     setImageGenError(null);
-    setPublishingImageId(imageId);
+    setPublishingImageId(image.id);
     try {
-      const updated = await api.publishGeneratedImage(productId, imageId);
+      const updated = await api.publishGeneratedImage(productId, image.id);
       setGeneratedImages((prev) => ({
         ...prev,
-        [productId]: (prev[productId] ?? []).map((img) => (img.id === imageId ? updated : img)),
+        [productId]: (prev[productId] ?? []).map((img) => (img.id === image.id ? updated : img)),
       }));
     } catch (err) {
       setImageGenError(err instanceof Error ? err.message : String(err));
@@ -860,17 +868,21 @@ export function RunDetail() {
                               type="button"
                               className="link-button"
                               style={{ fontSize: "0.72rem", marginTop: "0.3rem" }}
-                              onClick={() => handlePublishImage(productId, image.id)}
-                              disabled={publishingImageId === image.id || !image.integrityVerified || !image.classification}
+                              onClick={() => handlePublishImage(productId, image)}
+                              disabled={publishingImageId === image.id || !image.classification}
                               title={
-                                !image.integrityVerified
-                                  ? "Integridade não confirmada — gere uma nova imagem para publicar."
-                                  : !image.classification
+                                !image.classification
                                     ? "Classifique a foto antes de publicar."
+                                  : !image.integrityVerified
+                                    ? "Integridade nao confirmada automaticamente — publique apenas se voce revisou visualmente."
                                     : undefined
                               }
                             >
-                              {publishingImageId === image.id ? "Publicando..." : "Aceitar e publicar"}
+                              {publishingImageId === image.id
+                                ? "Publicando..."
+                                : image.integrityVerified
+                                  ? "Aceitar e publicar"
+                                  : "Aceitar mesmo assim"}
                             </button>
                           )}
                           {isGeneratableImageKind(image.kind) && (
