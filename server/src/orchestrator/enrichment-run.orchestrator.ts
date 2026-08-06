@@ -52,6 +52,9 @@ export interface StartEnrichmentRunParams {
    *  unlike the text fields above which default to "all". Requires a Gemini connection; skipped
    *  (per-product, not run-wide) for any product with zero reference images to compose from. */
   imageKinds?: Array<"lifestyle" | "feature_callout">;
+  /** Extra visual guidance for every AI image generated as part of this run. Category rules remain
+   *  the stable baseline; this is the run-specific brief, e.g. "manter exatamente 2 hastes". */
+  imageGenerationNote?: string;
 }
 
 /** Safety ceiling on how many products a catalogFilter run fetches to consider for ranking —
@@ -293,7 +296,7 @@ export async function executeEnrichmentRun(runId: number, params: StartEnrichmen
       // pair (see generateProductImage's guard), never the whole run.
       imageKinds.length > 0 && imageGemini
         ? mapWithConcurrency(imageGenTasks, concurrency, ({ product, kind }) =>
-            generateProductImage({ gemini: imageGemini, product, kind }),
+            generateProductImage({ gemini: imageGemini, product, kind, note: params.imageGenerationNote }),
           )
         : Promise.resolve([]),
     ]);

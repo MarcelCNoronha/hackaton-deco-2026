@@ -21,6 +21,7 @@ interface Props {
     fields: EnrichmentField[];
     includeAltText: boolean;
     imageKinds: ImageGenKind[];
+    imageGenerationNote: string;
     descriptionRichness: DescriptionRichness;
     communicationTone: CommunicationTone;
   }) => Promise<void>;
@@ -75,6 +76,7 @@ export function OptimizationFieldSelector({ productCount, confirmLabel, onCancel
   });
   const [level, setLevel] = useState<OptimizationLevel>("excelente");
   const [tone, setTone] = useState<CommunicationTone>("auto");
+  const [imageGenerationNote, setImageGenerationNote] = useState("");
   const [estimates, setEstimates] = useState<FieldCostEstimate[] | null>(null);
   const [levelEstimates, setLevelEstimates] = useState<LevelCostEstimate[] | null>(null);
   const [note, setNote] = useState("");
@@ -118,7 +120,8 @@ export function OptimizationFieldSelector({ productCount, confirmLabel, onCancel
   const estimateByField = new Map((estimates ?? []).map((e) => [e.field, e]));
   const levelEstimateByLevel = new Map((levelEstimates ?? []).map((e) => [e.level, e]));
   const total = (estimates ?? []).reduce((sum, e) => (checked[e.field] ? sum + e.estimatedCostUsd : sum), 0);
-  const canConfirm = ALL_ENRICHMENT_FIELDS.some((field) => checked[field]) || checked.alt_text;
+  const hasImageGeneration = IMAGE_GEN_KINDS.some(({ kind }) => checked[kind]);
+  const canConfirm = ALL_ENRICHMENT_FIELDS.some((field) => checked[field]) || checked.alt_text || hasImageGeneration;
 
   async function handleConfirm() {
     setSubmitting(true);
@@ -127,6 +130,7 @@ export function OptimizationFieldSelector({ productCount, confirmLabel, onCancel
         fields: ALL_ENRICHMENT_FIELDS.filter((field) => checked[field]),
         includeAltText: checked.alt_text,
         imageKinds: IMAGE_GEN_KINDS.map((i) => i.kind).filter((kind) => checked[kind]),
+        imageGenerationNote: imageGenerationNote.trim(),
         descriptionRichness,
         communicationTone: tone,
       });
@@ -219,6 +223,29 @@ export function OptimizationFieldSelector({ productCount, confirmLabel, onCancel
         <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
           {IMAGE_GEN_KINDS.map(({ kind, fallbackLabel }) => renderRow(kind, fallbackLabel))}
         </div>
+        <label style={{ display: "block", marginTop: "0.75rem" }}>
+          <span className="muted" style={{ display: "block", fontSize: "0.78rem", marginBottom: "0.3rem" }}>
+            Orientacao para imagens desta otimizacao
+          </span>
+          <textarea
+            value={imageGenerationNote}
+            onChange={(e) => setImageGenerationNote(e.target.value)}
+            maxLength={500}
+            rows={2}
+            placeholder="Ex.: manter exatamente 2 hastes; nao adicionar suporte extra; usar ambiente de banheiro claro"
+            style={{
+              width: "100%",
+              resize: "vertical",
+              padding: "0.55rem 0.7rem",
+              borderRadius: "var(--radius-md)",
+              border: "1px solid var(--border)",
+              background: "var(--page-plane)",
+              color: "inherit",
+              fontFamily: "inherit",
+              fontSize: "0.82rem",
+            }}
+          />
+        </label>
 
         {note && (
           <p className="muted" style={{ fontSize: "0.78rem", marginTop: "0.75rem" }}>

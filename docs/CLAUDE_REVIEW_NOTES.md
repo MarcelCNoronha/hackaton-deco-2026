@@ -246,6 +246,14 @@ resolvidos pelo codigo atual.
   - seguranca funcional: `content-enrichment.agent.ts` faz checagem deterministica e retry/reprova se termo proibido escapar;
   - imagem: `generateProductImage` aplica instrucoes persistidas por tipo de foto como nota padrao.
 
+- Reiteracao/refacao de imagens geradas incorretas:
+  - implementado em 2026-08-06 na tela `RunDetail`;
+  - no card da imagem gerada, o operador agora tem `Aceitar e publicar` e `Refazer`;
+  - `Refazer` exige uma instrucao curta e cria nova imagem, mantendo a anterior para comparacao/exclusao;
+  - a run tambem ganhou `imageGenerationNote` no `scope`, editavel por `PATCH /api/runs/:id/image-generation-note`;
+  - o prompt de imagem agora combina: regra da categoria + orientacao da run + instrucao pontual da refacao/geracao manual;
+  - o seletor de otimizacao permite preencher a orientacao da run antes de disparar imagens em massa.
+
 - Geracao de video curto de produto:
   - video gerado entre 15 e 30 segundos;
   - nao confundir com o video de demo do hackathon, que tem limite de 5 minutos;

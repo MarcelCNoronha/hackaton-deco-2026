@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../../db/client.js";
-import { enrichmentProposals, generatedImages, products } from "../../db/schema.js";
+import { enrichmentProposals, enrichmentRuns, generatedImages, products } from "../../db/schema.js";
 import { requireAuth } from "../../auth/guards.js";
 import { syncProduct } from "../../agents/catalog-reader.agent.js";
 import { extractManufacturerFacts } from "../../agents/reference-facts.agent.js";
@@ -37,6 +37,12 @@ const manufacturerReferenceBody = z.object({ manufacturerReferenceUrl: z.string(
 const classifyImageBody = z.object({ classification: z.enum(["principal", "ambientada", "dimensional", "destaque"]).nullable() });
 
 const republishBody = z.object({ runId: z.number() });
+
+function imageGenerationNoteFromScope(scope: unknown): string | undefined {
+  if (!scope || typeof scope !== "object" || Array.isArray(scope)) return undefined;
+  const note = (scope as Record<string, unknown>).imageGenerationNote;
+  return typeof note === "string" && note.trim() ? note.trim() : undefined;
+}
 
 export async function productsRoutes(app: FastifyInstance) {
   app.addHook("preHandler", requireAuth);
@@ -189,7 +195,11 @@ export async function productsRoutes(app: FastifyInstance) {
 
     try {
       const gemini = new GeminiClient(geminiCreds.apiKey, IMAGE_GENERATION_MODEL, makeRequestLogger(body.runId));
-      const row = await generateProductImage({ gemini, product, kind: body.kind, note: body.note });
+      const run = body.runId ? await db.query.enrichmentRuns.findFirst({ where: eq(enrichmentRuns.id, body.runId) }) : null;
+      const note = [imageGenerationNoteFromScope(run?.scope), body.note?.trim()]
+        .filter((value): value is string => Boolean(value))
+        .join(" ");
+      const row = await generateProductImage({ gemini, product, kind: body.kind, note: note || undefined });
       return reply.status(201).send(row);
     } catch (err) {
       return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });

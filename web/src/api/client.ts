@@ -134,7 +134,12 @@ export function classifyScore(thresholds: CategoryScoreThreshold[], category: st
 export interface EnrichmentRun {
   id: number;
   status: "running" | "success" | "failed" | "partial";
-  scope: { candidateProductIds?: string[]; catalogFilter?: CatalogFilter; topN?: number };
+  scope: {
+    candidateProductIds?: string[];
+    catalogFilter?: CatalogFilter;
+    topN?: number;
+    imageGenerationNote?: string;
+  };
   startedAt: string;
   finishedAt: string | null;
   durationMs: number | null;
@@ -808,9 +813,12 @@ export const api = {
     fields?: EnrichmentField[];
     includeAltText?: boolean;
     imageKinds?: ImageGenKind[];
+    imageGenerationNote?: string;
     descriptionRichness?: DescriptionRichness;
     communicationTone?: CommunicationTone;
   }) => request<{ runId: number }>("/runs", { method: "POST", body: JSON.stringify(body) }),
+  updateRunImageGenerationNote: (id: number, imageGenerationNote: string) =>
+    request<EnrichmentRun>(`/runs/${id}/image-generation-note`, { method: "PATCH", body: JSON.stringify({ imageGenerationNote }) }),
   fieldCostEstimates: (productCount: number, descriptionRichness?: DescriptionRichness) =>
     request<{ estimates: FieldCostEstimate[]; note: string }>(
       `/runs/field-estimates?productCount=${productCount}${

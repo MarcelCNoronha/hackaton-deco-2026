@@ -952,6 +952,24 @@ diferentes pra evitar a IA julgar o próprio texto, mas com só o Gemini conecta
 caíram no mesmo lugar. Métricas de "Confiança de conteúdo" desta fase devem ser lidas como
 indicativo otimista, não neutro, até um segundo provedor (Claude/OpenAI) ser conectado.
 
+### Reiteracao manual de imagens incorretas e orientacao por run (2026-08-06)
+
+Caso real observado pelo usuario: imagem ambientada gerada com quantidade de hastes maior que o
+produto. O fluxo anterior permitia excluir e gerar outra imagem, mas a instrucao ficava dispersa:
+parte vinha apenas das regras da categoria e nao havia um lugar claro para corrigir uma geracao
+especifica.
+
+Implementado:
+
+- `RunDetail`: cada imagem gerada por IA agora mostra `Aceitar e publicar` e `Refazer`.
+- `Refazer` exige uma instrucao pontual e gera uma nova imagem mantendo a anterior para comparacao.
+- A run ganhou `imageGenerationNote` no `scope`, editavel pela tela da run e pelo endpoint
+  `PATCH /api/runs/:id/image-generation-note`.
+- O seletor de otimizacao permite preencher a orientacao de imagens da run antes de disparar
+  otimizacoes com imagens em massa.
+- O prompt final de imagem combina, nesta ordem: regras da categoria, orientacao da run e instrucao
+  pontual da geracao/refacao.
+
 ## Formação de equipes
 
 - 1 a 5 pessoas por equipe (pode ser solo)

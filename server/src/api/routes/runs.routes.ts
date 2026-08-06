@@ -28,12 +28,21 @@ const createRunBody = z
     fields: z.array(z.enum(ALL_ENRICHMENT_FIELDS as [EnrichmentField, ...EnrichmentField[]])).optional(),
     includeAltText: z.boolean().optional(),
     imageKinds: z.array(z.enum(["lifestyle", "feature_callout"])).optional(),
+    imageGenerationNote: z.string().trim().max(500).optional(),
     descriptionRichness: z.enum(DESCRIPTION_RICHNESS_VALUES).optional(),
     communicationTone: z.enum(COMMUNICATION_TONE_VALUES).optional(),
   })
   .refine((body) => Boolean(body.candidateProductIds) !== Boolean(body.catalogFilter), {
     message: "Informe exatamente um entre candidateProductIds (seleção manual) e catalogFilter (otimização total).",
   });
+
+const updateImageGenerationNoteBody = z.object({
+  imageGenerationNote: z.string().trim().max(500),
+});
+
+function mutableScope(scope: unknown): Record<string, unknown> {
+  return scope && typeof scope === "object" && !Array.isArray(scope) ? { ...(scope as Record<string, unknown>) } : {};
+}
 
 export async function runsRoutes(app: FastifyInstance) {
   app.addHook("preHandler", requireAuth);
@@ -152,6 +161,25 @@ export async function runsRoutes(app: FastifyInstance) {
     const run = await db.query.enrichmentRuns.findFirst({ where: eq(enrichmentRuns.id, Number(req.params.id)) });
     if (!run) return reply.status(404).send({ error: "Run not found" });
     const [withCost] = await withLiveCost([run]);
+    return withCost;
+  });
+
+  app.patch<{ Params: { id: string } }>("/api/runs/:id/image-generation-note", async (req, reply) => {
+    const runId = Number(req.params.id);
+    const body = updateImageGenerationNoteBody.parse(req.body);
+    const run = await db.query.enrichmentRuns.findFirst({ where: eq(enrichmentRuns.id, runId) });
+    if (!run) return reply.status(404).send({ error: "Run not found" });
+
+    const scope = mutableScope(run.scope);
+    if (body.imageGenerationNote) scope.imageGenerationNote = body.imageGenerationNote;
+    else delete scope.imageGenerationNote;
+
+    const [updated] = await db
+      .update(enrichmentRuns)
+      .set({ scope })
+      .where(eq(enrichmentRuns.id, runId))
+      .returning();
+    const [withCost] = await withLiveCost([updated]);
     return withCost;
   });
 

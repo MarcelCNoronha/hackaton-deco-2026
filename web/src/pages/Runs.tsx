@@ -212,6 +212,7 @@ export function Runs() {
     fields: EnrichmentField[],
     includeAltText: boolean,
     imageKinds: ImageGenKind[],
+    imageGenerationNote: string,
     descriptionRichness: DescriptionRichness,
     communicationTone: CommunicationTone,
   ): Promise<void> {
@@ -229,6 +230,7 @@ export function Runs() {
         fields,
         includeAltText,
         imageKinds,
+        imageGenerationNote: imageGenerationNote || undefined,
         descriptionRichness,
         communicationTone,
       });
@@ -261,6 +263,7 @@ export function Runs() {
     fields: EnrichmentField[],
     includeAltText: boolean,
     imageKinds: ImageGenKind[],
+    imageGenerationNote: string,
     descriptionRichness: DescriptionRichness,
     communicationTone: CommunicationTone,
   ): Promise<void> {
@@ -273,6 +276,7 @@ export function Runs() {
           fields,
           includeAltText,
           imageKinds,
+          imageGenerationNote: imageGenerationNote || undefined,
           descriptionRichness,
           communicationTone,
         }
@@ -282,6 +286,7 @@ export function Runs() {
           fields,
           includeAltText,
           imageKinds,
+          imageGenerationNote: imageGenerationNote || undefined,
           descriptionRichness,
           communicationTone,
         };
@@ -596,8 +601,8 @@ export function Runs() {
           productCount={1}
           confirmLabel="Confirmar otimização"
           onCancel={() => setPendingSingle(null)}
-          onConfirm={({ fields, includeAltText, imageKinds, descriptionRichness, communicationTone }) =>
-            confirmSingleOptimize(fields, includeAltText, imageKinds, descriptionRichness, communicationTone)
+          onConfirm={({ fields, includeAltText, imageKinds, imageGenerationNote, descriptionRichness, communicationTone }) =>
+            confirmSingleOptimize(fields, includeAltText, imageKinds, imageGenerationNote, descriptionRichness, communicationTone)
           }
         />
       )}
@@ -606,8 +611,8 @@ export function Runs() {
           productCount={selectAllMatching ? (topN ? Number(topN) : 50) : selectedIds.size}
           confirmLabel="Confirmar otimização"
           onCancel={() => setPendingBulk(false)}
-          onConfirm={({ fields, includeAltText, imageKinds, descriptionRichness, communicationTone }) =>
-            confirmBulkOptimize(fields, includeAltText, imageKinds, descriptionRichness, communicationTone)
+          onConfirm={({ fields, includeAltText, imageKinds, imageGenerationNote, descriptionRichness, communicationTone }) =>
+            confirmBulkOptimize(fields, includeAltText, imageKinds, imageGenerationNote, descriptionRichness, communicationTone)
           }
         />
       )}

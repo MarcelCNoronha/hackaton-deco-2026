@@ -42,6 +42,27 @@ import { ScoreCompare } from "../components/ScoreCompare";
 import { ImpactSummaryBanner } from "../components/ImpactSummaryBanner";
 import { formatCost } from "../lib/currency";
 
+function isGeneratableImageKind(kind: GeneratedImage["kind"]): kind is GeneratableImageKind {
+  return kind === "principal" || kind === "lifestyle" || kind === "dimensional" || kind === "feature_callout";
+}
+
+function imageGenerationNoteFromRun(run: EnrichmentRun | null): string {
+  const note = run?.scope.imageGenerationNote;
+  return typeof note === "string" ? note : "";
+}
+
+const IMAGE_NOTE_TEXTAREA_STYLE = {
+  width: "100%",
+  resize: "vertical",
+  padding: "0.55rem 0.7rem",
+  borderRadius: "var(--radius-md)",
+  border: "1px solid var(--border)",
+  background: "var(--page-plane)",
+  color: "inherit",
+  fontFamily: "inherit",
+  fontSize: "0.78rem",
+} as const;
+
 const FIELD_LABELS: Record<EnrichmentProposal["field"], string> = {
   description: "Descrição",
   alt_text: "Alt-text de imagem",
@@ -178,6 +199,10 @@ export function RunDetail() {
   const { id } = useParams<{ id: string }>();
   const runId = Number(id);
   const [run, setRun] = useState<EnrichmentRun | null>(null);
+  const [runImageNote, setRunImageNote] = useState("");
+  const [savedRunImageNote, setSavedRunImageNote] = useState("");
+  const [savingRunImageNote, setSavingRunImageNote] = useState(false);
+  const [runImageNoteError, setRunImageNoteError] = useState<string | null>(null);
   const [proposals, setProposals] = useState<EnrichmentProposal[]>([]);
   const [scores, setScores] = useState<ContentScore[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -194,8 +219,12 @@ export function RunDetail() {
   const [thresholds, setThresholds] = useState<CategoryScoreThreshold[]>([]);
   const [impactSummary, setImpactSummary] = useState<ImpactSummary | null>(null);
   const [generatingFor, setGeneratingFor] = useState<Record<number, GeneratableImageKind | undefined>>({});
+  const [imageGenerationNotes, setImageGenerationNotes] = useState<Record<number, string>>({});
+  const [imageRetryNotes, setImageRetryNotes] = useState<Record<number, string>>({});
+  const [retryingImageId, setRetryingImageId] = useState<number | null>(null);
   const [imageGenError, setImageGenError] = useState<string | null>(null);
   const [classifyingId, setClassifyingId] = useState<string | null>(null);
+  const runImageNoteDirtyRef = useRef(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   async function refresh() {
@@ -207,6 +236,9 @@ export function RunDetail() {
       api.runImpactSummary(runId),
     ]);
     setRun(runData);
+    const nextRunImageNote = imageGenerationNoteFromRun(runData);
+    setSavedRunImageNote(nextRunImageNote);
+    if (!runImageNoteDirtyRef.current) setRunImageNote(nextRunImageNote);
     setProposals(proposalsData);
     setScores(scoresData);
     setCosts(costsData);
@@ -274,19 +306,60 @@ export function RunDetail() {
    *  one of the 4 photo standards this store classifies its whole catalog into (see
    *  PHOTO_CLASSIFICATION_LABELS): principal, ambientada (lifestyle), dimensional, or destaque
    *  (feature_callout). */
-  async function handleGenerateImage(productId: number, kind: GeneratableImageKind) {
+  async function handleSaveRunImageNote() {
+    setRunImageNoteError(null);
+    setSavingRunImageNote(true);
+    try {
+      const updated = await api.updateRunImageGenerationNote(runId, runImageNote.trim());
+      setRun(updated);
+      const saved = imageGenerationNoteFromRun(updated);
+      setSavedRunImageNote(saved);
+      setRunImageNote(saved);
+      runImageNoteDirtyRef.current = false;
+    } catch (err) {
+      setRunImageNoteError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSavingRunImageNote(false);
+    }
+  }
+
+  function handleRunImageNoteChange(value: string) {
+    runImageNoteDirtyRef.current = value.trim() !== savedRunImageNote;
+    setRunImageNote(value);
+  }
+
+  async function handleGenerateImage(productId: number, kind: GeneratableImageKind, noteOverride?: string): Promise<boolean> {
     setImageGenError(null);
     setGeneratingFor((prev) => ({ ...prev, [productId]: kind }));
     try {
-      const image = await api.generateImage(productId, { kind, runId });
+      const note = (noteOverride ?? imageGenerationNotes[productId] ?? "").trim();
+      const image = await api.generateImage(productId, { kind, runId, note: note || undefined });
       setGeneratedImages((prev) => ({ ...prev, [productId]: [image, ...(prev[productId] ?? [])] }));
       // The run may already be done (poll loop stopped) — costs otherwise wouldn't reflect this
       // generation's price until something else happens to trigger a refresh.
       api.runCosts(runId).then(setCosts);
+      return true;
     } catch (err) {
       setImageGenError(err instanceof Error ? err.message : String(err));
+      return false;
     } finally {
       setGeneratingFor((prev) => ({ ...prev, [productId]: undefined }));
+    }
+  }
+
+  async function handleRegenerateImage(productId: number, image: GeneratedImage) {
+    if (!isGeneratableImageKind(image.kind)) return;
+    const note = (imageRetryNotes[image.id] ?? "").trim();
+    if (!note) {
+      setImageGenError("Informe uma instrucao para orientar a nova geracao.");
+      return;
+    }
+    setRetryingImageId(image.id);
+    try {
+      const ok = await handleGenerateImage(productId, image.kind, note);
+      if (ok) setImageRetryNotes((prev) => ({ ...prev, [image.id]: "" }));
+    } finally {
+      setRetryingImageId(null);
     }
   }
 
@@ -480,6 +553,34 @@ export function RunDetail() {
           )}
         </div>
 
+        <div className="card" style={{ background: "var(--surface-2)", margin: "0 0 1rem" }}>
+          <div className="proposal-header">
+            <div>
+              <h3 style={{ margin: 0 }}>Orientacao de imagens da run</h3>
+              <p className="muted" style={{ margin: "0.25rem 0 0", fontSize: "0.82rem" }}>
+                Vale para novas imagens e refacoes desta otimizacao, somada a regra da categoria.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="secondary"
+              onClick={handleSaveRunImageNote}
+              disabled={savingRunImageNote || runImageNote.trim() === savedRunImageNote}
+            >
+              {savingRunImageNote ? "Salvando..." : "Salvar orientacao"}
+            </button>
+          </div>
+          <textarea
+            value={runImageNote}
+            onChange={(e) => handleRunImageNoteChange(e.target.value)}
+            maxLength={500}
+            rows={2}
+            placeholder="Ex.: manter exatamente 2 hastes; nao adicionar suporte extra; usar ambiente claro"
+            style={IMAGE_NOTE_TEXTAREA_STYLE}
+          />
+          {runImageNoteError && <div className="banner" style={{ marginTop: "0.6rem" }}>{runImageNoteError}</div>}
+        </div>
+
         <div className="banner">
           <span>
             {runInProgress
@@ -656,6 +757,19 @@ export function RunDetail() {
                     )}
                   </div>
                 </div>
+                <label style={{ display: "block", margin: "0 0 0.75rem" }}>
+                  <span className="muted" style={{ display: "block", fontSize: "0.78rem", marginBottom: "0.3rem" }}>
+                    Instrucao adicional para a proxima imagem deste produto
+                  </span>
+                  <textarea
+                    value={imageGenerationNotes[productId] ?? ""}
+                    onChange={(e) => setImageGenerationNotes((prev) => ({ ...prev, [productId]: e.target.value }))}
+                    maxLength={500}
+                    rows={2}
+                    placeholder="Ex.: manter exatamente 2 hastes; nao inserir itens decorativos perto do produto"
+                    style={IMAGE_NOTE_TEXTAREA_STYLE}
+                  />
+                </label>
                 {(() => {
                   // One combined, ordered view of every photo for this product regardless of
                   // source (generated-here vs already-on-the-platform) — sorted by classification
@@ -697,7 +811,7 @@ export function RunDetail() {
                       key: `generated-${image.id}`,
                       classification: (image.classification ?? "") as PhotoClassification | "",
                       render: (name: string) => (
-                        <div style={{ width: 160 }}>
+                        <div style={{ width: 180 }}>
                           <img
                             src={`data:${image.mimeType};base64,${image.imageBase64}`}
                             alt={name}
@@ -756,8 +870,34 @@ export function RunDetail() {
                                     : undefined
                               }
                             >
-                              {publishingImageId === image.id ? "Publicando…" : "Publicar na loja"}
+                              {publishingImageId === image.id ? "Publicando..." : "Aceitar e publicar"}
                             </button>
+                          )}
+                          {isGeneratableImageKind(image.kind) && (
+                            <div style={{ marginTop: "0.45rem", paddingTop: "0.45rem", borderTop: "1px solid var(--border)" }}>
+                              <textarea
+                                value={imageRetryNotes[image.id] ?? ""}
+                                onChange={(e) => setImageRetryNotes((prev) => ({ ...prev, [image.id]: e.target.value }))}
+                                maxLength={500}
+                                rows={2}
+                                placeholder="Instrucao para refazer esta imagem"
+                                style={{ ...IMAGE_NOTE_TEXTAREA_STYLE, fontSize: "0.72rem", padding: "0.4rem 0.5rem" }}
+                              />
+                              <button
+                                type="button"
+                                className="link-button"
+                                style={{ fontSize: "0.72rem", marginTop: "0.25rem" }}
+                                onClick={() => handleRegenerateImage(productId, image)}
+                                disabled={
+                                  retryingImageId === image.id ||
+                                  generatingFor[productId] !== undefined ||
+                                  !(imageRetryNotes[image.id] ?? "").trim()
+                                }
+                                title="Gera uma nova imagem mantendo esta aqui para comparacao."
+                              >
+                                {retryingImageId === image.id ? "Gerando..." : "Refazer"}
+                              </button>
+                            </div>
                           )}
                           <button
                             type="button"
