@@ -260,6 +260,14 @@ resolvidos pelo codigo atual.
 - Conexoes em producao:
   - confirmar se VTEX/Shopify, Anthropic/OpenAI/Gemini e Google foram recadastradas no banco de producao.
 
+- Google Analytics Data API em producao:
+  - `GscClient.testConnection()` e `Ga4Client.testConnection()` retornaram ok em 2026-08-06;
+  - a consulta real `properties/{ga4PropertyId}:runReport`, usada pelo painel de Impacto, retornou
+    HTTP 403 porque a API `analyticsdata.googleapis.com` ainda nao foi usada/ativada no projeto
+    Google Cloud `230497389153`;
+  - acao necessaria: ativar "Google Analytics Data API" nesse projeto e aguardar a propagacao;
+  - o codigo agora trata falha de GSC/GA4 como ausencia de dados para nao derrubar o painel.
+
 - Chave Gemini/billing:
   - houve registro de 429 `limit: 0` para modelo de imagem;
   - confirmar se a chave de producao pertence ao projeto com billing ativo quando a geracao de imagem for prioridade.
