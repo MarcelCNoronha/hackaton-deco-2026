@@ -138,8 +138,15 @@ function PhotoReferencePicker({
   allowCrop: boolean;
 }) {
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
+  // A photo just uploaded to the platform (e.g. a generated image published minutes ago) can 404
+  // for a bit while the CDN finishes replicating it — tracked per-URL so switching back to an
+  // already-loaded photo doesn't show a stale broken state, and so retrying doesn't require
+  // reopening the modal.
+  const [brokenUrls, setBrokenUrls] = useState<Record<string, boolean>>({});
 
   if (images.length === 0 || !baseImageUrl) return null;
+
+  const isBroken = brokenUrls[baseImageUrl] === true;
 
   const activeCrop = allowCrop && crop?.imageUrl === baseImageUrl ? crop : undefined;
 
@@ -191,8 +198,30 @@ function PhotoReferencePicker({
           }}
           title={allowCrop ? "Arraste para marcar o detalhe que deve orientar a foto de destaque." : undefined}
         >
-          <img src={baseImageUrl} alt="Referencia do produto" draggable={false} style={{ width: "100%", display: "block", userSelect: "none" }} />
-          {activeCrop && (
+          {isBroken ? (
+            <div className="muted" style={{ padding: "1.5rem 1rem", fontSize: "0.78rem", textAlign: "center" }}>
+              ⚠ Não foi possível carregar esta foto agora — se ela acabou de ser publicada, a
+              plataforma pode ainda estar processando. Aguarde alguns instantes e tente de novo.
+              <div style={{ marginTop: "0.5rem" }}>
+                <button
+                  type="button"
+                  className="link-button"
+                  onClick={() => setBrokenUrls((prev) => ({ ...prev, [baseImageUrl]: false }))}
+                >
+                  Tentar novamente
+                </button>
+              </div>
+            </div>
+          ) : (
+            <img
+              src={baseImageUrl}
+              alt="Referencia do produto"
+              draggable={false}
+              style={{ width: "100%", display: "block", userSelect: "none" }}
+              onError={() => setBrokenUrls((prev) => ({ ...prev, [baseImageUrl]: true }))}
+            />
+          )}
+          {!isBroken && activeCrop && (
             <div
               style={{
                 position: "absolute",
@@ -261,6 +290,12 @@ function ImageGenerationModal({
   error,
   onCancel,
   onSubmit,
+  runNote,
+  savedRunNote,
+  runNoteSaving,
+  runNoteError,
+  onRunNoteChange,
+  onSaveRunNote,
 }: {
   target: ImageModalTarget;
   images: ProductImage[];
@@ -268,6 +303,12 @@ function ImageGenerationModal({
   error: string | null;
   onCancel: () => void;
   onSubmit: (baseImageUrl: string, crop: ReferenceImageCrop | undefined, note: string) => void;
+  runNote: string;
+  savedRunNote: string;
+  runNoteSaving: boolean;
+  runNoteError: string | null;
+  onRunNoteChange: (value: string) => void;
+  onSaveRunNote: () => void;
 }) {
   const allowCrop = target.kind === "feature_callout";
   const requireNote = Boolean(target.retryImage);
@@ -320,6 +361,40 @@ function ImageGenerationModal({
                 style={IMAGE_NOTE_TEXTAREA_STYLE}
               />
             </label>
+            <div style={{ marginTop: "0.9rem", paddingTop: "0.75rem", borderTop: "1px solid var(--border)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "0.6rem" }}>
+                <div>
+                  <span className="muted" style={{ display: "block", fontSize: "0.78rem" }}>
+                    Orientação para imagens desta otimização
+                  </span>
+                  <span className="muted" style={{ display: "block", fontSize: "0.72rem", marginTop: "0.15rem" }}>
+                    Vale para novas imagens e refações desta otimização, somada à regra da categoria.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="link-button"
+                  style={{ fontSize: "0.75rem", whiteSpace: "nowrap" }}
+                  onClick={onSaveRunNote}
+                  disabled={runNoteSaving || runNote.trim() === savedRunNote}
+                >
+                  {runNoteSaving ? "Salvando…" : "Salvar orientação"}
+                </button>
+              </div>
+              <textarea
+                value={runNote}
+                onChange={(event) => onRunNoteChange(event.target.value)}
+                maxLength={500}
+                rows={2}
+                placeholder="Ex.: manter exatamente 2 hastes; não adicionar suporte extra; usar ambiente claro"
+                style={{ ...IMAGE_NOTE_TEXTAREA_STYLE, marginTop: "0.4rem" }}
+              />
+              {runNoteError && (
+                <div className="banner" style={{ marginTop: "0.5rem" }}>
+                  {runNoteError}
+                </div>
+              )}
+            </div>
           </>
         )}
         {error && (
@@ -847,34 +922,6 @@ export function RunDetail() {
           )}
         </div>
 
-        <div className="card" style={{ background: "var(--surface-2)", margin: "0 0 1rem" }}>
-          <div className="proposal-header">
-            <div>
-              <h3 style={{ margin: 0 }}>Orientacao de imagens da run</h3>
-              <p className="muted" style={{ margin: "0.25rem 0 0", fontSize: "0.82rem" }}>
-                Vale para novas imagens e refacoes desta otimizacao, somada a regra da categoria.
-              </p>
-            </div>
-            <button
-              type="button"
-              className="secondary"
-              onClick={handleSaveRunImageNote}
-              disabled={savingRunImageNote || runImageNote.trim() === savedRunImageNote}
-            >
-              {savingRunImageNote ? "Salvando..." : "Salvar orientacao"}
-            </button>
-          </div>
-          <textarea
-            value={runImageNote}
-            onChange={(e) => handleRunImageNoteChange(e.target.value)}
-            maxLength={500}
-            rows={2}
-            placeholder="Ex.: manter exatamente 2 hastes; nao adicionar suporte extra; usar ambiente claro"
-            style={IMAGE_NOTE_TEXTAREA_STYLE}
-          />
-          {runImageNoteError && <div className="banner" style={{ marginTop: "0.6rem" }}>{runImageNoteError}</div>}
-        </div>
-
         <div className="banner">
           <span>
             {runInProgress
@@ -1321,6 +1368,12 @@ export function RunDetail() {
             setImageModalError(null);
           }}
           onSubmit={handleImageModalSubmit}
+          runNote={runImageNote}
+          savedRunNote={savedRunImageNote}
+          runNoteSaving={savingRunImageNote}
+          runNoteError={runImageNoteError}
+          onRunNoteChange={handleRunImageNoteChange}
+          onSaveRunNote={handleSaveRunImageNote}
         />
       )}
     </>

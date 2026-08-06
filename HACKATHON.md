@@ -1000,6 +1000,21 @@ agora vive só no momento da geração a que se refere. Backend: `POST
 cadastradas do produto, como já era feito pro `referenceCrop`), aceito pelos 4 tipos de geração, não
 só o de destaque.
 
+Duas correções pequenas no mesmo dia, ambas a partir de teste ao vivo do usuário:
+
+- **Foto de referência quebrada no modal**: uma foto recém-publicada pode 404 por alguns instantes
+  enquanto o CDN da VTEX propaga o arquivo — o ícone de imagem quebrada do navegador não dava
+  nenhuma saída. `PhotoReferencePicker` agora trata `onError` da foto e mostra um aviso com
+  "Tentar novamente" no lugar do ícone quebrado.
+- **Card "Orientação de imagens da run" não fazia sentido onde estava**: apontado pelo usuário —
+  esse card só era alcançável DEPOIS que a run já existia (na tela `RunDetail`), mas o caso de uso
+  original que justificava o campo (orientar a geração em massa de imagens disparada na criação da
+  run, em `enrichment-run.orchestrator.ts`) já tinha acontecido a essa altura; editar ali só afetava
+  gerações manuais futuras, que já tinham seu próprio campo de instrução no modal. Removido o card
+  solto do topo da run; o mesmo campo (`imageGenerationNote` no `scope` da run, mesma API) agora vive
+  dentro do próprio `ImageGenerationModal`, como uma seção "Orientação para imagens desta otimização"
+  com salvamento próprio, separada da instrução pontual daquela geração.
+
 ## Formação de equipes
 
 - 1 a 5 pessoas por equipe (pode ser solo)
