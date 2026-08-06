@@ -579,7 +579,7 @@ export class GeminiClient implements LlmClient {
   }): Promise<{ sameProduct: boolean; notes: string }> {
     const referenceBlock = await fetchImageDataBlock(params.referenceImageUrl);
     const requiredInstruction = params.requiredInstruction?.trim();
-    return this.callWithSchema<{ sameProduct: boolean; notes: string }>({
+    const verdict = await this.callWithSchema<{ sameProduct: boolean; instructionSatisfied: boolean; notes: string }>({
       operation: "verifyImageIntegrity",
       productId: params.productId,
       systemInstruction:
@@ -590,7 +590,8 @@ export class GeminiClient implements LlmClient {
         "rigoroso: na dúvida, considere que não é o mesmo produto." +
         (requiredInstruction
           ? " Alem disso, existe uma INSTRUCAO OBRIGATORIA do operador. Quando ela for objetiva ou contavel, " +
-            "como numero de barras, hastes, suportes ou pecas, reprove se a imagem gerada nao cumprir exatamente."
+            "como numero de barras, hastes, suportes ou pecas, reprove se a imagem gerada nao cumprir exatamente. " +
+            "Se uma toalha, sombra ou objeto impedir confirmar a contagem exata, instructionSatisfied deve ser false."
           : ""),
       input: [
         referenceBlock,
@@ -604,14 +605,23 @@ export class GeminiClient implements LlmClient {
           sameProduct: {
             type: "boolean",
             description:
-              "true somente se for claramente o mesmo produto, sem alteracao de forma/cor/material/rotulo, e se cumprir a instrucao obrigatoria objetiva quando houver.",
+              "true somente se for claramente o mesmo produto, sem alteracao de forma/cor/material/rotulo.",
+          },
+          instructionSatisfied: {
+            type: "boolean",
+            description:
+              "true se nao houver instrucao obrigatoria; ou, havendo instrucao, somente se a imagem cumprir exatamente. Para quantidades, conte visualmente; na duvida, false.",
           },
           notes: { type: "string", description: "Justificativa curta (1 frase) do veredito." },
         },
-        required: ["sameProduct", "notes"],
+        required: ["sameProduct", "instructionSatisfied", "notes"],
       },
       maxOutputTokens: 200,
     });
+    return {
+      sameProduct: verdict.sameProduct && verdict.instructionSatisfied,
+      notes: verdict.instructionSatisfied ? verdict.notes : `Instrucao obrigatoria nao confirmada: ${verdict.notes}`,
+    };
   }
 
   async extractStructuredData<T>(params: {

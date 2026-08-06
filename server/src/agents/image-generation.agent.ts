@@ -27,7 +27,22 @@ interface ProductImage {
 
 /** Gemini's multi-image input works best with a couple of clear references, not the whole gallery
  *  — more images raises cost and risks diluting which one the model treats as "the product". */
-const MAX_REFERENCE_IMAGES = 2;
+const MAX_REFERENCE_IMAGES = 1;
+const PRINCIPAL_IMAGE_PATTERN = /principal|main|hero/i;
+
+function selectReferenceImageUrls(images: ProductImage[]): string[] {
+  return [...images]
+    .filter((img) => Boolean(img.ImageUrl))
+    .sort((a, b) => {
+      const aText = `${a.ImageText ?? ""} ${a.ImageUrl}`;
+      const bText = `${b.ImageText ?? ""} ${b.ImageUrl}`;
+      const aPrincipal = PRINCIPAL_IMAGE_PATTERN.test(aText);
+      const bPrincipal = PRINCIPAL_IMAGE_PATTERN.test(bText);
+      return Number(bPrincipal) - Number(aPrincipal);
+    })
+    .slice(0, MAX_REFERENCE_IMAGES)
+    .map((img) => img.ImageUrl);
+}
 
 /** "Integridade do produto é inegociável" (requisito explícito do usuário, reforçado de novo em
  *  2026-08-05: sempre deixar explícito, nunca gerar variação parecida, e frisar cor à parte por
@@ -50,7 +65,8 @@ function requiredNoteInstruction(note?: string): string {
     " INSTRUCAO ADICIONAL OBRIGATORIA DO OPERADOR: " +
     trimmed +
     ". Esta instrucao deve ser obedecida acima de qualquer decisao estetica. Se ela citar quantidade, conte visualmente e mostre exatamente a quantidade pedida; " +
-    "nao adicione pecas, barras, hastes, suportes ou detalhes extras que nao existam no produto de referencia."
+    "nao adicione pecas, barras, hastes, suportes ou detalhes extras que nao existam no produto de referencia. Use a foto principal de referencia como fonte de geometria; " +
+    "em cenas com toalhas ou objetos cobrindo parte do produto, preserve a quantidade real sem duplicar nem dividir barras visiveis nas laterais."
   );
 }
 
@@ -102,7 +118,10 @@ export async function generateProductImage(params: {
     throw new Error("Este produto não tem nenhuma imagem cadastrada para usar como referência.");
   }
 
-  const referenceImageUrls = images.slice(0, MAX_REFERENCE_IMAGES).map((img) => img.ImageUrl);
+  const referenceImageUrls = selectReferenceImageUrls(images);
+  if (referenceImageUrls.length === 0) {
+    throw new Error("Este produto nÃ£o tem nenhuma imagem cadastrada para usar como referÃªncia.");
+  }
   const categoryPromptRules = await resolveCategoryPromptRules(product.platform, product.category);
   const categoryNote = categoryPromptRules?.imageInstructions[kind];
   const mergedNote = [categoryNote, note].filter((value): value is string => Boolean(value?.trim())).join(" ");
@@ -130,7 +149,7 @@ export async function generateProductImage(params: {
         generatedBase64: generated.base64,
         generatedMimeType: generated.mimeType,
         productId: product.id,
-        requiredInstruction: note,
+        requiredInstruction: mergedNote,
       });
       integrityNotes = verdict.notes;
       if (verdict.sameProduct) {
