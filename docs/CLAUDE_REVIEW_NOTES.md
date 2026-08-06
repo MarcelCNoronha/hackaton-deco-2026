@@ -35,6 +35,14 @@ O que falta amanha:
 - Se a geracao falhar, checar primeiro conexao/billing/quota da chave Gemini de producao antes de mexer em codigo.
 - Depois disso, seguir para as proximas evolucoes do `HACKATHON.md`.
 
+Atualizacao antes de parar:
+
+- Deploy posterior tambem concluido: commit `2756c30 Use principal reference for image generation`.
+- VPS validada com `IMAGE_TAG=sha-2756c30`, `/health` publico 200 e API interna `{"ok":true}`.
+- Esse commit mudou a geracao de imagem para usar a foto principal como referencia dominante e separou o gate em `sameProduct` + `instructionSatisfied`.
+- Observacao real do usuario: a imagem saiu correta quando a instrucao pediu "uma barra a menos"; isso sugere vies do modelo de imagem para adicionar/compensar barras em cena ambientada.
+- Amanha: preferir testar primeiro com a regra nova e a foto principal como referencia. Se ainda houver desvio, guardar a heuristica temporaria ("pedir uma a menos") apenas como workaround operacional, nao como regra permanente do sistema.
+
 ## Resultado da validacao local
 
 - `server`: `npm run build` passou.
