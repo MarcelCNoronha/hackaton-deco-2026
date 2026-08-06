@@ -264,15 +264,17 @@ specs, FAQ, dados estruturados) + alt-text de imagem, sem opção de escolher. A
   `model-recommendations.ts`). Dá pra montar em cima do que já existe em `agent_request_logs`
   (tem `provider`/`model`/`costUsd`/`createdAt` por chamada) sem precisar de tabela nova.
 
-- **Analytics agregado combinando Google + otimizações** — pedido em 2026-08-05 ("colocar no
-  radar"), não implementado. Diferente do item acima (que é sobre custo/uso de IA): a ideia é uma
-  visão histórica cruzando os deltas reais de GSC/GA4 (`impact.agent.ts`) com o histórico de runs
-  de otimização — ex. "impressões subiram X% no mês seguinte às otimizações de categoria Y". Hoje
-  o `RealImpactPanel` só existe por produto, sob demanda; um agregado exigiria decidir uma janela
-  comum entre produtos com `publishedAt` diferentes (ver nota de escopo cortado na seção "Qualidade
-  de conteúdo com dados reais + impacto real sem tabela de snapshot" abaixo) — o custo de N
-  chamadas ao Google por produto na carga de uma página só valeria a pena com mais produtos já
-  maturados do que os 2 que temos até agora.
+- ~~**Analytics agregado combinando Google + otimizações**~~ — **implementado em 2026-08-06** com
+  foco no que o usuário pediu como principal: **acessos e retorno financeiro**. A página Impacto
+  agora tem um painel agregado e uma tabela produto a produto. A regra usa a primeira publicação
+  real do produto como pivô, espera 14 dias de maturação do Google, compara 28 dias antes contra
+  até 28 dias depois, e mede GSC (impressões, cliques, CTR, posição média) + GA4 (sessões, sessões
+  engajadas, compras, taxa de compra e receita). Para evitar N chamadas por produto, o backend
+  busca relatórios diários por página/item em janelas amplas e calcula localmente cada produto. A
+  receita usa `itemRevenue`/`itemsPurchased` quando o GA4 consegue casar `itemId` com SKU/ID do
+  produto; quando não há e-commerce por item, cai para receita por página como sinal secundário.
+  O painel também marca confiança da amostra (poucos dados, janela parcial, completa) para não
+  vender certeza antes de o histórico maturar.
 
 - **Geração de vídeo curto** — adiado para 2026-08-04 ("vamos fazer amanhã"). Ainda não
   pesquisado; a geração de imagem (ver abaixo) já dá o padrão de client/agent/rota a seguir.

@@ -219,9 +219,15 @@ resolvidos pelo codigo atual.
   - Base provavel: `agent_request_logs`, sem tabela nova inicialmente.
 
 - Analytics agregado Google + otimizacoes:
-  - cruzar deltas reais de GSC/GA4 com historico de runs;
-  - exige decidir janela comum entre produtos com `publishedAt` diferentes;
-  - so vale priorizar quando houver mais produtos maturados.
+  - implementado em 2026-08-06 na pagina Impacto;
+  - foco principal: acessos e retorno financeiro;
+  - mede consolidado e produto a produto usando primeira publicacao como pivo, 14 dias de maturacao
+    e janela de 28 dias antes/depois;
+  - GSC: impressoes, cliques, CTR, posicao media;
+  - GA4: sessoes, sessoes engajadas, compras, taxa de compra e receita;
+  - receita prioriza item-level (`itemRevenue`/`itemsPurchased`) quando `itemId` casa com SKU/ID do
+    produto, com fallback para receita por pagina quando o e-commerce por item nao estiver
+    disponivel.
 
 - Geracao de video curto de produto:
   - video gerado entre 15 e 30 segundos;

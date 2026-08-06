@@ -9,6 +9,15 @@ export interface GscSearchAnalyticsRow {
   position: number;
 }
 
+export interface GscDailyPageRow {
+  date: string;
+  page: string;
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  position: number;
+}
+
 /** Thin client for the Google Search Console API (searchanalytics.query). */
 export class GscClient {
   constructor(
@@ -40,6 +49,39 @@ export class GscClient {
     });
     const body = (await res.json()) as { rows?: GscSearchAnalyticsRow[] };
     return body.rows ?? [];
+  }
+
+  async queryByPageAndDate(params: { startDate: string; endDate: string; rowLimit?: number }): Promise<GscDailyPageRow[]> {
+    const accessToken = await getGoogleAccessToken(this.refreshToken);
+    const res = await requestWithRetry({
+      provider: "google",
+      operation: "gsc.searchAnalytics.query",
+      url: `https://searchconsole.googleapis.com/webmasters/v3/sites/${encodeURIComponent(this.siteUrl)}/searchAnalytics/query`,
+      init: {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          startDate: params.startDate,
+          endDate: params.endDate,
+          dimensions: ["date", "page"],
+          aggregationType: "byPage",
+          rowLimit: params.rowLimit ?? 25000,
+        }),
+      },
+      onAttempt: this.onAttempt,
+    });
+    const body = (await res.json()) as { rows?: GscSearchAnalyticsRow[] };
+    return (body.rows ?? []).map((row) => ({
+      date: row.keys[0] ?? "",
+      page: row.keys[1] ?? "",
+      clicks: row.clicks,
+      impressions: row.impressions,
+      ctr: row.ctr,
+      position: row.position,
+    }));
   }
 
   /** Real search queries that actually bring people to each page — grounds SEO title/keywords

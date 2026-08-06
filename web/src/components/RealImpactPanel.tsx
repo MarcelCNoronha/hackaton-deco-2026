@@ -2,41 +2,32 @@ import { StatTile } from "./StatTile";
 import type { RealImpact } from "../api/client";
 
 function pct(n: number | null): string {
-  return n === null ? "—" : `${n >= 0 ? "+" : ""}${n}%`;
+  return n === null ? "-" : `${n >= 0 ? "+" : ""}${n}%`;
 }
 
 function money(n: number | null): string {
-  return n === null ? "—" : `${n >= 0 ? "+" : ""}R$ ${n.toFixed(2)}`;
+  return n === null ? "-" : `${n >= 0 ? "+" : ""}R$ ${n.toFixed(2)}`;
 }
 
-/** Per-product antes/depois panel fed by a LIVE GSC/GA4 comparison (see impact.agent.ts) — never a
- *  local snapshot. The two windows and the delta only exist once `status === "ready"`; the other
- *  states explain exactly why not yet, since "sem dados" alone doesn't say whether that's a data
- *  problem or just Google needing more time. */
+function int(n: number | null): string {
+  return n === null ? "-" : n.toLocaleString("pt-BR");
+}
+
+/** Per-product before/after panel fed by a live GSC/GA4 comparison. */
 export function RealImpactPanel({ impact }: { impact: RealImpact }) {
   if (impact.status === "no_url") {
-    return (
-      <div className="empty-state">
-        Este produto não tem uma URL conhecida — não é possível cruzar com o Search Console/GA4.
-      </div>
-    );
+    return <div className="empty-state">Este produto nao tem URL conhecida para cruzar com Search Console/GA4.</div>;
   }
 
   if (impact.status === "not_published") {
-    return (
-      <div className="empty-state">
-        Nenhum campo deste produto foi publicado ainda — o impacto real só existe a partir da
-        primeira publicação (veja a aba de Revisão do run).
-      </div>
-    );
+    return <div className="empty-state">Nenhum campo deste produto foi publicado ainda. O impacto real comeca na primeira publicacao.</div>;
   }
 
   if (impact.status === "maturing") {
     return (
       <div className="empty-state">
-        Publicado há {impact.daysSincePublish} {impact.daysSincePublish === 1 ? "dia" : "dias"} — o
-        Google ainda está processando a mudança. Faltam {impact.daysUntilReady}{" "}
-        {impact.daysUntilReady === 1 ? "dia" : "dias"} para a comparação ficar disponível.
+        Publicado ha {impact.daysSincePublish} {impact.daysSincePublish === 1 ? "dia" : "dias"}. Faltam{" "}
+        {impact.daysUntilReady} {impact.daysUntilReady === 1 ? "dia" : "dias"} para a comparacao ficar disponivel.
       </div>
     );
   }
@@ -47,25 +38,42 @@ export function RealImpactPanel({ impact }: { impact: RealImpact }) {
   return (
     <div>
       <p className="muted" style={{ marginTop: 0, fontSize: "0.82rem" }}>
-        Antes: {before.startDate} a {before.endDate} · Depois: {after.startDate} a {after.endDate} — publicado há{" "}
-        {impact.daysSincePublish} dias. Consulta em tempo real ao Google, sem armazenar cópia local.
+        Antes: {before.startDate} a {before.endDate} · Depois: {after.startDate} a {after.endDate}. Consulta em tempo
+        real ao Google, sem armazenar copia local.
       </p>
       <div className="stat-row">
-        <StatTile label="Impressões (GSC)" value={pct(deltas.impressionsPct)} deltaGood={(deltas.impressionsPct ?? 0) >= 0} />
+        <StatTile label="Impressoes (GSC)" value={pct(deltas.impressionsPct)} deltaGood={(deltas.impressionsPct ?? 0) >= 0} />
         <StatTile
-          label="Posição média (GSC)"
-          value={deltas.positionDelta === null ? "—" : deltas.positionDelta.toFixed(1)}
+          label="Posicao media (GSC)"
+          value={deltas.positionDelta === null ? "-" : deltas.positionDelta.toFixed(1)}
           delta={deltas.positionDelta === null ? undefined : deltas.positionDelta <= 0 ? "melhorou" : "piorou"}
           deltaGood={(deltas.positionDelta ?? 0) <= 0}
         />
         <StatTile label="CTR (GSC)" value={pct(deltas.ctrDeltaPct)} deltaGood={(deltas.ctrDeltaPct ?? 0) >= 0} />
-        <StatTile label="Sessões (GA4)" value={pct(deltas.sessionsPct)} deltaGood={(deltas.sessionsPct ?? 0) >= 0} />
+        <StatTile label="Sessoes (GA4)" value={pct(deltas.sessionsPct)} deltaGood={(deltas.sessionsPct ?? 0) >= 0} />
         <StatTile
-          label="Taxa de conversão (GA4)"
+          label="Sessoes engajadas (GA4)"
+          value={pct(deltas.engagedSessionsPct)}
+          delta={`${int(before.engagedSessions)} -> ${int(after.engagedSessions)}`}
+          deltaGood={(deltas.engagedSessionsPct ?? 0) >= 0}
+        />
+        <StatTile
+          label="Compras (GA4)"
+          value={pct(deltas.purchasesPct)}
+          delta={`${int(before.purchases)} -> ${int(after.purchases)}`}
+          deltaGood={(deltas.purchasesPct ?? 0) >= 0}
+        />
+        <StatTile
+          label="Taxa de compra (GA4)"
           value={pct(deltas.conversionRateDeltaPct)}
           deltaGood={(deltas.conversionRateDeltaPct ?? 0) >= 0}
         />
-        <StatTile label="Receita (GA4)" value={money(deltas.revenueDeltaAbs)} deltaGood={(deltas.revenueDeltaAbs ?? 0) >= 0} />
+        <StatTile
+          label="Receita (GA4)"
+          value={money(deltas.revenueDeltaAbs)}
+          delta={pct(deltas.revenuePct)}
+          deltaGood={(deltas.revenueDeltaAbs ?? 0) >= 0}
+        />
       </div>
     </div>
   );

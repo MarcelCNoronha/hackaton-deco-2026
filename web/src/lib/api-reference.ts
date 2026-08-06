@@ -337,11 +337,20 @@ export const API_REFERENCE: ApiSystem[] = [
         method: "POST",
         endpoint: "/properties/{propertyId}:runReport",
         kind: "read",
-        fields: "dimension pagePath → sessions, sessionConversionRate, totalRevenue",
+        fields: "dimension date/pagePath -> sessions, engagedSessions, ecommercePurchases, purchaseRevenue",
         purpose:
           "Sessões/conversão/receita por página — fecha a ponta que o GSC não cobre (negócio, não só visibilidade); " +
           "mesmo uso duplo do queryByPage do GSC (priorização + janelas do painel de Impacto real, sempre ao vivo).",
-        caveat: "Também casado só por pathname hoje — daria pra trocar pra dimensão itemId (SKU) se a loja já mandar item_id nos eventos de e-commerce.",
+        caveat: "O agregado financeiro tenta antes a leitura por itemId/SKU; a leitura por pagina fica como fallback quando o e-commerce por item nao existe.",
+      },
+      {
+        name: "runItemDailyReport",
+        method: "POST",
+        endpoint: "/properties/{propertyId}:runReport",
+        kind: "read",
+        fields: "dimension date/itemId/itemName -> itemsViewed, itemsAddedToCart, itemsCheckedOut, itemsPurchased, itemRevenue",
+        purpose: "Mensura retorno financeiro produto a produto quando o GA4 envia item_id nos eventos de e-commerce.",
+        caveat: "So casa com CatalogIA quando itemId bate com SKU, product id ou variant id salvos no snapshot local.",
       },
       {
         name: "testConnection",

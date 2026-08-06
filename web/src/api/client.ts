@@ -418,7 +418,9 @@ export interface RealImpactWindow {
   ctr: number | null;
   avgPosition: number | null;
   sessions: number | null;
+  engagedSessions: number | null;
   conversionRate: number | null;
+  purchases: number | null;
   revenue: number | null;
 }
 
@@ -436,8 +438,11 @@ export interface RealImpact {
     positionDelta: number | null;
     ctrDeltaPct: number | null;
     sessionsPct: number | null;
+    engagedSessionsPct: number | null;
     conversionRateDeltaPct: number | null;
+    purchasesPct: number | null;
     revenueDeltaAbs: number | null;
+    revenuePct: number | null;
   };
 }
 
@@ -477,6 +482,92 @@ export interface ImpactSummary {
   requiredAttributesFilledPct: number;
   estimatedTimeSavedMinutes: number;
   estimatedTimeSavedPct: number;
+}
+
+export type BusinessImpactStatus = "missing_google" | "no_published_products" | "no_mature_products" | "no_google_data" | "ready";
+export type BusinessImpactConfidence = "waiting" | "low_data" | "partial" | "complete";
+export type BusinessImpactRevenueSource = "item" | "page" | "none" | "mixed";
+
+export interface BusinessImpactWindow {
+  impressions: number;
+  clicks: number;
+  ctr: number | null;
+  avgPosition: number | null;
+  sessions: number;
+  engagedSessions: number;
+  engagementRate: number | null;
+  itemViews: number;
+  addToCarts: number;
+  checkouts: number;
+  purchases: number;
+  purchaseRate: number | null;
+  revenue: number;
+  pageRevenue: number;
+  itemRevenue: number;
+}
+
+export interface BusinessImpactDeltas {
+  impressionsPct: number | null;
+  clicksPct: number | null;
+  ctrPoints: number | null;
+  positionDelta: number | null;
+  sessionsPct: number | null;
+  engagedSessionsPct: number | null;
+  engagementRatePoints: number | null;
+  itemViewsPct: number | null;
+  addToCartsPct: number | null;
+  checkoutsPct: number | null;
+  purchasesPct: number | null;
+  purchaseRatePoints: number | null;
+  revenueAbs: number;
+  revenuePct: number | null;
+}
+
+export interface BusinessImpactProduct {
+  productId: number;
+  title: string;
+  externalId: string;
+  sku: string | null;
+  url: string | null;
+  category: string | null;
+  brand: string | null;
+  publishedAt: string;
+  beforeStartDate: string;
+  beforeEndDate: string;
+  afterStartDate: string;
+  afterEndDate: string;
+  afterWindowDays: number;
+  revenueSource: Exclude<BusinessImpactRevenueSource, "mixed">;
+  aiCostUsd: number;
+  hasGoogleData: boolean;
+  before: BusinessImpactWindow;
+  after: BusinessImpactWindow;
+  deltas: BusinessImpactDeltas;
+}
+
+export interface BusinessImpactSummary {
+  status: BusinessImpactStatus;
+  confidence: BusinessImpactConfidence;
+  generatedAt: string;
+  windowDays: number;
+  maturationDays: number;
+  revenueCurrency: string;
+  revenueSource: BusinessImpactRevenueSource;
+  productCounts: {
+    published: number;
+    missingUrl: number;
+    maturing: number;
+    mature: number;
+    measured: number;
+    fullAfterWindow: number;
+    partialAfterWindow: number;
+    itemMatched: number;
+  };
+  aiCostUsd: number;
+  before: BusinessImpactWindow;
+  after: BusinessImpactWindow;
+  deltas: BusinessImpactDeltas;
+  products: BusinessImpactProduct[];
 }
 
 export interface RunCosts {
@@ -665,6 +756,7 @@ export const api = {
   runCosts: (runId: number) => request<RunCosts>(`/runs/${runId}/costs`),
   runImpactSummary: (runId: number) => request<ImpactSummary>(`/runs/${runId}/impact-summary`),
   overallImpactSummary: () => request<ImpactSummary>("/impact/summary"),
+  businessImpact: () => request<BusinessImpactSummary>("/impact/business"),
   reviewProposal: (id: number, body: { status: "approved" | "rejected" | "edited"; proposedValue?: string }) =>
     request<EnrichmentProposal>(`/proposals/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   approveAllProposals: (runId: number) =>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router";
-import { api, type CatalogFilterOptions, type ImpactSummary, type Product, type RealImpact } from "../api/client";
+import { api, type BusinessImpactSummary, type CatalogFilterOptions, type ImpactSummary, type Product, type RealImpact } from "../api/client";
+import { BusinessImpactPanel } from "../components/BusinessImpactPanel";
 import { CatalogFilterBar } from "../components/CatalogFilterBar";
 import { ImpactSummaryBanner } from "../components/ImpactSummaryBanner";
 import { RealImpactPanel } from "../components/RealImpactPanel";
@@ -15,6 +16,7 @@ export function Impact() {
   });
   const [realImpact, setRealImpact] = useState<RealImpact | null>(null);
   const [impactSummary, setImpactSummary] = useState<ImpactSummary | null>(null);
+  const [businessImpact, setBusinessImpact] = useState<BusinessImpactSummary | null>(null);
 
   const [search, setSearch] = useState("");
   const [categoryId, setCategoryId] = useState("");
@@ -27,6 +29,7 @@ export function Impact() {
       .then(setFilters)
       .catch(() => setFilters({ categories: [], brands: [] }));
     api.overallImpactSummary().then(setImpactSummary);
+    api.businessImpact().then(setBusinessImpact).catch((err) => console.error("Failed to load business impact", err));
   }, []);
 
   useEffect(() => {
@@ -64,6 +67,7 @@ export function Impact() {
 
       <div className="page-content">
         {impactSummary && <ImpactSummaryBanner summary={impactSummary} />}
+        {businessImpact && <BusinessImpactPanel summary={businessImpact} onSelectProduct={setSelected} />}
 
         <section className="card">
           <CatalogFilterBar

@@ -27,7 +27,9 @@ export interface RealImpactWindow {
   ctr: number | null;
   avgPosition: number | null;
   sessions: number | null;
+  engagedSessions: number | null;
   conversionRate: number | null;
+  purchases: number | null;
   revenue: number | null;
 }
 
@@ -45,8 +47,11 @@ export interface RealImpactResult {
     positionDelta: number | null;
     ctrDeltaPct: number | null;
     sessionsPct: number | null;
+    engagedSessionsPct: number | null;
     conversionRateDeltaPct: number | null;
+    purchasesPct: number | null;
     revenueDeltaAbs: number | null;
+    revenuePct: number | null;
   };
 }
 
@@ -85,10 +90,11 @@ export async function getProductRealImpact(params: {
     };
   }
 
-  const beforeStart = new Date(publishedAt.getTime() - WINDOW_DAYS * MS_PER_DAY);
-  const beforeEnd = publishedAt;
-  const afterStart = new Date(publishedAt.getTime() + MATURATION_DAYS * MS_PER_DAY);
-  const afterEnd = new Date(Math.min(now.getTime(), afterStart.getTime() + WINDOW_DAYS * MS_PER_DAY));
+  const publishedDay = new Date(Date.UTC(publishedAt.getUTCFullYear(), publishedAt.getUTCMonth(), publishedAt.getUTCDate()));
+  const beforeStart = new Date(publishedDay.getTime() - WINDOW_DAYS * MS_PER_DAY);
+  const beforeEnd = new Date(publishedDay.getTime() - MS_PER_DAY);
+  const afterStart = new Date(publishedDay.getTime() + MATURATION_DAYS * MS_PER_DAY);
+  const afterEnd = new Date(Math.min(now.getTime(), afterStart.getTime() + (WINDOW_DAYS - 1) * MS_PER_DAY));
 
   const path = pathnameOf(product.url);
 
@@ -115,7 +121,9 @@ export async function getProductRealImpact(params: {
     ctr: gscB?.ctr ?? null,
     avgPosition: gscB?.position ?? null,
     sessions: ga4B?.sessions ?? null,
+    engagedSessions: ga4B?.engagedSessions ?? null,
     conversionRate: ga4B?.conversionRate ?? null,
+    purchases: ga4B?.purchases ?? null,
     revenue: ga4B?.revenue ?? null,
   };
   const after: RealImpactWindow = {
@@ -126,7 +134,9 @@ export async function getProductRealImpact(params: {
     ctr: gscA?.ctr ?? null,
     avgPosition: gscA?.position ?? null,
     sessions: ga4A?.sessions ?? null,
+    engagedSessions: ga4A?.engagedSessions ?? null,
     conversionRate: ga4A?.conversionRate ?? null,
+    purchases: ga4A?.purchases ?? null,
     revenue: ga4A?.revenue ?? null,
   };
 
@@ -144,9 +154,12 @@ export async function getProductRealImpact(params: {
           : null,
       ctrDeltaPct: pctDelta(before.ctr, after.ctr),
       sessionsPct: pctDelta(before.sessions, after.sessions),
+      engagedSessionsPct: pctDelta(before.engagedSessions, after.engagedSessions),
       conversionRateDeltaPct: pctDelta(before.conversionRate, after.conversionRate),
+      purchasesPct: pctDelta(before.purchases, after.purchases),
       revenueDeltaAbs:
         before.revenue !== null && after.revenue !== null ? Math.round((after.revenue - before.revenue) * 100) / 100 : null,
+      revenuePct: pctDelta(before.revenue, after.revenue),
     },
   };
 }

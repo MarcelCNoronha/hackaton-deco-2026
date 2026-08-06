@@ -564,6 +564,12 @@ button.danger {
   background: var(--accent-soft);
 }
 
+.compact-btn {
+  padding: 0.35rem 0.65rem;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
 /* ---------- Status badges (icon/dot + label, never color alone) ---------- */
 
 .status-badge {
@@ -673,6 +679,11 @@ button.danger {
 table {
   width: 100%;
   border-collapse: collapse;
+}
+
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
 }
 
 th {
