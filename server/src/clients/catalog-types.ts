@@ -39,6 +39,8 @@ export interface CatalogProductDetail extends CatalogProductSummary {
 }
 
 export interface CatalogFilterOptions {
+  /** VTEX: Search facet value. Department is a single id ("6"), while category/subcategory uses
+   *  the ancestor id path ("6/13", "6/13/43"). Shopify: Collection id. */
   categories: Array<{ id: string; name: string }>;
   brands: Array<{ id: string; name: string }>;
 }
@@ -69,8 +71,9 @@ export interface CategoryFieldDefinition {
 
 export interface CatalogListParams {
   search?: string;
-  /** VTEX: category id (tree node). Shopify: Collection id — filters by the same Collections
-   *  membership shown in the product list's "Coleção" column, not the productType field. */
+  /** VTEX: category facet value from listFilterOptions ("6" or "6/13/43"). Shopify: Collection id
+   *  — filters by the same Collections membership shown in the product list's "Coleção" column,
+   *  not the productType field. */
   categoryId?: string;
   brandId?: string;
   page: number;

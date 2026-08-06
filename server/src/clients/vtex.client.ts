@@ -116,10 +116,50 @@ function formatVtexCategoryPath(categories?: string[]): string | null {
   return path ? path.split("/").join(" > ") : null;
 }
 
-interface VtexCategoryTreeNode {
+export interface VtexCategoryTreeNode {
   id: number;
   name: string;
   children?: VtexCategoryTreeNode[];
+}
+
+function normalizeVtexCategoryFacetValue(categoryId: string): string {
+  return categoryId.trim().replace(/^\/+|\/+$/g, "");
+}
+
+export function buildVtexCategoryFilterOptions(tree: VtexCategoryTreeNode[]): Array<{ id: string; name: string }> {
+  const categories: Array<{ id: string; name: string }> = [];
+  const walk = (nodes: VtexCategoryTreeNode[], parentPath: string | null, parentIds: string[]) => {
+    for (const node of nodes) {
+      const path = parentPath ? `${parentPath} > ${node.name}` : node.name;
+      const ids = [...parentIds, String(node.id)];
+      // VTEX Search only accepts a plain id for level 1. Category/subcategory filters need the
+      // full ancestor id path, e.g. C:6/13/43, otherwise they return zero products.
+      categories.push({ id: ids.join("/"), name: path });
+      if (node.children?.length) walk(node.children, path, ids);
+    }
+  };
+  walk(tree, null, []);
+  return categories;
+}
+
+export function resolveVtexCategoryFacetValue(categoryId: string, tree: VtexCategoryTreeNode[]): string {
+  const normalized = normalizeVtexCategoryFacetValue(categoryId);
+  if (!normalized || normalized.includes("/")) return normalized;
+
+  let resolved: string | null = null;
+  const walk = (nodes: VtexCategoryTreeNode[], parentIds: string[]) => {
+    for (const node of nodes) {
+      const ids = [...parentIds, String(node.id)];
+      if (String(node.id) === normalized) {
+        resolved = ids.join("/");
+        return;
+      }
+      if (node.children?.length) walk(node.children, ids);
+      if (resolved) return;
+    }
+  };
+  walk(tree, []);
+  return resolved ?? normalized;
 }
 
 interface VtexBrand {
@@ -338,7 +378,7 @@ export class VtexClient implements CatalogClient {
     const to = from + params.pageSize - 1;
     const query = new URLSearchParams({ _from: String(from), _to: String(to) });
     if (params.search) query.set("ft", params.search);
-    if (params.categoryId) query.append("fq", `C:${params.categoryId}`);
+    if (params.categoryId) query.append("fq", `C:${await this.resolveCategoryFacetValue(params.categoryId)}`);
     if (params.brandId) query.append("fq", `B:${params.brandId}`);
 
     const res = await requestWithRetry({
@@ -384,6 +424,18 @@ export class VtexClient implements CatalogClient {
     return ((await res.json()) as VtexCategoryTreeNode[]) ?? [];
   }
 
+  private async resolveCategoryFacetValue(categoryId: string): Promise<string> {
+    const normalized = normalizeVtexCategoryFacetValue(categoryId);
+    if (!normalized || normalized.includes("/")) return normalized;
+
+    try {
+      return resolveVtexCategoryFacetValue(normalized, await this.fetchCategoryTree());
+    } catch (err) {
+      console.error(`VTEX category filter path lookup failed for category ${categoryId} - falling back to raw value`, err);
+      return normalized;
+    }
+  }
+
   async listFilterOptions(): Promise<CatalogFilterOptions> {
     const [tree, brandRes] = await Promise.all([
       this.fetchCategoryTree(),
@@ -398,17 +450,8 @@ export class VtexClient implements CatalogClient {
 
     const brands = ((await brandRes.json()) as VtexBrand[]) ?? [];
 
-    const categories: Array<{ id: string; name: string }> = [];
-    const flatten = (nodes: VtexCategoryTreeNode[]) => {
-      for (const node of nodes) {
-        categories.push({ id: String(node.id), name: node.name });
-        if (node.children?.length) flatten(node.children);
-      }
-    };
-    flatten(tree);
-
     return {
-      categories,
+      categories: buildVtexCategoryFilterOptions(tree),
       brands: brands.filter((b) => b.isActive !== false).map((b) => ({ id: String(b.id), name: b.name })),
     };
   }

@@ -70,6 +70,7 @@ export interface CatalogProductSummary {
 }
 
 export interface CatalogFilterOptions {
+  /** VTEX: department id or category/subcategory id path ("6/13/43"). Shopify: collection id. */
   categories: Array<{ id: string; name: string }>;
   brands: Array<{ id: string; name: string }>;
 }
