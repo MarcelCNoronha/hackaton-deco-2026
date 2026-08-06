@@ -72,6 +72,17 @@ const EMPTY_RULES_DRAFT: PromptRulesDraft = {
   imageInstructions: {},
 };
 
+const RULE_TEXTAREA_STYLE = {
+  width: "100%",
+  resize: "vertical",
+  padding: "0.55rem 0.7rem",
+  borderRadius: "var(--radius-md)",
+  border: "1px solid var(--border)",
+  background: "var(--page-plane)",
+  color: "inherit",
+  fontFamily: "inherit",
+} as const;
+
 function termsToText(terms: string[]): string {
   return terms.join("\n");
 }
@@ -254,6 +265,7 @@ export function PdpConfig() {
   const [rulesUpdatedAt, setRulesUpdatedAt] = useState<string | null>(null);
   const [rulesLoading, setRulesLoading] = useState(false);
   const [savingRules, setSavingRules] = useState(false);
+  const [rulesExpanded, setRulesExpanded] = useState(false);
 
   function resizePreviewFrame() {
     const doc = previewFrameRef.current?.contentDocument;
@@ -459,6 +471,11 @@ export function PdpConfig() {
 
   const rows = layoutByLevel[activeLevel];
   const selectedSpecFields = categorySpecFields.find((c) => c.categoryPath === selectedCategory);
+  const recommendedTermCount = parseTermList(rulesDraft.recommendedTermsText).length;
+  const forbiddenTermCount = parseTermList(rulesDraft.forbiddenTermsText).length;
+  const fieldRuleCount = Object.values(rulesDraft.fieldInstructions).filter((value) => value?.trim()).length;
+  const imageRuleCount = Object.values(rulesDraft.imageInstructions).filter((value) => value?.trim()).length;
+  const hasPromptRules = recommendedTermCount + forbiddenTermCount + fieldRuleCount + imageRuleCount > 0;
 
   return (
     <>
@@ -503,131 +520,6 @@ export function PdpConfig() {
               Nenhuma subcategoria sincronizada ainda — clique em "Sincronizar categorias agora" ou reconecte a loja
               VTEX pra poder configurar por categoria.
             </p>
-          )}
-        </section>
-
-        <section className="card" style={{ marginTop: "1.5rem" }}>
-          <div className="proposal-header">
-            <div>
-              <h2 style={{ margin: 0 }}>Regras de linguagem e compliance</h2>
-              {rulesUpdatedAt && (
-                <p className="muted" style={{ margin: "0.2rem 0 0", fontSize: "0.78rem" }}>
-                  Última atualização: {new Date(rulesUpdatedAt).toLocaleString("pt-BR")}
-                </p>
-              )}
-            </div>
-            <button type="button" onClick={handleSavePromptRules} disabled={savingRules || rulesLoading}>
-              {savingRules ? "Salvando…" : "Salvar regras"}
-            </button>
-          </div>
-          <p className="muted" style={{ marginTop: 0 }}>
-            Bloqueie termos sensíveis por categoria, como "medicamento" em suplementos. A geração recebe estas
-            regras no prompt e também é checada antes de criar propostas.
-          </p>
-
-          {rulesLoading ? (
-            <p className="muted">Carregando regras…</p>
-          ) : (
-            <>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "1rem" }}>
-                <label style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
-                  <span className="muted">Termos recomendados</span>
-                  <textarea
-                    value={rulesDraft.recommendedTermsText}
-                    onChange={(e) => setRulesDraft((prev) => ({ ...prev, recommendedTermsText: e.target.value }))}
-                    placeholder={"ex: suplemento alimentar\nvitaminas"}
-                    rows={4}
-                    style={{
-                      width: "100%",
-                      resize: "vertical",
-                      padding: "0.65rem 0.75rem",
-                      borderRadius: "var(--radius-md)",
-                      border: "1px solid var(--border)",
-                      background: "var(--page-plane)",
-                      color: "inherit",
-                      fontFamily: "inherit",
-                    }}
-                  />
-                </label>
-                <label style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
-                  <span className="muted">Termos proibidos</span>
-                  <textarea
-                    value={rulesDraft.forbiddenTermsText}
-                    onChange={(e) => setRulesDraft((prev) => ({ ...prev, forbiddenTermsText: e.target.value }))}
-                    placeholder={"ex: medicamento\ncura\ntratamento"}
-                    rows={4}
-                    style={{
-                      width: "100%",
-                      resize: "vertical",
-                      padding: "0.65rem 0.75rem",
-                      borderRadius: "var(--radius-md)",
-                      border: "1px solid var(--border)",
-                      background: "var(--page-plane)",
-                      color: "inherit",
-                      fontFamily: "inherit",
-                    }}
-                  />
-                </label>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "1rem", marginTop: "1rem" }}>
-                <div>
-                  <h3 style={{ marginTop: 0 }}>Instruções por campo</h3>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "0.55rem" }}>
-                    {ALL_ENRICHMENT_FIELDS.map((field) => (
-                      <label key={field} style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-                        <span className="muted" style={{ fontSize: "0.78rem" }}>
-                          {FIELD_RULE_LABELS[field]}
-                        </span>
-                        <textarea
-                          value={rulesDraft.fieldInstructions[field] ?? ""}
-                          onChange={(e) => updateFieldInstruction(field, e.target.value)}
-                          rows={2}
-                          style={{
-                            width: "100%",
-                            resize: "vertical",
-                            padding: "0.55rem 0.7rem",
-                            borderRadius: "var(--radius-md)",
-                            border: "1px solid var(--border)",
-                            background: "var(--page-plane)",
-                            color: "inherit",
-                            fontFamily: "inherit",
-                          }}
-                        />
-                      </label>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <h3 style={{ marginTop: 0 }}>Instruções por foto</h3>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "0.55rem" }}>
-                    {IMAGE_RULE_KINDS.map((kind) => (
-                      <label key={kind} style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-                        <span className="muted" style={{ fontSize: "0.78rem" }}>
-                          {IMAGE_RULE_LABELS[kind]}
-                        </span>
-                        <textarea
-                          value={rulesDraft.imageInstructions[kind] ?? ""}
-                          onChange={(e) => updateImageInstruction(kind, e.target.value)}
-                          rows={2}
-                          style={{
-                            width: "100%",
-                            resize: "vertical",
-                            padding: "0.55rem 0.7rem",
-                            borderRadius: "var(--radius-md)",
-                            border: "1px solid var(--border)",
-                            background: "var(--page-plane)",
-                            color: "inherit",
-                            fontFamily: "inherit",
-                          }}
-                        />
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </>
           )}
         </section>
 
@@ -860,6 +752,122 @@ export function PdpConfig() {
                 />
               </section>
             </div>
+
+            <section className="card" style={{ marginTop: "1.5rem" }}>
+              <div className="proposal-header">
+                <div>
+                  <h2 style={{ margin: 0 }}>Regras de linguagem e compliance</h2>
+                  <p className="muted" style={{ margin: "0.25rem 0 0", fontSize: "0.82rem" }}>
+                    Termos proibidos como "medicamento" em suplementos, vocabulário recomendado e instruções por campo/foto.
+                  </p>
+                  {rulesUpdatedAt && (
+                    <p className="muted" style={{ margin: "0.2rem 0 0", fontSize: "0.78rem" }}>
+                      Última atualização: {new Date(rulesUpdatedAt).toLocaleString("pt-BR")}
+                    </p>
+                  )}
+                </div>
+                <button type="button" className="secondary" onClick={() => setRulesExpanded((open) => !open)}>
+                  {rulesExpanded ? "Ocultar regras" : "Editar regras"}
+                </button>
+              </div>
+
+              <div style={{ display: "flex", gap: "0.45rem", flexWrap: "wrap", marginTop: "0.75rem" }}>
+                <span className="pill">{recommendedTermCount} recomendados</span>
+                <span className="pill">{forbiddenTermCount} proibidos</span>
+                <span className="pill">{fieldRuleCount} campos</span>
+                <span className="pill">{imageRuleCount} fotos</span>
+                {!hasPromptRules && <span className="pill">sem regras salvas</span>}
+              </div>
+
+              {!rulesExpanded && (
+                <p className="muted" style={{ marginBottom: 0 }}>
+                  Estas regras ficam escondidas para não atrapalhar o editor visual da PDP. Abra apenas quando precisar
+                  ajustar compliance, termos sensíveis ou instruções específicas da categoria selecionada.
+                </p>
+              )}
+
+              {rulesExpanded && (
+                <>
+                  {rulesLoading ? (
+                    <p className="muted">Carregando regras…</p>
+                  ) : (
+                    <>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "1rem", marginTop: "1rem" }}>
+                        <label style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                          <span className="muted">Termos recomendados</span>
+                          <textarea
+                            value={rulesDraft.recommendedTermsText}
+                            onChange={(e) => setRulesDraft((prev) => ({ ...prev, recommendedTermsText: e.target.value }))}
+                            placeholder={"ex: suplemento alimentar\nvitaminas"}
+                            rows={4}
+                            style={{ ...RULE_TEXTAREA_STYLE, padding: "0.65rem 0.75rem" }}
+                          />
+                        </label>
+                        <label style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                          <span className="muted">Termos proibidos</span>
+                          <textarea
+                            value={rulesDraft.forbiddenTermsText}
+                            onChange={(e) => setRulesDraft((prev) => ({ ...prev, forbiddenTermsText: e.target.value }))}
+                            placeholder={"ex: medicamento\ncura\ntratamento"}
+                            rows={4}
+                            style={{ ...RULE_TEXTAREA_STYLE, padding: "0.65rem 0.75rem" }}
+                          />
+                        </label>
+                      </div>
+
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "1rem", marginTop: "1rem" }}>
+                        <div>
+                          <h3 style={{ marginTop: 0 }}>Instruções por campo</h3>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "0.55rem" }}>
+                            {ALL_ENRICHMENT_FIELDS.map((field) => (
+                              <label key={field} style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                                <span className="muted" style={{ fontSize: "0.78rem" }}>
+                                  {FIELD_RULE_LABELS[field]}
+                                </span>
+                                <textarea
+                                  value={rulesDraft.fieldInstructions[field] ?? ""}
+                                  onChange={(e) => updateFieldInstruction(field, e.target.value)}
+                                  rows={2}
+                                  style={RULE_TEXTAREA_STYLE}
+                                />
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div>
+                          <h3 style={{ marginTop: 0 }}>Instruções por foto</h3>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "0.55rem" }}>
+                            {IMAGE_RULE_KINDS.map((kind) => (
+                              <label key={kind} style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                                <span className="muted" style={{ fontSize: "0.78rem" }}>
+                                  {IMAGE_RULE_LABELS[kind]}
+                                </span>
+                                <textarea
+                                  value={rulesDraft.imageInstructions[kind] ?? ""}
+                                  onChange={(e) => updateImageInstruction(kind, e.target.value)}
+                                  rows={2}
+                                  style={RULE_TEXTAREA_STYLE}
+                                />
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="actions" style={{ justifyContent: "flex-start", marginTop: "1rem" }}>
+                        <button type="button" onClick={handleSavePromptRules} disabled={savingRules || rulesLoading}>
+                          {savingRules ? "Salvando…" : "Salvar regras"}
+                        </button>
+                        <button type="button" className="secondary" onClick={() => setRulesExpanded(false)}>
+                          Ocultar
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+            </section>
           </>
         )}
       </div>
