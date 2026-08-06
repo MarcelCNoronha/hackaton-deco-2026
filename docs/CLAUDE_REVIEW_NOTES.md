@@ -230,6 +230,8 @@ resolvidos pelo codigo atual.
   - GA4 preliminar/maduro: sessoes, sessoes engajadas, compras, taxa de compra e receita;
   - o detalhe individual do produto segue a mesma regra: antes de 3 dias fica aguardando, de 3 a
     13 dias mostra GA4 preliminar, e a partir de 14 dias mostra GA4 + GSC;
+  - regra de isolamento: listas/contadores/impacto global usam somente a plataforma ativa
+    (`vtex` ou `shopify`), para anuncios de teste de uma plataforma nao aparecerem na outra;
   - receita prioriza item-level (`itemRevenue`/`itemsPurchased`) quando `itemId` casa com SKU/ID do
     produto, com fallback para receita por pagina quando o e-commerce por item nao estiver
     disponivel.

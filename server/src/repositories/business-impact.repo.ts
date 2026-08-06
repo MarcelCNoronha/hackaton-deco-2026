@@ -1,9 +1,10 @@
-import { and, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { MATURATION_DAYS, PRELIMINARY_IMPACT_DAYS } from "../agents/impact.agent.js";
 import type { Ga4Client, Ga4DailyItemReportRow, Ga4DailyPageReportRow } from "../clients/ga4.client.js";
 import type { GscClient, GscDailyPageRow } from "../clients/gsc.client.js";
 import { db } from "../db/client.js";
 import { agentRequestLogs, products } from "../db/schema.js";
+import { getCatalogPlatform } from "./catalog-settings.repo.js";
 import { getEarliestPublishedAtByProduct } from "./real-impact.repo.js";
 
 export const BUSINESS_IMPACT_WINDOW_DAYS = 28;
@@ -364,7 +365,8 @@ export async function getBusinessImpactSummary(params: {
 }): Promise<BusinessImpactSummary> {
   if (!params.gsc && !params.ga4) return buildEmptySummary("missing_google");
 
-  const productRows = await db.query.products.findMany();
+  const platform = await getCatalogPlatform();
+  const productRows = await db.query.products.findMany({ where: eq(products.platform, platform) });
   const publishedAtByProduct = await getEarliestPublishedAtByProduct(productRows.map((product) => product.id));
   const publishedProducts = productRows.filter((product) => publishedAtByProduct.has(product.id));
   if (publishedProducts.length === 0) return buildEmptySummary("no_published_products");

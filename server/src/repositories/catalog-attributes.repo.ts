@@ -1,6 +1,7 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { products } from "../db/schema.js";
+import type { CatalogPlatform } from "../clients/catalog-types.js";
 
 const MIN_SAMPLE_SIZE = 3;
 const EXPECTED_FREQUENCY_THRESHOLD = 0.5;
@@ -11,11 +12,11 @@ const EXPECTED_FREQUENCY_THRESHOLD = 0.5;
  *  scored) define its own denominator. See evaluator.agent.ts's `computeAttributeCompleteness`.
  *  Returns `null` (caller falls back to the old union-with-patch behavior) when there aren't
  *  enough synced products in the category yet for the frequency count to mean anything. */
-export async function getExpectedAttributeKeys(category: string | null): Promise<string[] | null> {
+export async function getExpectedAttributeKeys(platform: CatalogPlatform, category: string | null): Promise<string[] | null> {
   if (!category) return null;
 
   const rows = await db.query.products.findMany({
-    where: eq(products.category, category),
+    where: and(eq(products.platform, platform), eq(products.category, category)),
     columns: { attributes: true },
   });
   if (rows.length < MIN_SAMPLE_SIZE) return null;

@@ -2,6 +2,7 @@ import { and, cosineDistance, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { enrichmentProposals, products } from "../db/schema.js";
 import type { ReuseReference } from "../clients/llm-types.js";
+import type { CatalogPlatform } from "../clients/catalog-types.js";
 
 /** How close (cosine similarity, 0-1) two products' embeddings must be before one's content is
  *  considered safe to adapt for the other. Deliberately strict — this is meant to catch true
@@ -34,7 +35,7 @@ export interface ReuseDonor {
  *  unreviewed AI draft — and is close enough to count as a near-duplicate. Returns null if
  *  nothing qualifies (including: this is the very first product of its kind, which is expected —
  *  it becomes a future donor itself once its own proposal gets approved). */
-export async function findReuseDonor(excludeProductId: number, embedding: number[]): Promise<ReuseDonor | null> {
+export async function findReuseDonor(platform: CatalogPlatform, excludeProductId: number, embedding: number[]): Promise<ReuseDonor | null> {
   const distance = cosineDistance(products.embedding, embedding);
 
   const [candidate] = await db
@@ -53,7 +54,7 @@ export async function findReuseDonor(excludeProductId: number, embedding: number
         inArray(enrichmentProposals.status, ["approved", "published"]),
       ),
     )
-    .where(and(sql`${products.id} != ${excludeProductId}`, sql`${products.embedding} is not null`))
+    .where(and(eq(products.platform, platform), sql`${products.id} != ${excludeProductId}`, sql`${products.embedding} is not null`))
     .orderBy(distance, desc(enrichmentProposals.createdAt))
     .limit(1);
 

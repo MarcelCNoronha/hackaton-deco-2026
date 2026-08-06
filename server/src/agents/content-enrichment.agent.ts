@@ -273,7 +273,7 @@ export async function proposeContentEnrichment(params: {
   // that doesn't change across retries) — see catalog-attributes.repo.ts for what "expected"
   // means here (a fixed baseline from the category's OWN synced products, not from whatever this
   // same run's AI proposes for this one product).
-  const expectedAttributeKeys = await getExpectedAttributeKeys(product.category);
+  const expectedAttributeKeys = await getExpectedAttributeKeys(product.platform, product.category);
 
   // Category-level signals, fetched once per product (same reasoning as expectedAttributeKeys —
   // fixed facts about the category, not something that should shift across quality-gate retries).
@@ -306,7 +306,7 @@ export async function proposeContentEnrichment(params: {
   // MAX_ATTEMPTS. The whole point of this path is the cost saving from NOT retrying; adding the
   // same gate here would defeat that, and the donor was itself already a human-approved product,
   // so its adaptation starts from a much stronger baseline than a from-scratch draft.
-  const donor = params.embedding ? await findReuseDonor(product.id, params.embedding) : null;
+  const donor = params.embedding ? await findReuseDonor(product.platform, product.id, params.embedding) : null;
 
   if (donor) {
     const enriched = await contentLlm.enrichProductContent({

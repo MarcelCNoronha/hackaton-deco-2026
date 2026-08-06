@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../../db/client.js";
 import { enrichmentProposals, generatedImages, products } from "../../db/schema.js";
 import { requireAuth } from "../../auth/guards.js";
@@ -11,6 +11,7 @@ import { generateProductImage } from "../../agents/image-generation.agent.js";
 import { republishProduct } from "../../agents/publisher.agent.js";
 import { getProductRealImpact } from "../../agents/impact.agent.js";
 import { requireActiveCatalogClient } from "./catalog.routes.js";
+import { getCatalogPlatform } from "../../repositories/catalog-settings.repo.js";
 import { getConnectionCredentials } from "../../repositories/connections.repo.js";
 import { makeRequestLogger } from "../../repositories/logs.repo.js";
 import { GeminiClient } from "../../clients/gemini.client.js";
@@ -41,26 +42,32 @@ export async function productsRoutes(app: FastifyInstance) {
   app.addHook("preHandler", requireAuth);
 
   app.get("/api/products", async () => {
-    return db.query.products.findMany({ orderBy: desc(products.lastSyncedAt) });
+    const platform = await getCatalogPlatform();
+    return db.query.products.findMany({ where: eq(products.platform, platform), orderBy: desc(products.lastSyncedAt) });
   });
 
   /** Distinct products with at least one optimization proposal ever — used for the "Total de
    *  Otimizados" stat tile, which counts products, not runs (a product optimized in 3 runs still
    *  counts once). */
   app.get("/api/products/optimized-count", async () => {
+    const platform = await getCatalogPlatform();
     const [row] = await db
       .select({ count: sql<string>`count(distinct ${enrichmentProposals.productId})` })
-      .from(enrichmentProposals);
+      .from(enrichmentProposals)
+      .innerJoin(products, eq(enrichmentProposals.productId, products.id))
+      .where(eq(products.platform, platform));
     return { count: Number(row?.count ?? 0) };
   });
 
   /** Distinct products with at least one proposal still awaiting human review (pending or edited,
    *  not yet approved/rejected/published) — the "A Validar" stat tile. */
   app.get("/api/products/pending-review-count", async () => {
+    const platform = await getCatalogPlatform();
     const [row] = await db
       .select({ count: sql<string>`count(distinct ${enrichmentProposals.productId})` })
       .from(enrichmentProposals)
-      .where(inArray(enrichmentProposals.status, ["pending", "edited"]));
+      .innerJoin(products, eq(enrichmentProposals.productId, products.id))
+      .where(and(eq(products.platform, platform), inArray(enrichmentProposals.status, ["pending", "edited"])));
     return { count: Number(row?.count ?? 0) };
   });
 
@@ -68,7 +75,8 @@ export async function productsRoutes(app: FastifyInstance) {
    *  impact.agent.ts) pivoted on this product's earliest publish date. Works with only one of the
    *  two Google connections (e.g. GSC without GA4) — whichever side is missing just comes back null. */
   app.get<{ Params: { id: string } }>("/api/products/:id/real-impact", async (req, reply) => {
-    const product = await db.query.products.findFirst({ where: eq(products.id, Number(req.params.id)) });
+    const platform = await getCatalogPlatform();
+    const product = await db.query.products.findFirst({ where: and(eq(products.id, Number(req.params.id)), eq(products.platform, platform)) });
     if (!product) return reply.status(404).send({ error: "Produto não encontrado" });
 
     const googleCreds = await getConnectionCredentials("google");

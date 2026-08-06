@@ -1,10 +1,11 @@
 import type { FastifyInstance } from "fastify";
-import { isNotNull } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../../db/client.js";
 import { products } from "../../db/schema.js";
 import { getThresholds, setThreshold } from "../../repositories/optimization-thresholds.repo.js";
 import { requireSection } from "../../auth/guards.js";
+import { getCatalogPlatform } from "../../repositories/catalog-settings.repo.js";
 
 const thresholdBody = z.object({
   category: z.string().min(1),
@@ -19,9 +20,12 @@ export async function optimizationThresholdsRoutes(app: FastifyInstance) {
    *  threshold plus every distinct category actually seen in the synced catalog, so the UI can
    *  offer a card per real category (not just whichever ones already have an override). */
   app.get("/api/optimization-thresholds", async () => {
+    const platform = await getCatalogPlatform();
     const [thresholds, categoryRows] = await Promise.all([
       getThresholds(),
-      db.selectDistinct({ category: products.category }).from(products).where(isNotNull(products.category)),
+      db.selectDistinct({ category: products.category })
+        .from(products)
+        .where(and(eq(products.platform, platform), isNotNull(products.category))),
     ]);
     const categories = categoryRows.map((r) => r.category).filter((c): c is string => Boolean(c));
     return { thresholds, categories };

@@ -1,6 +1,7 @@
-import { eq, inArray, ne } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { contentScores, enrichmentRuns } from "../db/schema.js";
+import { contentScores, enrichmentRuns, products } from "../db/schema.js";
+import { getCatalogPlatform } from "./catalog-settings.repo.js";
 
 type ContentScoreRow = typeof contentScores.$inferSelect;
 
@@ -86,10 +87,23 @@ export async function getRunImpactSummary(runId: number): Promise<ImpactSummary>
 
 /** Account-wide rollup across every finished run — feeds the Impact page's banner. */
 export async function getOverallImpactSummary(): Promise<ImpactSummary> {
+  const platform = await getCatalogPlatform();
+  const activeProducts = await db.query.products.findMany({
+    where: eq(products.platform, platform),
+    columns: { id: true },
+  });
+  const activeProductIds = activeProducts.map((product) => product.id);
   const finishedRuns = await db.query.enrichmentRuns.findMany({ where: ne(enrichmentRuns.status, "running") });
   const runIds = finishedRuns.map((r) => r.id);
-  const scores = runIds.length ? await db.query.contentScores.findMany({ where: inArray(contentScores.runId, runIds) }) : [];
-  const totalDuration = finishedRuns.reduce((sum, r) => sum + (r.durationMs ?? 0), 0);
-  const totalProcessed = finishedRuns.reduce((sum, r) => sum + r.processedCount, 0);
+  const scores =
+    runIds.length && activeProductIds.length
+      ? await db.query.contentScores.findMany({
+          where: and(inArray(contentScores.runId, runIds), inArray(contentScores.productId, activeProductIds)),
+        })
+      : [];
+  const scoredRunIds = new Set(scores.map((score) => score.runId));
+  const scopedRuns = finishedRuns.filter((run) => scoredRunIds.has(run.id));
+  const totalDuration = scopedRuns.reduce((sum, r) => sum + (r.durationMs ?? 0), 0);
+  const totalProcessed = new Set(scores.map((score) => `${score.runId}-${score.productId}`)).size;
   return computeSummary(scores, totalDuration, totalProcessed);
 }

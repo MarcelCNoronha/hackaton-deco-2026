@@ -273,7 +273,8 @@ specs, FAQ, dados estruturados) + alt-text de imagem, sem opção de escolher. A
   quando o produto vira maduro. O detalhe individual segue a mesma régua: antes de 3 dias aguarda,
   de 3 a 13 dias mostra GA4 preliminar, e a partir de 14 dias mostra GA4 + GSC. Para evitar N
   chamadas por produto, o backend busca relatórios diários por página/item em janelas amplas e
-  calcula localmente cada produto. A receita usa
+  calcula localmente cada produto. Painéis/listagens globais respeitam a **plataforma ativa**
+  (VTEX ou Shopify): dado de uma plataforma não aparece quando a outra está selecionada. A receita usa
   `itemRevenue`/`itemsPurchased` quando o GA4 consegue casar `itemId` com SKU/ID do produto; quando
   não há e-commerce por item, cai para receita por página como sinal secundário. O painel também
   marca confiança da amostra (sinal preliminar, poucos dados, janela parcial, completa) para não
