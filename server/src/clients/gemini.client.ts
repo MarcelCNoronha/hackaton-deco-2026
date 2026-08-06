@@ -575,8 +575,10 @@ export class GeminiClient implements LlmClient {
     generatedBase64: string;
     generatedMimeType: string;
     productId?: number;
+    requiredInstruction?: string;
   }): Promise<{ sameProduct: boolean; notes: string }> {
     const referenceBlock = await fetchImageDataBlock(params.referenceImageUrl);
+    const requiredInstruction = params.requiredInstruction?.trim();
     return this.callWithSchema<{ sameProduct: boolean; notes: string }>({
       operation: "verifyImageIntegrity",
       productId: params.productId,
@@ -585,18 +587,24 @@ export class GeminiClient implements LlmClient {
         "produto; a segunda foi gerada por IA a partir dela. Diga se a imagem gerada mostra EXATAMENTE o " +
         "mesmo produto (mesma forma, cor, material, rótulo/logo/textura) — mudanças de cenário, enquadramento " +
         "ou iluminação são aceitáveis; qualquer alteração de forma, cor, material ou rótulo NÃO é. Seja " +
-        "rigoroso: na dúvida, considere que não é o mesmo produto.",
+        "rigoroso: na dúvida, considere que não é o mesmo produto." +
+        (requiredInstruction
+          ? " Alem disso, existe uma INSTRUCAO OBRIGATORIA do operador. Quando ela for objetiva ou contavel, " +
+            "como numero de barras, hastes, suportes ou pecas, reprove se a imagem gerada nao cumprir exatamente."
+          : ""),
       input: [
         referenceBlock,
         { type: "image", data: params.generatedBase64, mime_type: params.generatedMimeType },
         { type: "text", text: "Primeira imagem = referência real do produto. Segunda imagem = gerada por IA a partir dela." },
+        ...(requiredInstruction ? [{ type: "text" as const, text: `Instrucao obrigatoria do operador: ${requiredInstruction}` }] : []),
       ],
       schema: {
         type: "object",
         properties: {
           sameProduct: {
             type: "boolean",
-            description: "true somente se for claramente o mesmo produto, sem alteração de forma/cor/material/rótulo.",
+            description:
+              "true somente se for claramente o mesmo produto, sem alteracao de forma/cor/material/rotulo, e se cumprir a instrucao obrigatoria objetiva quando houver.",
           },
           notes: { type: "string", description: "Justificativa curta (1 frase) do veredito." },
         },

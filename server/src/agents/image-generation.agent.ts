@@ -43,18 +43,29 @@ const INTEGRITY_INSTRUCTION =
   "matiz, saturação ou brilho. Apenas cenário, enquadramento e iluminação ambiente podem mudar — o produto " +
   "em si deve permanecer idêntico em todos os aspectos.";
 
+function requiredNoteInstruction(note?: string): string {
+  const trimmed = note?.trim();
+  if (!trimmed) return "";
+  return (
+    " INSTRUCAO ADICIONAL OBRIGATORIA DO OPERADOR: " +
+    trimmed +
+    ". Esta instrucao deve ser obedecida acima de qualquer decisao estetica. Se ela citar quantidade, conte visualmente e mostre exatamente a quantidade pedida; " +
+    "nao adicione pecas, barras, hastes, suportes ou detalhes extras que nao existam no produto de referencia."
+  );
+}
+
 const PROMPTS: Record<GeneratableImageKind, (title: string, note?: string) => string> = {
   principal: (title, note) =>
     `Gere a foto principal de e-commerce do produto "${title}": still isolado sobre fundo branco puro, ` +
     "enquadramento frontal centralizado, iluminação de estúdio uniforme, sem sombras duras nem outros " +
     "objetos de cena — o mesmo padrão de uma foto principal de catálogo." +
     INTEGRITY_INSTRUCTION +
-    (note ? ` Detalhe adicional pedido: ${note}` : ""),
+    requiredNoteInstruction(note),
   lifestyle: (title, note) =>
     `Gere uma foto realista mostrando o produto "${title}" ambientado em um cenário de uso real e ` +
     "atraente (um ambiente bem decorado condizente com a categoria do produto)." +
     INTEGRITY_INSTRUCTION +
-    (note ? ` Detalhe adicional pedido: ${note}` : ""),
+    requiredNoteInstruction(note),
   // AI image generation can't render precise measurement numbers reliably — this asks for a
   // clear scale/proportion reference (e.g. next to a common object) rather than promising exact
   // annotated dimensions, which the model would likely hallucinate.
@@ -63,13 +74,13 @@ const PROMPTS: Record<GeneratableImageKind, (title: string, note?: string) => st
     "produto inteiro, enquadramento amplo e nítido, de preferência ao lado de um objeto comum que dê " +
     "noção de escala (sem inventar números ou medidas na imagem)." +
     INTEGRITY_INSTRUCTION +
-    (note ? ` Detalhe adicional pedido: ${note}` : ""),
+    requiredNoteInstruction(note),
   feature_callout: (title, note) =>
     `Gere uma imagem de destaque de produto para "${title}", em estilo still de e-commerce, aproximando ` +
     "(close-up) ou destacando visualmente um detalhe/característica importante do produto mostrado nas " +
     "imagens de referência (acabamento, material, mecanismo, textura)." +
     INTEGRITY_INSTRUCTION +
-    (note ? ` Característica a destacar: ${note}` : ""),
+    requiredNoteInstruction(note),
 };
 
 /** Bounded retries for the integrity gate below — separate from (and on top of) generateProductImage's
@@ -119,6 +130,7 @@ export async function generateProductImage(params: {
         generatedBase64: generated.base64,
         generatedMimeType: generated.mimeType,
         productId: product.id,
+        requiredInstruction: note,
       });
       integrityNotes = verdict.notes;
       if (verdict.sameProduct) {
