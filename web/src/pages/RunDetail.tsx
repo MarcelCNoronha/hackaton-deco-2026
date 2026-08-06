@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { useParams } from "react-router";
 import {
   api,
@@ -14,6 +14,8 @@ import {
   type ImpactSummary,
   type PhotoClassification,
   type Product,
+  type ProductImage,
+  type ReferenceImageCrop,
   type RunCosts,
 } from "../api/client";
 
@@ -62,6 +64,187 @@ const IMAGE_NOTE_TEXTAREA_STYLE = {
   fontFamily: "inherit",
   fontSize: "0.78rem",
 } as const;
+
+const PRINCIPAL_IMAGE_PATTERN = /principal|main|hero/i;
+
+function orderedReferenceImages(product: Product | undefined): ProductImage[] {
+  return [...(product?.images ?? [])]
+    .filter((img) => Boolean(img.ImageUrl))
+    .sort((a, b) => {
+      const aText = `${a.ImageText ?? ""} ${a.ImageUrl}`;
+      const bText = `${b.ImageText ?? ""} ${b.ImageUrl}`;
+      const aPrincipal = PRINCIPAL_IMAGE_PATTERN.test(aText);
+      const bPrincipal = PRINCIPAL_IMAGE_PATTERN.test(bText);
+      return Number(bPrincipal) - Number(aPrincipal);
+    });
+}
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
+}
+
+function selectionFromPoints(
+  imageUrl: string,
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+): ReferenceImageCrop {
+  const minSize = 0.02;
+  let x = Math.min(start.x, end.x);
+  let y = Math.min(start.y, end.y);
+  let width = Math.abs(end.x - start.x);
+  let height = Math.abs(end.y - start.y);
+
+  if (width < minSize) {
+    x = clamp01((start.x + end.x) / 2 - minSize / 2);
+    width = minSize;
+  }
+  if (height < minSize) {
+    y = clamp01((start.y + end.y) / 2 - minSize / 2);
+    height = minSize;
+  }
+  if (x + width > 1) x = 1 - width;
+  if (y + height > 1) y = 1 - height;
+
+  return { imageUrl, x: clamp01(x), y: clamp01(y), width: clamp01(width), height: clamp01(height) };
+}
+
+function cropPointFromPointer(event: PointerEvent<HTMLDivElement>) {
+  const rect = event.currentTarget.getBoundingClientRect();
+  return {
+    x: clamp01((event.clientX - rect.left) / rect.width),
+    y: clamp01((event.clientY - rect.top) / rect.height),
+  };
+}
+
+function ReferenceCropSelector({
+  productId,
+  images,
+  value,
+  onChange,
+}: {
+  productId: number;
+  images: ProductImage[];
+  value?: ReferenceImageCrop;
+  onChange: (crop: ReferenceImageCrop | undefined) => void;
+}) {
+  const imageUrls = images.map((img) => img.ImageUrl);
+  const imagesKey = imageUrls.join("\n");
+  const [activeImageUrl, setActiveImageUrl] = useState(value?.imageUrl ?? imageUrls[0] ?? "");
+  const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    setActiveImageUrl((current) => {
+      if (current && imageUrls.includes(current)) return current;
+      if (value?.imageUrl && imageUrls.includes(value.imageUrl)) return value.imageUrl;
+      return imageUrls[0] ?? "";
+    });
+  }, [productId, imagesKey, value?.imageUrl]);
+
+  if (images.length === 0 || !activeImageUrl) return null;
+
+  const activeCrop = value?.imageUrl === activeImageUrl ? value : undefined;
+
+  function startSelection(event: PointerEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const point = cropPointFromPointer(event);
+    setDragStart(point);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    onChange(selectionFromPoints(activeImageUrl, point, point));
+  }
+
+  function updateSelection(event: PointerEvent<HTMLDivElement>) {
+    if (!dragStart) return;
+    event.preventDefault();
+    onChange(selectionFromPoints(activeImageUrl, dragStart, cropPointFromPointer(event)));
+  }
+
+  function finishSelection(event: PointerEvent<HTMLDivElement>) {
+    if (!dragStart) return;
+    event.preventDefault();
+    onChange(selectionFromPoints(activeImageUrl, dragStart, cropPointFromPointer(event)));
+    setDragStart(null);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", gap: "0.8rem", flexWrap: "wrap", alignItems: "flex-start", marginBottom: "0.9rem" }}>
+      <div style={{ width: "min(100%, 320px)" }}>
+        <div className="muted" style={{ fontSize: "0.78rem", marginBottom: "0.35rem" }}>
+          Recorte para foto de destaque
+        </div>
+        <div
+          onPointerDown={startSelection}
+          onPointerMove={updateSelection}
+          onPointerUp={finishSelection}
+          onPointerCancel={finishSelection}
+          style={{
+            position: "relative",
+            width: "100%",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-md)",
+            overflow: "hidden",
+            background: "var(--page-plane)",
+            cursor: "crosshair",
+            touchAction: "none",
+          }}
+          title="Arraste para marcar o detalhe que deve orientar a foto de destaque."
+        >
+          <img src={activeImageUrl} alt="Referencia do produto" draggable={false} style={{ width: "100%", display: "block", userSelect: "none" }} />
+          {activeCrop && (
+            <div
+              style={{
+                position: "absolute",
+                left: `${activeCrop.x * 100}%`,
+                top: `${activeCrop.y * 100}%`,
+                width: `${activeCrop.width * 100}%`,
+                height: `${activeCrop.height * 100}%`,
+                border: "2px solid var(--accent)",
+                background: "rgba(255, 255, 255, 0.16)",
+                boxShadow: "0 0 0 9999px rgba(0, 0, 0, 0.32)",
+                pointerEvents: "none",
+              }}
+            />
+          )}
+        </div>
+      </div>
+      <div style={{ minWidth: 220, flex: "1 1 220px" }}>
+        {images.length > 1 && (
+          <label style={{ display: "block", marginBottom: "0.6rem" }}>
+            <span className="muted" style={{ display: "block", fontSize: "0.78rem", marginBottom: "0.25rem" }}>
+              Foto de referencia
+            </span>
+            <select
+              value={activeImageUrl}
+              onChange={(event) => {
+                const nextUrl = event.target.value;
+                setActiveImageUrl(nextUrl);
+                if (value?.imageUrl !== nextUrl) onChange(undefined);
+              }}
+              style={{ width: "100%" }}
+            >
+              {images.map((img, index) => (
+                <option key={`${img.Id ?? img.ImageUrl}-${index}`} value={img.ImageUrl}>
+                  {img.ImageText || `Foto ${index + 1}`}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <div style={{ display: "flex", gap: "0.45rem", alignItems: "center", flexWrap: "wrap" }}>
+          <span className="pill">{activeCrop ? "Recorte selecionado" : "Sem recorte"}</span>
+          {activeCrop && (
+            <button type="button" className="link-button" onClick={() => onChange(undefined)}>
+              Limpar recorte
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const FIELD_LABELS: Record<EnrichmentProposal["field"], string> = {
   description: "Descrição",
@@ -220,6 +403,7 @@ export function RunDetail() {
   const [impactSummary, setImpactSummary] = useState<ImpactSummary | null>(null);
   const [generatingFor, setGeneratingFor] = useState<Record<number, GeneratableImageKind | undefined>>({});
   const [imageGenerationNotes, setImageGenerationNotes] = useState<Record<number, string>>({});
+  const [imageReferenceCrops, setImageReferenceCrops] = useState<Record<number, ReferenceImageCrop | undefined>>({});
   const [imageRetryNotes, setImageRetryNotes] = useState<Record<number, string>>({});
   const [retryingImageId, setRetryingImageId] = useState<number | null>(null);
   const [imageGenError, setImageGenError] = useState<string | null>(null);
@@ -328,12 +512,18 @@ export function RunDetail() {
     setRunImageNote(value);
   }
 
-  async function handleGenerateImage(productId: number, kind: GeneratableImageKind, noteOverride?: string): Promise<boolean> {
+  async function handleGenerateImage(
+    productId: number,
+    kind: GeneratableImageKind,
+    noteOverride?: string,
+    referenceCropOverride?: ReferenceImageCrop,
+  ): Promise<boolean> {
     setImageGenError(null);
     setGeneratingFor((prev) => ({ ...prev, [productId]: kind }));
     try {
       const note = (noteOverride ?? imageGenerationNotes[productId] ?? "").trim();
-      const image = await api.generateImage(productId, { kind, runId, note: note || undefined });
+      const referenceCrop = kind === "feature_callout" ? referenceCropOverride ?? imageReferenceCrops[productId] : undefined;
+      const image = await api.generateImage(productId, { kind, runId, note: note || undefined, referenceCrop });
       setGeneratedImages((prev) => ({ ...prev, [productId]: [image, ...(prev[productId] ?? [])] }));
       // The run may already be done (poll loop stopped) — costs otherwise wouldn't reflect this
       // generation's price until something else happens to trigger a refresh.
@@ -356,7 +546,12 @@ export function RunDetail() {
     }
     setRetryingImageId(image.id);
     try {
-      const ok = await handleGenerateImage(productId, image.kind, note);
+      const ok = await handleGenerateImage(
+        productId,
+        image.kind,
+        note,
+        image.kind === "feature_callout" ? imageReferenceCrops[productId] : undefined,
+      );
       if (ok) setImageRetryNotes((prev) => ({ ...prev, [image.id]: "" }));
     } finally {
       setRetryingImageId(null);
@@ -614,6 +809,7 @@ export function RunDetail() {
 
           const productCost = costs?.byProduct.find((c) => c.productId === productId);
           const currentProduct = products.find((p) => p.id === productId);
+          const referenceImages = orderedReferenceImages(currentProduct);
           const descriptionProposal = productProposals.find((p) => p.field === "description");
           const donorProduct =
             descriptionProposal?.reusedFromProductId != null
@@ -747,8 +943,9 @@ export function RunDetail() {
                     <button
                       type="button"
                       className="secondary"
-                      onClick={() => handleGenerateImage(productId, "feature_callout")}
+                      onClick={() => handleGenerateImage(productId, "feature_callout", undefined, imageReferenceCrops[productId])}
                       disabled={generatingFor[productId] !== undefined}
+                      title={imageReferenceCrops[productId] ? "Usa o recorte selecionado como referencia visual extra." : undefined}
                     >
                       {generatingFor[productId] === "feature_callout" ? "Gerando…" : "🎯 Gerar foto de destaque"}
                     </button>
@@ -778,6 +975,12 @@ export function RunDetail() {
                     style={IMAGE_NOTE_TEXTAREA_STYLE}
                   />
                 </label>
+                <ReferenceCropSelector
+                  productId={productId}
+                  images={referenceImages}
+                  value={imageReferenceCrops[productId]}
+                  onChange={(crop) => setImageReferenceCrops((prev) => ({ ...prev, [productId]: crop }))}
+                />
                 {(() => {
                   // One combined, ordered view of every photo for this product regardless of
                   // source (generated-here vs already-on-the-platform) — sorted by classification

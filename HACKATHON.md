@@ -281,13 +281,13 @@ specs, FAQ, dados estruturados) + alt-text de imagem, sem opção de escolher. A
   confundir com a duração do vídeo de demo do hackathon (5 minutos, ver "Entregáveis
   obrigatórios"), são coisas completamente diferentes.
 
-- **Seleção de recorte da foto de referência para guiar a geração da foto de destaque** — pedido
-  em 2026-08-05, não implementado. Hoje `image-generation.agent.ts`'s `feature_callout` prompt só
-  aceita uma nota de texto livre (`note`) pra dizer qual detalhe destacar; a ideia é deixar o
-  usuário desenhar/selecionar uma região (crop) de uma das fotos de referência do produto, e usar
-  essa seleção (recorte + coordenadas, ou só o recorte como imagem de referência adicional) como
-  guia visual pro Gemini saber exatamente em qual ponto do produto focar, em vez de depender só de
-  descrição em texto.
+- ~~**Seleção de recorte da foto de referência para guiar a geração da foto de destaque**~~ —
+  **implementado em 2026-08-06**. Na tela da run, o bloco **Fotos** agora permite selecionar um
+  recorte de uma foto real do produto para orientar a próxima **foto de destaque** (`feature_callout`)
+  e também a ação **Refazer** dessa mesma categoria de imagem. O backend valida que a URL pertence
+  ao snapshot de imagens do produto, baixa pelo `safeUrlFetch`, transforma o recorte em JPEG
+  quadrado via `sharp` e envia esse recorte como segunda referência inline ao Gemini, mantendo a
+  foto principal completa como referência de integridade do produto.
 
 - ~~**Ajustes na tela de Integrações (`web/src/pages/Connections.tsx`)**~~ — **implementado em
   2026-08-06**. A tela agora segue o fluxo real do backoffice: plataforma de catálogo primeiro,

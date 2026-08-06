@@ -366,6 +366,12 @@ export interface EnrichmentProposal {
   reusedSimilarity: string | null;
 }
 
+export interface ProductImage {
+  Id?: string | number | null;
+  ImageUrl: string;
+  ImageText?: string | null;
+}
+
 export interface Product {
   id: number;
   vtexProductId: string;
@@ -376,7 +382,16 @@ export interface Product {
   collection: string | null;
   brand: string | null;
   url: string | null;
+  images: ProductImage[];
   lastSyncedAt: string | null;
+}
+
+export interface ReferenceImageCrop {
+  imageUrl: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 /** This store's VTEX carousel-slot convention: 1=principal, 2=ambientada, 3=dimensional, 4+
@@ -847,7 +862,12 @@ export const api = {
   listGeneratedImages: (productId: number) => request<GeneratedImage[]>(`/products/${productId}/generated-images`),
   generateImage: (
     productId: number,
-    body: { kind: "principal" | "lifestyle" | "dimensional" | "feature_callout"; note?: string; runId?: number },
+    body: {
+      kind: "principal" | "lifestyle" | "dimensional" | "feature_callout";
+      note?: string;
+      runId?: number;
+      referenceCrop?: ReferenceImageCrop;
+    },
   ) =>
     request<GeneratedImage>(`/products/${productId}/generated-images`, { method: "POST", body: JSON.stringify(body) }),
   // classification: null declassifies — if the photo was already published, this also clears its

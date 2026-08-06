@@ -4,7 +4,8 @@ import type { GeminiClient } from "../clients/gemini.client.js";
 import { IMAGE_GENERATION_PRICE_PER_IMAGE } from "../clients/model-recommendations.js";
 import type { ImageInstructionKind } from "../clients/llm-types.js";
 import type { ProductRow } from "./catalog-reader.agent.js";
-import { toStoreJpeg } from "../lib/image-processing.js";
+import { safeUrlFetch } from "../clients/safe-url-fetch.js";
+import { cropReferenceToJpeg, toStoreJpeg, type NormalizedCropRect } from "../lib/image-processing.js";
 import { resolveCategoryPromptRules } from "../repositories/category-prompt-rules.repo.js";
 
 export type GeneratableImageKind = ImageInstructionKind;
@@ -23,6 +24,10 @@ interface ProductImage {
   ImageUrl: string;
   ImageText?: string;
   Id?: string | number;
+}
+
+export interface ReferenceImageCrop extends NormalizedCropRect {
+  imageUrl: string;
 }
 
 /** Gemini's multi-image input works best with a couple of clear references, not the whole gallery
@@ -102,6 +107,29 @@ const PROMPTS: Record<GeneratableImageKind, (title: string, note?: string) => st
 /** Bounded retries for the integrity gate below — separate from (and on top of) generateProductImage's
  *  own network-level retry/backoff in gemini.client.ts. */
 const MAX_INTEGRITY_ATTEMPTS = 2;
+const REFERENCE_CROP_FETCH_TIMEOUT_MS = 15_000;
+const REFERENCE_CROP_MAX_BYTES = 12 * 1024 * 1024;
+const REFERENCE_CROP_INSTRUCTION =
+  " A segunda imagem de referencia enviada ao modelo e um RECORTE escolhido pelo operador. Use esse recorte como guia visual prioritario " +
+  "para decidir qual detalhe destacar, mas continue preservando o produto completo e exato da foto principal.";
+
+function productImageUrls(product: ProductRow): Set<string> {
+  const images = (product.images as ProductImage[]) ?? [];
+  return new Set(images.map((img) => img.ImageUrl).filter((url): url is string => Boolean(url)));
+}
+
+async function buildReferenceCropData(crop: ReferenceImageCrop): Promise<{ data: string; mimeType: string }> {
+  const { response, body } = await safeUrlFetch(crop.imageUrl, {
+    timeoutMs: REFERENCE_CROP_FETCH_TIMEOUT_MS,
+    maxBytes: REFERENCE_CROP_MAX_BYTES,
+  });
+  if (!response.ok) {
+    throw new Error(`Nao foi possivel baixar a imagem do recorte (HTTP ${response.status}).`);
+  }
+
+  const jpeg = await cropReferenceToJpeg(body, crop);
+  return { data: jpeg.toString("base64"), mimeType: "image/jpeg" };
+}
 
 /** Generates a new marketing image FROM a product's existing photos (never from scratch) and
  *  persists it. Throws if the product has no reference images to work from — there's nothing to
@@ -111,8 +139,9 @@ export async function generateProductImage(params: {
   product: ProductRow;
   kind: GeneratableImageKind;
   note?: string;
+  referenceCrop?: ReferenceImageCrop;
 }): Promise<typeof generatedImages.$inferSelect> {
-  const { gemini, product, kind, note } = params;
+  const { gemini, product, kind, note, referenceCrop } = params;
   const images = (product.images as ProductImage[]) ?? [];
   if (images.length === 0) {
     throw new Error("Este produto não tem nenhuma imagem cadastrada para usar como referência.");
@@ -122,10 +151,18 @@ export async function generateProductImage(params: {
   if (referenceImageUrls.length === 0) {
     throw new Error("Este produto nÃ£o tem nenhuma imagem cadastrada para usar como referÃªncia.");
   }
+  let referenceImageData: Array<{ data: string; mimeType: string }> = [];
+  if (referenceCrop) {
+    if (!productImageUrls(product).has(referenceCrop.imageUrl)) {
+      throw new Error("O recorte precisa usar uma imagem cadastrada neste produto.");
+    }
+    referenceImageData = [await buildReferenceCropData(referenceCrop)];
+  }
+
   const categoryPromptRules = await resolveCategoryPromptRules(product.platform, product.category);
   const categoryNote = categoryPromptRules?.imageInstructions[kind];
   const mergedNote = [categoryNote, note].filter((value): value is string => Boolean(value?.trim())).join(" ");
-  const prompt = PROMPTS[kind](product.title, mergedNote);
+  const prompt = PROMPTS[kind](product.title, mergedNote) + (referenceCrop ? REFERENCE_CROP_INSTRUCTION : "");
 
   let best: { mimeType: string; base64: string } | null = null;
   let integrityVerified = false;
@@ -134,6 +171,7 @@ export async function generateProductImage(params: {
   for (let attempt = 1; attempt <= MAX_INTEGRITY_ATTEMPTS; attempt++) {
     const generated = await gemini.generateProductImage({
       referenceImageUrls,
+      referenceImageData,
       prompt,
       costUsd: IMAGE_GENERATION_PRICE_PER_IMAGE,
       productId: product.id,

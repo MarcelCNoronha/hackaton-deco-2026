@@ -21,9 +21,27 @@ import { IMAGE_GENERATION_MODEL } from "../../clients/model-recommendations.js";
 import { env } from "../../config/env.js";
 import { PHOTO_CLASSIFICATION_LABELS, resolvePhotoLabel } from "../../lib/photo-labels.js";
 
+const referenceCropSchema = z
+  .object({
+    imageUrl: z.string().url(),
+    x: z.number().min(0).max(1),
+    y: z.number().min(0).max(1),
+    width: z.number().min(0.02).max(1),
+    height: z.number().min(0.02).max(1),
+  })
+  .superRefine((crop, ctx) => {
+    if (crop.x + crop.width > 1.0001) {
+      ctx.addIssue({ code: "custom", path: ["width"], message: "Recorte ultrapassa a largura da imagem." });
+    }
+    if (crop.y + crop.height > 1.0001) {
+      ctx.addIssue({ code: "custom", path: ["height"], message: "Recorte ultrapassa a altura da imagem." });
+    }
+  });
+
 const generateImageBody = z.object({
   kind: z.enum(["principal", "lifestyle", "dimensional", "feature_callout"]),
   note: z.string().max(500).optional(),
+  referenceCrop: referenceCropSchema.optional(),
   // Which run's "Custo da otimização" this generation's cost should count toward — optional since
   // this endpoint doesn't strictly require a run context, but RunDetail (the only caller today)
   // always has one in scope; omitting it silently drops the cost from every run total, confirmed
@@ -200,7 +218,7 @@ export async function productsRoutes(app: FastifyInstance) {
       const note = [imageGenerationNoteFromScope(run?.scope), body.note?.trim()]
         .filter((value): value is string => Boolean(value))
         .join(" ");
-      const row = await generateProductImage({ gemini, product, kind: body.kind, note: note || undefined });
+      const row = await generateProductImage({ gemini, product, kind: body.kind, note: note || undefined, referenceCrop: body.referenceCrop });
       return reply.status(201).send(row);
     } catch (err) {
       return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });

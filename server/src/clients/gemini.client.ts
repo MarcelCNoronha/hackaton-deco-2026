@@ -481,6 +481,7 @@ export class GeminiClient implements LlmClient {
    *  not per-token, so the generic loggedCall/computeCostUsd path doesn't apply here). */
   async generateProductImage(params: {
     referenceImageUrls: string[];
+    referenceImageData?: Array<{ data: string; mimeType: string }>;
     prompt: string;
     costUsd: number;
     productId?: number;
@@ -498,10 +499,15 @@ export class GeminiClient implements LlmClient {
             return { type: "image" as const, data, mime_type: mimeType };
           }),
         );
+        const inlineImageBlocks = (params.referenceImageData ?? []).map((image) => ({
+          type: "image" as const,
+          data: image.data,
+          mime_type: image.mimeType,
+        }));
 
         const interaction = (await this.client.interactions.create({
           model: this.model,
-          input: [...imageBlocks, { type: "text", text: params.prompt }],
+          input: [...imageBlocks, ...inlineImageBlocks, { type: "text", text: params.prompt }],
           // Verified live: an explicit `delivery` value (either "inline" or "uri") is rejected on
           // this model ("Image delivery mode is not supported") — must be omitted entirely, which
           // then returns inline base64 data by default. `thinking_level` (any value) is also
