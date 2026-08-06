@@ -47,6 +47,10 @@ const generateImageBody = z.object({
   // always has one in scope; omitting it silently drops the cost from every run total, confirmed
   // live (2026-08-05).
   runId: z.number().optional(),
+}).superRefine((body, ctx) => {
+  if (body.referenceCrop && body.kind !== "feature_callout") {
+    ctx.addIssue({ code: "custom", path: ["referenceCrop"], message: "Recorte de referencia so pode ser usado na foto de destaque." });
+  }
 });
 
 const manufacturerReferenceBody = z.object({ manufacturerReferenceUrl: z.string().url().nullable() });

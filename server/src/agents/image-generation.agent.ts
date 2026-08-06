@@ -110,8 +110,11 @@ const MAX_INTEGRITY_ATTEMPTS = 2;
 const REFERENCE_CROP_FETCH_TIMEOUT_MS = 15_000;
 const REFERENCE_CROP_MAX_BYTES = 12 * 1024 * 1024;
 const REFERENCE_CROP_INSTRUCTION =
-  " A segunda imagem de referencia enviada ao modelo e um RECORTE escolhido pelo operador. Use esse recorte como guia visual prioritario " +
-  "para decidir qual detalhe destacar, mas continue preservando o produto completo e exato da foto principal.";
+  " A segunda imagem de referencia enviada ao modelo e um RECORTE escolhido pelo operador. Ela e a referencia visual PRIORITARIA para a foto de destaque. " +
+  "Nao gere uma foto aberta do produto inteiro quando houver recorte: a imagem final deve ser um close-up centrado no detalhe selecionado, com esse detalhe " +
+  "ocupando a maior parte do quadro (aproximadamente 70% a 90%). Use a foto completa apenas para preservar a identidade exata do produto.";
+const REFERENCE_CROP_REQUIRED_NOTE =
+  "A foto de destaque deve focar no recorte selecionado pelo operador: gere um close-up do detalhe escolhido, nao uma foto aberta do produto inteiro.";
 
 function productImageUrls(product: ProductRow): Set<string> {
   const images = (product.images as ProductImage[]) ?? [];
@@ -141,7 +144,8 @@ export async function generateProductImage(params: {
   note?: string;
   referenceCrop?: ReferenceImageCrop;
 }): Promise<typeof generatedImages.$inferSelect> {
-  const { gemini, product, kind, note, referenceCrop } = params;
+  const { gemini, product, kind, note } = params;
+  const referenceCrop = kind === "feature_callout" ? params.referenceCrop : undefined;
   const images = (product.images as ProductImage[]) ?? [];
   if (images.length === 0) {
     throw new Error("Este produto não tem nenhuma imagem cadastrada para usar como referência.");
@@ -161,7 +165,9 @@ export async function generateProductImage(params: {
 
   const categoryPromptRules = await resolveCategoryPromptRules(product.platform, product.category);
   const categoryNote = categoryPromptRules?.imageInstructions[kind];
-  const mergedNote = [categoryNote, note].filter((value): value is string => Boolean(value?.trim())).join(" ");
+  const mergedNote = [categoryNote, note, referenceCrop ? REFERENCE_CROP_REQUIRED_NOTE : ""]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .join(" ");
   const prompt = PROMPTS[kind](product.title, mergedNote) + (referenceCrop ? REFERENCE_CROP_INSTRUCTION : "");
 
   let best: { mimeType: string; base64: string } | null = null;

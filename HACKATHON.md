@@ -287,7 +287,9 @@ specs, FAQ, dados estruturados) + alt-text de imagem, sem opção de escolher. A
   e também a ação **Refazer** dessa mesma categoria de imagem. O backend valida que a URL pertence
   ao snapshot de imagens do produto, baixa pelo `safeUrlFetch`, transforma o recorte em JPEG
   quadrado via `sharp` e envia esse recorte como segunda referência inline ao Gemini, mantendo a
-  foto principal completa como referência de integridade do produto.
+  foto principal completa como referência de integridade do produto. Refinado após teste real no
+  mesmo dia: quando há recorte, o prompt e o gate agora exigem explicitamente close-up centrado no
+  detalhe selecionado, para evitar que o modelo gere de novo uma foto aberta do produto inteiro.
 
 - ~~**Ajustes na tela de Integrações (`web/src/pages/Connections.tsx`)**~~ — **implementado em
   2026-08-06**. A tela agora segue o fluxo real do backoffice: plataforma de catálogo primeiro,
