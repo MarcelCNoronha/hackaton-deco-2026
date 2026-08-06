@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { truncateAtWordBoundary } from "./content-enrichment.agent.js";
+import { findForbiddenTermHits, truncateAtWordBoundary } from "./content-enrichment.agent.js";
 
 describe("truncateAtWordBoundary", () => {
   it("returns the text untouched when it already fits", () => {
@@ -20,5 +20,20 @@ describe("truncateAtWordBoundary", () => {
     const result = truncateAtWordBoundary("Supercalifragilisticexpialidocious", 10);
     expect(result).toBe("Supercali…");
     expect(result.length).toBe(10);
+  });
+});
+
+describe("findForbiddenTermHits", () => {
+  it("detects category-forbidden terms across generated fields", () => {
+    const hits = findForbiddenTermHits(
+      {
+        description: "Suplemento alimentar para rotina diária.",
+        benefitBullets: ["Não é Medicamento e não substitui alimentação equilibrada."],
+        keywords: { primary: ["suplemento"], secondary: ["vitaminas"] },
+      },
+      ["medicamento"],
+    );
+
+    expect(hits).toEqual(["medicamento"]);
   });
 });

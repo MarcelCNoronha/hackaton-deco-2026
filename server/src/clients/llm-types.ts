@@ -31,6 +31,18 @@ export const ALL_ENRICHMENT_FIELDS: EnrichmentField[] = [
   "attributes_patch",
 ];
 
+export type ImageInstructionKind = "principal" | "lifestyle" | "dimensional" | "feature_callout";
+
+/** Merchant-configured category language rules. These are both prompt guidance and hard validation
+ *  inputs: `forbiddenTerms` are checked after generation so compliance doesn't depend only on the
+ *  model following instructions. */
+export interface CategoryPromptRules {
+  recommendedTerms: string[];
+  forbiddenTerms: string[];
+  fieldInstructions: Partial<Record<EnrichmentField, string>>;
+  imageInstructions: Partial<Record<ImageInstructionKind, string>>;
+}
+
 /** How much structure the "description" field should have — drives the Excelente/Bom/Médio
  *  generation packages (see field-cost-estimates.ts): "plain" is today's flowing text, "structured"
  *  asks for real HTML (headings/sections/spec table), "structured_with_image" additionally embeds
@@ -177,6 +189,9 @@ export interface LlmClient {
       hasSpecTable: boolean | null;
       hasWarrantySection: boolean | null;
     } | null;
+    /** Category-specific language/compliance rules (recommended/prohibited terms and per-field
+     *  instructions), resolved with the catalog-wide `'*'` fallback before the LLM call. */
+    categoryPromptRules?: CategoryPromptRules | null;
     /** Objective facts extracted from a merchant-provided reference for THIS exact product
      *  (typically the manufacturer's own page) — a primary source of truth against hallucinated
      *  specs, distinct from `attributes` (from the catalog platform itself). Omitted when the

@@ -16,6 +16,11 @@ import {
   MAX_REFERENCE_LINKS,
   type CategoryReferenceLink,
 } from "../../repositories/category-reference-links.repo.js";
+import {
+  emptyPromptRules,
+  getCategoryPromptRules,
+  setCategoryPromptRules,
+} from "../../repositories/category-prompt-rules.repo.js";
 import { extractReferenceStructure } from "../../agents/reference-structure.agent.js";
 import { requireSection } from "../../auth/guards.js";
 
@@ -32,6 +37,13 @@ const manualProfileBody = z.object({
   hasFaq: z.boolean().nullable(),
   hasSpecTable: z.boolean().nullable(),
   hasWarrantySection: z.boolean().nullable(),
+});
+const promptRulesBody = z.object({
+  category: z.string().min(1),
+  recommendedTerms: z.array(z.string().trim().min(1)).max(100).default([]),
+  forbiddenTerms: z.array(z.string().trim().min(1)).max(100).default([]),
+  fieldInstructions: z.record(z.string(), z.string().max(1000)).default({}),
+  imageInstructions: z.record(z.string(), z.string().max(1000)).default({}),
 });
 
 /** Read-only views over what category-sync.orchestrator.ts last synced — the "Campos aceitos pela
@@ -83,6 +95,18 @@ export async function categoryProfilesRoutes(app: FastifyInstance) {
       hasWarrantySection: body.hasWarrantySection,
     });
     return { profile: await getContentProfile(platform, body.category) };
+  });
+
+  app.get("/api/category-prompt-rules", async (req) => {
+    const { category } = categoryQuery.parse(req.query);
+    const platform = await getCatalogPlatform();
+    return { rules: (await getCategoryPromptRules(platform, category)) ?? emptyPromptRules(platform, category) };
+  });
+
+  app.put("/api/category-prompt-rules", async (req) => {
+    const body = promptRulesBody.parse(req.body);
+    const platform = await getCatalogPlatform();
+    return { rules: await setCategoryPromptRules({ platform, ...body }) };
   });
 
   app.get("/api/category-reference-links", async (req) => {

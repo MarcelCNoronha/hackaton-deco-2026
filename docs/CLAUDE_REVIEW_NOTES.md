@@ -236,22 +236,30 @@ resolvidos pelo codigo atual.
     produto, com fallback para receita por pagina quando o e-commerce por item nao estiver
     disponivel.
 
+- Palavras recomendadas/proibidas e instrucoes por campo/foto por categoria:
+  - implementado em 2026-08-06 como regra de linguagem/compliance por plataforma + categoria;
+  - caso confirmado pelo usuario: bloquear palavras proibidas como "medicamento" em Suplementos;
+  - tabela: `category_prompt_rules`, com fallback `'*'`;
+  - rotas: `GET/PUT /api/category-prompt-rules`;
+  - UI: bloco "Regras de linguagem e compliance" em `PdpConfig.tsx`;
+  - texto: os 3 clients recebem `buildCategoryPromptRulesSuffix`;
+  - seguranca funcional: `content-enrichment.agent.ts` faz checagem deterministica e retry/reprova se termo proibido escapar;
+  - imagem: `generateProductImage` aplica instrucoes persistidas por tipo de foto como nota padrao.
+
 - Geracao de video curto de produto:
   - video gerado entre 15 e 30 segundos;
   - nao confundir com o video de demo do hackathon, que tem limite de 5 minutos;
   - seguir padrao de agent/client/rota usado pela geracao de imagem.
 
-- Configuracao de PDP por Marca/Departamento/Categoria/Subcategoria:
-  - hoje resolve por plataforma + categoria/subcategoria + nivel, com fallback `'*'`;
-  - precisa definir precedencia, provavelmente subcategoria > categoria > departamento > marca > `'*'`;
-  - mexe em `pdp-templates.repo.ts`, API e UI da tela de configuracao.
+- Editor/otimizacao de paginas de Marca, Departamento, Categoria e Subcategoria:
+  - esclarecido pelo usuario em 2026-08-06: nao e apenas template de PDP por marca/departamento;
+  - objetivo e criar/otimizar paginas alem da pagina de produto, por exemplo uma pagina de Marca com editor, blocos, conteudo SEO/GEO, imagens e preview;
+  - precisa modelar tipos de pagina, API/editor proprios e possivel publicacao/leitura na plataforma ativa;
+  - heranca editorial provavel: subcategoria > categoria > departamento > marca > `'*'`.
 
 - Possivel migracao dos clients LLM para LangChain:
   - anotado como manutenibilidade futura, nao requisito para terminar;
   - so revisitar se bugs de saida estruturada por provedor voltarem a ser frequentes.
-
-- Possivel uso de reviews reais de clientes como fonte de perguntas/dor real:
-  - depende de confirmar se VTEX Reviews & Ratings esta ativo e acessivel.
 
 ### Infra/operacao a confirmar com usuario/VPS
 

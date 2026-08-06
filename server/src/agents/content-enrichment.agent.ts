@@ -14,6 +14,7 @@ import { findReuseDonor } from "../repositories/product-similarity.repo.js";
 import { getExpectedAttributeKeys } from "../repositories/catalog-attributes.repo.js";
 import { getCategoryFields } from "../repositories/category-spec-fields.repo.js";
 import { resolveCategoryContentProfile } from "../repositories/category-content-profile.repo.js";
+import { resolveCategoryPromptRules } from "../repositories/category-prompt-rules.repo.js";
 
 // Real platform/SEO limits — the prompt already asks for these lengths (see
 // enrichment-schema.ts), but a prompt is a request, not a guarantee, and a search engine or VTEX
@@ -31,6 +32,66 @@ export function truncateAtWordBoundary(text: string, maxLength: number): string 
   const cut = text.slice(0, maxLength - 1);
   const lastSpace = cut.lastIndexOf(" ");
   return `${(lastSpace > 0 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`;
+}
+
+function normalizeForTermMatch(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("pt-BR");
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (!trimmed) continue;
+    const key = normalizeForTermMatch(trimmed);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(trimmed);
+  }
+  return out;
+}
+
+function collectGeneratedStrings(value: unknown, out: string[] = []): string[] {
+  if (typeof value === "string") {
+    out.push(value);
+    return out;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectGeneratedStrings(item, out));
+    return out;
+  }
+  if (value && typeof value === "object") {
+    Object.values(value as Record<string, unknown>).forEach((item) => collectGeneratedStrings(item, out));
+  }
+  return out;
+}
+
+export function findForbiddenTermHits(enriched: EnrichedContent, forbiddenTerms: string[]): string[] {
+  const terms = uniqueStrings(forbiddenTerms);
+  if (terms.length === 0) return [];
+  const haystack = normalizeForTermMatch(collectGeneratedStrings(enriched).join("\n"));
+  return terms.filter((term) => haystack.includes(normalizeForTermMatch(term)));
+}
+
+function applyForbiddenTermPenalty(score: ComputedContentScore, forbiddenHits: string[]): ComputedContentScore {
+  if (forbiddenHits.length === 0) return score;
+  const issue = `Remover termos proibidos desta categoria: ${forbiddenHits.join(", ")}.`;
+  const claims = forbiddenHits.map((term) => `Termo proibido da categoria encontrado: "${term}".`);
+  return {
+    ...score,
+    buyerConfidence: Math.min(score.buyerConfidence, 35),
+    seoScore: Math.min(score.seoScore, 35),
+    conversionScore: Math.min(score.conversionScore, 35),
+    dataConsistencyScore: Math.min(score.dataConsistencyScore, 35),
+    overallScore: Math.min(score.overallScore, 35),
+    buyerUnanswered: uniqueStrings([...score.buyerUnanswered, issue]),
+    unsupportedClaims: uniqueStrings([...score.unsupportedClaims, ...claims]),
+    catalogIssues: uniqueStrings([...score.catalogIssues, ...claims]),
+  };
 }
 
 interface VtexImage {
@@ -282,6 +343,8 @@ export async function proposeContentEnrichment(params: {
   // comments on categoryFields/contentProfile/manufacturerFacts).
   const categoryFields = product.category ? await getCategoryFields(product.platform, product.category) : null;
   const contentProfile = await resolveCategoryContentProfile(product.platform, product.category);
+  const categoryPromptRules = await resolveCategoryPromptRules(product.platform, product.category);
+  const forbiddenTerms = categoryPromptRules?.forbiddenTerms ?? [];
   const manufacturerFacts = product.manufacturerReferenceFacts as Record<string, string> | null;
 
   const originalScore = await scoreContent({
@@ -301,11 +364,14 @@ export async function proposeContentEnrichment(params: {
     attributes: product.attributes,
   });
 
-  // Deliberate: the donor/reuse branch below computes a score but never checks it against
-  // QUALITY_THRESHOLD/MIN_IMPROVEMENT — accepted unconditionally, one call instead of up to
-  // MAX_ATTEMPTS. The whole point of this path is the cost saving from NOT retrying; adding the
-  // same gate here would defeat that, and the donor was itself already a human-approved product,
-  // so its adaptation starts from a much stronger baseline than a from-scratch draft.
+  // Deliberate: the donor/reuse branch still skips QUALITY_THRESHOLD/MIN_IMPROVEMENT (the donor
+  // was already human-approved), but category compliance terms are non-negotiable: if the adapted
+  // draft contains a forbidden term, it falls through to the normal retry loop with explicit
+  // feedback instead of being accepted automatically.
+  let best: { enriched: EnrichedContent; score: ComputedContentScore; forbiddenHits: string[] } | null = null;
+  let feedback: { buyerUnanswered: string[]; unsupportedClaims: string[] } | null = null;
+  let attempts = 0;
+
   const donor = params.embedding ? await findReuseDonor(product.platform, product.id, params.embedding) : null;
 
   if (donor) {
@@ -324,10 +390,11 @@ export async function proposeContentEnrichment(params: {
       topSearchQueries: params.topSearchQueries,
       categoryFields: categoryFields ?? undefined,
       contentProfile,
+      categoryPromptRules,
       manufacturerFacts,
     });
 
-    const score = await computeContentScore({
+    const rawScore = await computeContentScore({
       llm: evaluatorLlm,
       text: enriched.description,
       hasStructuredData: Boolean(enriched.structuredData),
@@ -340,27 +407,29 @@ export async function proposeContentEnrichment(params: {
       attributesPatch: enriched.attributesPatch,
       expectedAttributeKeys,
     });
+    const forbiddenHits = findForbiddenTermHits(enriched, forbiddenTerms);
+    const score = applyForbiddenTermPenalty(rawScore, forbiddenHits);
 
-    const donorRows = buildProposalRows({
-      runId,
-      product,
-      enriched,
-      fields,
-      reuse: { productId: donor.productId, similarity: donor.similarity },
-    });
-    // Drizzle's `.values([])` throws — reachable when the user deselects every field the model
-    // actually returned (e.g. only unchecking benefit_bullets/technical_specs/faq, all of which
-    // come back empty/omitted).
-    if (donorRows.length > 0) await db.insert(enrichmentProposals).values(donorRows);
+    if (forbiddenHits.length > 0) {
+      feedback = { buyerUnanswered: score.buyerUnanswered, unsupportedClaims: score.unsupportedClaims };
+    } else {
+      const donorRows = buildProposalRows({
+        runId,
+        product,
+        enriched,
+        fields,
+        reuse: { productId: donor.productId, similarity: donor.similarity },
+      });
+      // Drizzle's `.values([])` throws — reachable when the user deselects every field the model
+      // actually returned (e.g. only unchecking benefit_bullets/technical_specs/faq, all of which
+      // come back empty/omitted).
+      if (donorRows.length > 0) await db.insert(enrichmentProposals).values(donorRows);
 
-    await persistContentScore({ runId, productId: product.id, target: "proposed", score, attempts: 1 });
+      await persistContentScore({ runId, productId: product.id, target: "proposed", score, attempts: 1 });
 
-    return { attempts: 1, finalScore: score.overallScore, reused: true };
+      return { attempts: 1, finalScore: score.overallScore, reused: true };
+    }
   }
-
-  let best: { enriched: EnrichedContent; score: ComputedContentScore } | null = null;
-  let feedback: { buyerUnanswered: string[]; unsupportedClaims: string[] } | null = null;
-  let attempts = 0;
 
   for (attempts = 1; attempts <= MAX_ATTEMPTS; attempts++) {
     const enriched = await contentLlm.enrichProductContent({
@@ -378,10 +447,11 @@ export async function proposeContentEnrichment(params: {
       topSearchQueries: params.topSearchQueries,
       categoryFields: categoryFields ?? undefined,
       contentProfile,
+      categoryPromptRules,
       manufacturerFacts,
     });
 
-    const score = await computeContentScore({
+    const rawScore = await computeContentScore({
       llm: evaluatorLlm,
       text: enriched.description,
       hasStructuredData: Boolean(enriched.structuredData),
@@ -394,9 +464,11 @@ export async function proposeContentEnrichment(params: {
       attributesPatch: enriched.attributesPatch,
       expectedAttributeKeys,
     });
+    const forbiddenHits = findForbiddenTermHits(enriched, forbiddenTerms);
+    const score = applyForbiddenTermPenalty(rawScore, forbiddenHits);
 
     if (!best || score.overallScore > best.score.overallScore) {
-      best = { enriched, score };
+      best = { enriched, score, forbiddenHits };
     }
 
     const clearsBar =
@@ -408,8 +480,14 @@ export async function proposeContentEnrichment(params: {
   }
 
   // best is guaranteed set: the loop always runs at least once.
-  const { enriched, score } = best!;
+  const { enriched, score, forbiddenHits } = best!;
   const finalAttempts = Math.min(attempts, MAX_ATTEMPTS);
+
+  if (forbiddenHits.length > 0) {
+    throw new Error(
+      `Conteúdo gerado ainda contém termos proibidos desta categoria após ${finalAttempts} tentativa(s): ${forbiddenHits.join(", ")}.`,
+    );
+  }
 
   const rows = buildProposalRows({ runId, product, enriched, fields });
   if (rows.length > 0) await db.insert(enrichmentProposals).values(rows);

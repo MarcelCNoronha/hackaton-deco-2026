@@ -172,6 +172,7 @@ export const ALL_ENRICHMENT_FIELDS: EnrichmentField[] = [
   "attributes_patch",
 ];
 export type ImageGenKind = "lifestyle" | "feature_callout";
+export type PromptImageKind = "principal" | "lifestyle" | "dimensional" | "feature_callout";
 export type EstimableField = EnrichmentField | "alt_text" | ImageGenKind;
 
 export interface FieldCostEstimate {
@@ -299,6 +300,16 @@ export interface CategoryContentProfile {
  *  powers the "já mapeada" marker + date in PdpConfig.tsx's category selector. */
 export interface CategoryContentProfileSummary extends CategoryContentProfile {
   updatedAt: string;
+}
+
+export interface CategoryPromptRules {
+  platform: CatalogPlatform;
+  category: string;
+  recommendedTerms: string[];
+  forbiddenTerms: string[];
+  fieldInstructions: Partial<Record<EnrichmentField, string>>;
+  imageInstructions: Partial<Record<PromptImageKind, string>>;
+  updatedAt: string | null;
 }
 
 export interface StructureSignals {
@@ -734,6 +745,10 @@ export const api = {
   listCategoryContentProfiles: () => request<{ profiles: CategoryContentProfileSummary[] }>("/category-content-profiles"),
   setCategoryContentProfile: (body: Omit<CategoryContentProfile, "source">) =>
     request<{ profile: CategoryContentProfile | null }>("/category-content-profile", { method: "PUT", body: JSON.stringify(body) }),
+  getCategoryPromptRules: (category: string) =>
+    request<{ rules: CategoryPromptRules }>(`/category-prompt-rules?category=${encodeURIComponent(category)}`),
+  setCategoryPromptRules: (body: Omit<CategoryPromptRules, "platform" | "updatedAt">) =>
+    request<{ rules: CategoryPromptRules }>("/category-prompt-rules", { method: "PUT", body: JSON.stringify(body) }),
   getCategoryReferenceLinks: (category: string) =>
     request<{ links: CategoryReferenceLink[] }>(`/category-reference-links?category=${encodeURIComponent(category)}`),
   /** Up to MAX_REFERENCE_LINKS urls, one request for the whole batch — a url that fails to fetch/

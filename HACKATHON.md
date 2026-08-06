@@ -214,11 +214,6 @@ humana**, em vez de gerar uma vez e aceitar o resultado:
   não muda, e o critério de "Execução Técnica"/"Impacto no Negócio" do julgamento pesa mais que
   economizar chamada de API.
 
-Também ficou registrado, mas **não implementado ainda** (depende de confirmação do usuário se a
-loja tem dado real disponível): usar avaliações de clientes que já compraram (VTEX Reviews &
-Ratings, se ativo na conta) como fonte de perguntas *reais* pro Evaluator e pro Content
-Enrichment, em vez de só perguntas simuladas pela IA.
-
 ### Seletor de otimização com custo estimado por campo (2026-08-02)
 
 Antes desta mudança, todo run gerava sempre os 5 campos de conteúdo (descrição, bullets,
@@ -308,19 +303,25 @@ specs, FAQ, dados estruturados) + alt-text de imagem, sem opção de escolher. A
   embutida no nível Excelente, escolhida por visão multimodal a partir das fotos reais do
   produto.
 
-- **Configuração de PDP por Marca/Departamento/Categoria/Subcategoria** — pedido em 2026-08-05,
-  não implementado. Confirmado como uma das duas únicas frentes pra depois (a outra é a migração
-  pra LangChain, acima) — os demais itens levantados nessa mesma rodada (textos de apoio SEO/GEO)
-  foram descartados por ora. Hoje a "Configuração de PDP" (`pdp_templates`) resolve por um único
-  nível: categoria/subcategoria (ou o catalogo-wide `'*'`), ver `pdp-templates.repo.ts`. A ideia é
-  dar ao editor de layout mais níveis de granularidade além desse — por Marca (ex. um padrão só
-  pra DECA) e por Departamento (ex. um padrão só pra "Cozinha", acima de Categoria/Subcategoria).
-  Exigiria: decidir a ordem de precedência entre os níveis (provavelmente subcategoria > categoria
-  > departamento > marca > `'*'`, do mais específico pro mais genérico) e estender
-  `resolvePdpTemplate`/`getPdpTemplates` pra considerar múltiplas chaves em vez de só `category`.
+- **Editor/otimização de páginas de Marca, Departamento, Categoria e Subcategoria** — esclarecido
+  em 2026-08-06: este item não é só variar o template da página de produto por marca/departamento.
+  A ideia é otimizar páginas além da PDP, criando experiências editoriais próprias para páginas de
+  Marca (ex. DECA), Departamento (ex. Cozinha), Categoria e Subcategoria, com editor, blocos,
+  conteúdo SEO/GEO, imagens e prévia visual. Hoje a "Configuração de PDP" (`pdp_templates`) resolve
+  somente a estrutura da página de produto por categoria/subcategoria (ou o padrão `'*'`). Este
+  novo módulo exigiria modelar tipos de página, rota/API/editor próprios, armazenar conteúdo por
+  plataforma + tipo + chave da página, e depois integrar publicação/leitura com a plataforma ativa.
+  A precedência natural para herança editorial continua sendo do mais específico para o mais geral:
+  subcategoria > categoria > departamento > marca > `'*'`, mas aqui aplicada a páginas de conteúdo,
+  não apenas ao layout interno do anúncio.
 
-- **Palavras recomendadas/proibidas e instruções por campo e por padrão de foto, por categoria** —
-  pedido em 2026-08-05, não implementado. Duas peças complementares:
+- ~~**Palavras recomendadas/proibidas e instruções por campo e por padrão de foto, por categoria**~~ —
+  **implementado em 2026-08-06**. O caso de uso confirmado pelo usuário foi compliance/termos
+  proibidos, por exemplo bloquear "medicamento" em Suplementos. Implementado em
+  `category_prompt_rules`, `/api/category-prompt-rules`, `PdpConfig.tsx`,
+  `buildCategoryPromptRulesSuffix`, `resolveCategoryPromptRules`, `generateProductImage` e no gate
+  determinístico de `content-enrichment.agent.ts`, que reprova/retry se termo proibido escapar.
+  A especificação original era:
   1. **Listas de palavras por categoria**: cadastrar, por categoria (com fallback pro
      catálogo-wide `'*'`), duas listas de palavras/termos — uma **recomendada** (terminologia que a
      IA deve preferir — vocabulário da marca/categoria) e outra **proibida** (termos a evitar — ex.

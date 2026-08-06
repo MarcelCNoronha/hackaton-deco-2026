@@ -3,6 +3,7 @@ import type { RequestLogEntry } from "./http.js";
 import { computeCostUsd, IMAGE_GENERATION_MODEL } from "./model-recommendations.js";
 import {
   buildCategoryFieldsSuffix,
+  buildCategoryPromptRulesSuffix,
   buildContentProfileSuffix,
   buildDescriptionRichnessSuffix,
   buildEnrichmentInstructionSuffix,
@@ -13,6 +14,7 @@ import {
 } from "./enrichment-schema.js";
 import {
   GEO_QUESTIONS,
+  type CategoryPromptRules,
   type CommunicationTone,
   type ContentEvaluation,
   type DescriptionRichness,
@@ -305,6 +307,7 @@ export class GeminiClient implements LlmClient {
       hasSpecTable: boolean | null;
       hasWarrantySection: boolean | null;
     } | null;
+    categoryPromptRules?: CategoryPromptRules | null;
     manufacturerFacts?: Record<string, string> | null;
   }): Promise<EnrichedContent> {
     const requestedFields = resolveRequestedFields(product.fields);
@@ -354,6 +357,7 @@ export class GeminiClient implements LlmClient {
         buildTopSearchQueriesSuffix(product.topSearchQueries) +
         buildCategoryFieldsSuffix(product.categoryFields) +
         buildContentProfileSuffix(product.contentProfile) +
+        buildCategoryPromptRulesSuffix(product.categoryPromptRules) +
         toneInstruction(product.communicationTone) +
         (product.manufacturerFacts
           ? " O campo 'especificacoesFabricante' vem da página oficial do fabricante deste produto específico — é " +

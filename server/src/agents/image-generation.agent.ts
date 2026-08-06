@@ -2,10 +2,12 @@ import { db } from "../db/client.js";
 import { generatedImages } from "../db/schema.js";
 import type { GeminiClient } from "../clients/gemini.client.js";
 import { IMAGE_GENERATION_PRICE_PER_IMAGE } from "../clients/model-recommendations.js";
+import type { ImageInstructionKind } from "../clients/llm-types.js";
 import type { ProductRow } from "./catalog-reader.agent.js";
 import { toStoreJpeg } from "../lib/image-processing.js";
+import { resolveCategoryPromptRules } from "../repositories/category-prompt-rules.repo.js";
 
-export type GeneratableImageKind = "principal" | "lifestyle" | "dimensional" | "feature_callout";
+export type GeneratableImageKind = ImageInstructionKind;
 
 /** kind -> this store's VTEX photo-slot classification — see photoClassificationEnum's doc
  *  comment. 1:1 for every AI-generated kind (only a downloaded manufacturer_reference photo needs
@@ -90,7 +92,10 @@ export async function generateProductImage(params: {
   }
 
   const referenceImageUrls = images.slice(0, MAX_REFERENCE_IMAGES).map((img) => img.ImageUrl);
-  const prompt = PROMPTS[kind](product.title, note);
+  const categoryPromptRules = await resolveCategoryPromptRules(product.platform, product.category);
+  const categoryNote = categoryPromptRules?.imageInstructions[kind];
+  const mergedNote = [categoryNote, note].filter((value): value is string => Boolean(value?.trim())).join(" ");
+  const prompt = PROMPTS[kind](product.title, mergedNote);
 
   let best: { mimeType: string; base64: string } | null = null;
   let integrityVerified = false;

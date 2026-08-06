@@ -362,6 +362,21 @@ export const categoryContentProfiles = pgTable("category_content_profiles", {
   pk: primaryKey({ columns: [table.platform, table.category] }),
 }));
 
+/** Merchant language/compliance guardrails per platform+category (or `'*'` default): terms to
+ *  prefer, terms to never use, and optional field/photo instructions. Example: in Suplementos,
+ *  prohibit "medicamento" so generated copy never drifts into regulated medical positioning. */
+export const categoryPromptRules = pgTable("category_prompt_rules", {
+  platform: catalogPlatformEnum("platform").notNull(),
+  category: text("category").notNull(),
+  recommendedTerms: jsonb("recommended_terms").notNull().default(sql`'[]'::jsonb`),
+  forbiddenTerms: jsonb("forbidden_terms").notNull().default(sql`'[]'::jsonb`),
+  fieldInstructions: jsonb("field_instructions").notNull().default(sql`'{}'::jsonb`),
+  imageInstructions: jsonb("image_instructions").notNull().default(sql`'{}'::jsonb`),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.platform, table.category] }),
+}));
+
 /** A market-reference ad URL a merchant pasted for a category, plus what got extracted from it.
  *  `extractedSignals` holds ONLY structural counts/flags (word count, bullet count, has FAQ...) —
  *  the extraction prompt (reference-structure.agent.ts) is explicitly instructed to never

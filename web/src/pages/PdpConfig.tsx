@@ -1,20 +1,24 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  ALL_ENRICHMENT_FIELDS,
   api,
   DEFAULT_PDP_CATEGORY,
   PDP_ALIGN_OPTIONS,
   PDP_BLOCKS,
   PDP_FONT_SIZE_OPTIONS,
   type CatalogPlatform,
+  type CategoryPromptRules,
   type CategorySpecFields,
   type CategoryTreeNode,
   type DescriptionRichness,
+  type EnrichmentField,
   type PdpBlock,
   type PdpFontSize,
   type PdpLayoutCell,
   type PdpLayoutRow,
   type PdpTemplate,
   type PdpTextAlign,
+  type PromptImageKind,
 } from "../api/client";
 
 const BLOCK_LABELS: Record<PdpBlock, string> = {
@@ -31,6 +35,78 @@ const BLOCK_LABELS: Record<PdpBlock, string> = {
   divider: "Linha divisória",
   spacer: "Espaçamento",
 };
+
+const FIELD_RULE_LABELS: Record<EnrichmentField, string> = {
+  description: "Descrição",
+  benefit_bullets: "Bullets de benefício",
+  technical_specs: "Especificações técnicas",
+  faq: "FAQ",
+  structured_data: "Dados estruturados",
+  seo_title: "Título SEO",
+  meta_description: "Meta description",
+  keywords: "Keywords",
+  tags: "Tags",
+  cta: "CTA",
+  attributes_patch: "Atributos",
+};
+
+const IMAGE_RULE_KINDS: PromptImageKind[] = ["principal", "lifestyle", "dimensional", "feature_callout"];
+const IMAGE_RULE_LABELS: Record<PromptImageKind, string> = {
+  principal: "Foto principal",
+  lifestyle: "Foto ambientada",
+  dimensional: "Foto dimensional",
+  feature_callout: "Foto de destaque",
+};
+
+interface PromptRulesDraft {
+  recommendedTermsText: string;
+  forbiddenTermsText: string;
+  fieldInstructions: Partial<Record<EnrichmentField, string>>;
+  imageInstructions: Partial<Record<PromptImageKind, string>>;
+}
+
+const EMPTY_RULES_DRAFT: PromptRulesDraft = {
+  recommendedTermsText: "",
+  forbiddenTermsText: "",
+  fieldInstructions: {},
+  imageInstructions: {},
+};
+
+function termsToText(terms: string[]): string {
+  return terms.join("\n");
+}
+
+function parseTermList(text: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of text.split(/[\n;,]+/)) {
+    const term = raw.trim();
+    if (!term) continue;
+    const key = term.toLocaleLowerCase("pt-BR");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(term);
+  }
+  return out;
+}
+
+function compactRecord<T extends string>(value: Partial<Record<T, string>>): Partial<Record<T, string>> {
+  const out: Partial<Record<T, string>> = {};
+  for (const [key, raw] of Object.entries(value) as Array<[T, string | undefined]>) {
+    const instruction = raw?.trim();
+    if (instruction) out[key] = instruction;
+  }
+  return out;
+}
+
+function rulesToDraft(rules: CategoryPromptRules): PromptRulesDraft {
+  return {
+    recommendedTermsText: termsToText(rules.recommendedTerms),
+    forbiddenTermsText: termsToText(rules.forbiddenTerms),
+    fieldInstructions: rules.fieldInstructions,
+    imageInstructions: rules.imageInstructions,
+  };
+}
 
 /** "divider"/"spacer" have no product data and no real alignment/weight concept — align/bold
  *  controls are hidden for them in the editor, and fontSize is relabeled "tamanho do espaço"
@@ -174,6 +250,10 @@ export function PdpConfig() {
   // handle itself is draggable (not the whole card), so dragging doesn't fight with clicking the
   // selects/checkboxes inside a row.
   const [draggedRow, setDraggedRow] = useState<number | null>(null);
+  const [rulesDraft, setRulesDraft] = useState<PromptRulesDraft>(EMPTY_RULES_DRAFT);
+  const [rulesUpdatedAt, setRulesUpdatedAt] = useState<string | null>(null);
+  const [rulesLoading, setRulesLoading] = useState(false);
+  const [savingRules, setSavingRules] = useState(false);
 
   function resizePreviewFrame() {
     const doc = previewFrameRef.current?.contentDocument;
@@ -202,6 +282,17 @@ export function PdpConfig() {
     });
   }
 
+  function loadPromptRulesForCategory(category: string) {
+    setRulesLoading(true);
+    api
+      .getCategoryPromptRules(category)
+      .then(({ rules }) => {
+        setRulesDraft(rulesToDraft(rules));
+        setRulesUpdatedAt(rules.updatedAt);
+      })
+      .finally(() => setRulesLoading(false));
+  }
+
   useEffect(() => {
     loadCategoryFields();
   }, []);
@@ -209,6 +300,7 @@ export function PdpConfig() {
   useEffect(() => {
     setMessage(null);
     loadTemplatesForCategory(selectedCategory);
+    loadPromptRulesForCategory(selectedCategory);
   }, [selectedCategory]);
 
   useEffect(() => {
@@ -334,6 +426,37 @@ export function PdpConfig() {
     }
   }
 
+  function updateFieldInstruction(field: EnrichmentField, instruction: string) {
+    setRulesDraft((prev) => ({ ...prev, fieldInstructions: { ...prev.fieldInstructions, [field]: instruction } }));
+  }
+
+  function updateImageInstruction(kind: PromptImageKind, instruction: string) {
+    setRulesDraft((prev) => ({ ...prev, imageInstructions: { ...prev.imageInstructions, [kind]: instruction } }));
+  }
+
+  async function handleSavePromptRules() {
+    setSavingRules(true);
+    setMessage(null);
+    try {
+      const { rules } = await api.setCategoryPromptRules({
+        category: selectedCategory,
+        recommendedTerms: parseTermList(rulesDraft.recommendedTermsText),
+        forbiddenTerms: parseTermList(rulesDraft.forbiddenTermsText),
+        fieldInstructions: compactRecord(rulesDraft.fieldInstructions),
+        imageInstructions: compactRecord(rulesDraft.imageInstructions),
+      });
+      setRulesDraft(rulesToDraft(rules));
+      setRulesUpdatedAt(rules.updatedAt);
+      setMessage(
+        `Regras de linguagem salvas para ${isSpecificCategory ? selectedCategory : "todas as categorias (padrão)"}.`,
+      );
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSavingRules(false);
+    }
+  }
+
   const rows = layoutByLevel[activeLevel];
   const selectedSpecFields = categorySpecFields.find((c) => c.categoryPath === selectedCategory);
 
@@ -380,6 +503,131 @@ export function PdpConfig() {
               Nenhuma subcategoria sincronizada ainda — clique em "Sincronizar categorias agora" ou reconecte a loja
               VTEX pra poder configurar por categoria.
             </p>
+          )}
+        </section>
+
+        <section className="card" style={{ marginTop: "1.5rem" }}>
+          <div className="proposal-header">
+            <div>
+              <h2 style={{ margin: 0 }}>Regras de linguagem e compliance</h2>
+              {rulesUpdatedAt && (
+                <p className="muted" style={{ margin: "0.2rem 0 0", fontSize: "0.78rem" }}>
+                  Última atualização: {new Date(rulesUpdatedAt).toLocaleString("pt-BR")}
+                </p>
+              )}
+            </div>
+            <button type="button" onClick={handleSavePromptRules} disabled={savingRules || rulesLoading}>
+              {savingRules ? "Salvando…" : "Salvar regras"}
+            </button>
+          </div>
+          <p className="muted" style={{ marginTop: 0 }}>
+            Bloqueie termos sensíveis por categoria, como "medicamento" em suplementos. A geração recebe estas
+            regras no prompt e também é checada antes de criar propostas.
+          </p>
+
+          {rulesLoading ? (
+            <p className="muted">Carregando regras…</p>
+          ) : (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "1rem" }}>
+                <label style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                  <span className="muted">Termos recomendados</span>
+                  <textarea
+                    value={rulesDraft.recommendedTermsText}
+                    onChange={(e) => setRulesDraft((prev) => ({ ...prev, recommendedTermsText: e.target.value }))}
+                    placeholder={"ex: suplemento alimentar\nvitaminas"}
+                    rows={4}
+                    style={{
+                      width: "100%",
+                      resize: "vertical",
+                      padding: "0.65rem 0.75rem",
+                      borderRadius: "var(--radius-md)",
+                      border: "1px solid var(--border)",
+                      background: "var(--page-plane)",
+                      color: "inherit",
+                      fontFamily: "inherit",
+                    }}
+                  />
+                </label>
+                <label style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                  <span className="muted">Termos proibidos</span>
+                  <textarea
+                    value={rulesDraft.forbiddenTermsText}
+                    onChange={(e) => setRulesDraft((prev) => ({ ...prev, forbiddenTermsText: e.target.value }))}
+                    placeholder={"ex: medicamento\ncura\ntratamento"}
+                    rows={4}
+                    style={{
+                      width: "100%",
+                      resize: "vertical",
+                      padding: "0.65rem 0.75rem",
+                      borderRadius: "var(--radius-md)",
+                      border: "1px solid var(--border)",
+                      background: "var(--page-plane)",
+                      color: "inherit",
+                      fontFamily: "inherit",
+                    }}
+                  />
+                </label>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "1rem", marginTop: "1rem" }}>
+                <div>
+                  <h3 style={{ marginTop: 0 }}>Instruções por campo</h3>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.55rem" }}>
+                    {ALL_ENRICHMENT_FIELDS.map((field) => (
+                      <label key={field} style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                        <span className="muted" style={{ fontSize: "0.78rem" }}>
+                          {FIELD_RULE_LABELS[field]}
+                        </span>
+                        <textarea
+                          value={rulesDraft.fieldInstructions[field] ?? ""}
+                          onChange={(e) => updateFieldInstruction(field, e.target.value)}
+                          rows={2}
+                          style={{
+                            width: "100%",
+                            resize: "vertical",
+                            padding: "0.55rem 0.7rem",
+                            borderRadius: "var(--radius-md)",
+                            border: "1px solid var(--border)",
+                            background: "var(--page-plane)",
+                            color: "inherit",
+                            fontFamily: "inherit",
+                          }}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <h3 style={{ marginTop: 0 }}>Instruções por foto</h3>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.55rem" }}>
+                    {IMAGE_RULE_KINDS.map((kind) => (
+                      <label key={kind} style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                        <span className="muted" style={{ fontSize: "0.78rem" }}>
+                          {IMAGE_RULE_LABELS[kind]}
+                        </span>
+                        <textarea
+                          value={rulesDraft.imageInstructions[kind] ?? ""}
+                          onChange={(e) => updateImageInstruction(kind, e.target.value)}
+                          rows={2}
+                          style={{
+                            width: "100%",
+                            resize: "vertical",
+                            padding: "0.55rem 0.7rem",
+                            borderRadius: "var(--radius-md)",
+                            border: "1px solid var(--border)",
+                            background: "var(--page-plane)",
+                            color: "inherit",
+                            fontFamily: "inherit",
+                          }}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </>
           )}
         </section>
 

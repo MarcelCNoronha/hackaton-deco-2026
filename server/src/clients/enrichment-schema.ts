@@ -1,4 +1,4 @@
-import { ALL_ENRICHMENT_FIELDS, type DescriptionRichness, type EnrichmentField } from "./llm-types.js";
+import { ALL_ENRICHMENT_FIELDS, type CategoryPromptRules, type DescriptionRichness, type EnrichmentField } from "./llm-types.js";
 
 interface FieldSpec {
   /** camelCase key as it appears in EnrichedContent / the JSON schema sent to the model. */
@@ -272,6 +272,33 @@ export function buildContentProfileSuffix(profile?: {
     `alvo estrutural quando o campo correspondente for gerado, mas nunca invente conteúdo só para atingir esses ` +
     `números — se os dados do produto não sustentarem, prefira ficar mais curto/simples do que inventar.`
   );
+}
+
+/** Appended when a merchant configured category language rules. This is prompt guidance only; the
+ *  content-enrichment agent also runs a deterministic post-generation forbidden-term gate. */
+export function buildCategoryPromptRulesSuffix(rules?: CategoryPromptRules | null): string {
+  if (!rules) return "";
+  const recommendedTerms = rules.recommendedTerms.map((term) => term.trim()).filter(Boolean);
+  const forbiddenTerms = rules.forbiddenTerms.map((term) => term.trim()).filter(Boolean);
+  const fieldInstructions = Object.entries(rules.fieldInstructions)
+    .map(([field, instruction]) => [field, instruction?.trim()] as const)
+    .filter(([, instruction]) => Boolean(instruction));
+
+  const parts: string[] = [];
+  if (recommendedTerms.length > 0) {
+    parts.push(`termos recomendados quando forem naturais e factuais: ${recommendedTerms.map((term) => `"${term}"`).join(", ")}`);
+  }
+  if (forbiddenTerms.length > 0) {
+    parts.push(
+      `termos PROIBIDOS em qualquer campo gerado (descrição, SEO, keywords, tags, CTA, atributos, FAQ e legendas): ` +
+        `${forbiddenTerms.map((term) => `"${term}"`).join(", ")}`,
+    );
+  }
+  if (fieldInstructions.length > 0) {
+    parts.push(`instruções por campo: ${fieldInstructions.map(([field, instruction]) => `${field}: ${instruction}`).join("; ")}`);
+  }
+  if (parts.length === 0) return "";
+  return ` Regras de linguagem/compliance desta categoria: ${parts.join(". ")}.`;
 }
 
 /** Extra instruction appended when "description" should be more than flowing text — see
