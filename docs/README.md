@@ -6,6 +6,13 @@ externo (decisão: manter duas cópias em sincronia era a mesma duplicação que
 código morto tentou evitar). No app, tudo isso fica atrás da permissão de Integrações (menu
 "Documentação" → "Arquitetura" / "Referência de APIs").
 
+## Nota para proxima auditoria
+
+- **Fonte**: [`docs/CLAUDE_REVIEW_NOTES.md`](./CLAUDE_REVIEW_NOTES.md).
+- **Objetivo**: registrar a leitura pragmatica da auditoria local considerando que a aplicacao roda
+  em backoffice confiavel, numa VPS com proxy reverso restrito; separa pontos de desempenho de
+  hardening de seguranca e deixa uma ordem sugerida para o Claude retomar depois.
+
 ## Fluxo atual (ponta a ponta)
 
 - **Fonte viva**: [`web/src/lib/pipeline-flow.ts`](../web/src/lib/pipeline-flow.ts).

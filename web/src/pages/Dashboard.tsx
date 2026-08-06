@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { api, type CatalogPlatform, type Connection, type EnrichmentRun, type ProviderSpend } from "../api/client";
 import { StatTile } from "../components/StatTile";
 import { StatusBadge } from "../components/StatusBadge";

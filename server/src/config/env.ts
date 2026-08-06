@@ -26,6 +26,7 @@ const envSchema = z.object({
   // to an attacker-controlled domain. Falls back to the request Origin (then localhost)
   // only when unset, so local dev keeps working without extra config.
   APP_BASE_URL: z.string().url().optional(),
+  TRUST_PROXY: z.coerce.boolean().optional(),
   // Caps how many products an enrichment run processes AT ONCE for each task type (content,
   // alt-text, image generation) — see lib/concurrency.ts. Without this, a run with many products
   // (e.g. "otimização total" with topN=50) fires 50+ simultaneous LLM calls, risking provider

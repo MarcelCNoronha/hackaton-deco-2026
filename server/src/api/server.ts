@@ -20,7 +20,10 @@ import { authRoutes } from "./routes/auth.routes.js";
 import { accountRoutes } from "./routes/account.routes.js";
 import { usersRoutes } from "./routes/users.routes.js";
 
-const app = Fastify({ logger: true });
+const app = Fastify({
+  logger: true,
+  trustProxy: env.TRUST_PROXY ?? env.NODE_ENV === "production",
+});
 
 // `origin: true` reflects whatever Origin the request sends, which — combined with
 // `credentials: true` (cookies) — lets ANY site make authenticated requests on a logged-in user's

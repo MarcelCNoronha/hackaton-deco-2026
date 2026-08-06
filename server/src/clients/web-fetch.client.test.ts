@@ -47,6 +47,25 @@ describe("toFetchedPageText", () => {
     expect(result.text).toContain("Descrição simples sem dado estruturado nenhum.");
   });
 
+  it("extracts useful product fields from application/json hydration scripts without executing JavaScript", () => {
+    const html = `<script type="application/json">${JSON.stringify({
+      props: {
+        pageProps: {
+          product: {
+            productName: "Misturador Twin Click",
+            brand: "Deca",
+            description: "<p>Misturador monocomando com filtro integrado e acionamento Twin Click.</p>",
+            specificationGroups: [{ name: "Material", specifications: [{ name: "Material", values: ["Liga de cobre"] }] }],
+          },
+        },
+      },
+    })}</script>`;
+    const result = toFetchedPageText(html);
+    expect(result.text).toContain("Misturador Twin Click");
+    expect(result.text).toContain("filtro integrado");
+    expect(result.text).toContain("Liga de cobre");
+  });
+
   it("still flags short content as a warning when neither JSON-LD nor visible text has enough words", () => {
     const html = "<html><body><p>Muito curto.</p></body></html>";
     const result = toFetchedPageText(html);

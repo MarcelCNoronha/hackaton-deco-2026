@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router";
 import { api, type CatalogFilterOptions, type ImpactSummary, type Product, type RealImpact } from "../api/client";
 import { CatalogFilterBar } from "../components/CatalogFilterBar";
 import { ImpactSummaryBanner } from "../components/ImpactSummaryBanner";

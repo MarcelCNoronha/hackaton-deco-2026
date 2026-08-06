@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { PasswordInput } from "../components/PasswordInput";

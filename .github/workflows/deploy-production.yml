@@ -72,7 +72,9 @@ jobs:
       - name: Prepare deploy bundle
         run: |
           mkdir -p .deploy
+          mkdir -p .deploy/scripts
           cp docker-compose.prod.yml .deploy/docker-compose.prod.yml
+          cp scripts/prune-production-images.sh .deploy/scripts/prune-production-images.sh
           cat <<'EOF' > .deploy/.env
           ${{ secrets.PRODUCTION_ENV_FILE }}
           EOF
@@ -103,7 +105,7 @@ jobs:
           upload_ok=0
           for attempt in $(seq 1 3); do
             echo "Upload attempt $attempt..."
-            if tar -czf - .deploy/docker-compose.prod.yml .deploy/.env | \
+            if tar -czf - .deploy/docker-compose.prod.yml .deploy/.env .deploy/scripts/prune-production-images.sh | \
               ssh $SSH_OPTS "$VPS_USER@$VPS_HOST" \
                 "mkdir -p $VPS_DEPLOY_PATH && cd $VPS_DEPLOY_PATH && tar -xzf - --strip-components=1"; then
               echo "Upload succeeded on attempt $attempt"
@@ -128,6 +130,9 @@ jobs:
           done
           HEALTH_PORT="\$(docker compose -f docker-compose.prod.yml port web 80 | awk -F: 'END {print \$NF}')"
           curl --retry 10 --retry-delay 5 --retry-all-errors -fsS "http://127.0.0.1:\${HEALTH_PORT}/health"
+          chmod +x scripts/prune-production-images.sh
+          scripts/prune-production-images.sh --execute --keep-recent 3 --min-age-hours 24 --compose-file docker-compose.prod.yml --env-file .env || \
+            echo "Docker image cleanup failed after a healthy deploy; continuing."
           LOCALEOF
 
           deploy_ok=0

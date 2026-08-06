@@ -1,25 +1,13 @@
 import { db } from "../db/client.js";
 import { generatedImages } from "../db/schema.js";
+import { safeUrlFetch } from "../clients/safe-url-fetch.js";
 import type { GeminiClient } from "../clients/gemini.client.js";
 import { toStoreJpeg } from "../lib/image-processing.js";
 
-/** Candidates are tried in order (og:image first — see web-fetch.client.ts) until one actually
- *  downloads and decodes; a small cap since each attempt is a real HTTP fetch, not because we
- *  expect to need more than one or two. */
-const MAX_DOWNLOAD_ATTEMPTS = 3;
+const IMAGE_DOWNLOAD_TIMEOUT_MS = 15_000;
+const MAX_SOURCE_IMAGE_BYTES = 25_000_000;
+const MAX_DOWNLOAD_ATTEMPTS = 8;
 
-/** Downloads the first workable candidate photo from a product's manufacturer reference page,
- *  crops/resizes it to the store's VTEX upload convention (1000x1000 JPG), and — when the product
- *  already has an existing photo to compare against — runs the same integrity gate as AI-generated
- *  images (never trusts that "the manufacturer's page for this product" is actually a match; a
- *  stale or wrong URL could point at a similar-but-different item). Persists even when integrity
- *  fails or can't be checked at all (no existing photo, or no Gemini connection) — same "always
- *  show something, but flag it" discipline as image-generation.agent.ts, so a human reviewing it
- *  in RunDetail sees exactly what happened instead of the candidate silently disappearing.
- *
- *  Never throws — called as a best-effort side effect of saving a manufacturer reference URL, same
- *  discipline as extractManufacturerFacts. Returns null when no candidate could be downloaded, or
- *  the page had no candidates at all. */
 export async function extractManufacturerReferenceImage(params: {
   gemini: GeminiClient | null;
   productId: number;
@@ -30,10 +18,18 @@ export async function extractManufacturerReferenceImage(params: {
   for (const imageUrl of params.imageUrls.slice(0, MAX_DOWNLOAD_ATTEMPTS)) {
     let jpeg: Buffer;
     try {
-      const res = await fetch(imageUrl);
-      if (!res.ok) continue;
-      const buffer = Buffer.from(await res.arrayBuffer());
-      jpeg = await toStoreJpeg(buffer);
+      const { response, body } = await safeUrlFetch(imageUrl, {
+        timeoutMs: IMAGE_DOWNLOAD_TIMEOUT_MS,
+        maxBytes: MAX_SOURCE_IMAGE_BYTES,
+        init: {
+          headers: {
+            Accept: "image/avif,image/webp,image/png,image/jpeg,image/*;q=0.8,*/*;q=0.5",
+            "User-Agent": "Mozilla/5.0 (compatible; CatalogIA-ImageFetcher/1.0)",
+          },
+        },
+      });
+      if (!response.ok) continue;
+      jpeg = await toStoreJpeg(body);
     } catch (err) {
       console.error(`[manufacturer-image] candidate ${imageUrl} failed to download/decode for product ${params.productId}:`, err);
       continue;
@@ -42,9 +38,9 @@ export async function extractManufacturerReferenceImage(params: {
     let integrityVerified = false;
     let integrityNotes: string;
     if (!params.gemini) {
-      integrityNotes = "Conexão Gemini não configurada — integridade não verificada.";
+      integrityNotes = "Conexao Gemini nao configurada - integridade nao verificada.";
     } else if (!params.existingImageUrl) {
-      integrityNotes = "Produto sem foto própria cadastrada para comparar — integridade não verificada.";
+      integrityNotes = "Produto sem foto propria cadastrada para comparar - integridade nao verificada.";
     } else {
       try {
         const verdict = await params.gemini.verifyImageIntegrity({
@@ -56,7 +52,7 @@ export async function extractManufacturerReferenceImage(params: {
         integrityVerified = verdict.sameProduct;
         integrityNotes = verdict.notes;
       } catch (err) {
-        integrityNotes = `Verificação de integridade falhou (erro técnico, não reprovação): ${err instanceof Error ? err.message : String(err)}`;
+        integrityNotes = `Verificacao de integridade falhou (erro tecnico, nao reprovacao): ${err instanceof Error ? err.message : String(err)}`;
         console.error(`[manufacturer-image] integrity check errored for product ${params.productId}:`, err);
       }
     }
@@ -66,7 +62,7 @@ export async function extractManufacturerReferenceImage(params: {
       .values({
         productId: params.productId,
         kind: "manufacturer_reference",
-        prompt: `Foto extraída da referência do fabricante: ${params.sourceUrl}`,
+        prompt: `Foto extraida da referencia do fabricante: ${params.sourceUrl}`,
         sourceUrl: params.sourceUrl,
         mimeType: "image/jpeg",
         imageBase64: jpeg.toString("base64"),

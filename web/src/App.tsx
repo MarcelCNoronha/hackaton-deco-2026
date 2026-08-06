@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { Link, Navigate, NavLink, Route, Routes, useLocation } from "react-router";
 import { Architecture } from "./pages/Architecture";
 import { ApiReference } from "./pages/ApiReference";
 import { Documentation } from "./pages/Documentation";

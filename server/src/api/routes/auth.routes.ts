@@ -162,6 +162,10 @@ export async function authRoutes(app: FastifyInstance) {
 
     const emailClient = buildEmailClient();
     if (!emailClient) {
+      if (env.NODE_ENV === "production") {
+        req.log.error("Password reset requested but Resend is not configured; suppressing resetUrl in production.");
+        return reply.send({ ok: true });
+      }
       // No Resend configured — same dev-friendly fallback as before: hand the link back directly.
       return reply.send({ ok: true, resetUrl });
     }

@@ -1,4 +1,6 @@
-const MAX_FETCH_BYTES = 3_000_000;
+import { safeUrlFetch } from "./safe-url-fetch.js";
+
+const MAX_FETCH_BYTES = 5_000_000;
 const MIN_TRUSTED_WORD_COUNT = 100;
 const FETCH_TIMEOUT_MS = 15_000;
 
@@ -87,20 +89,88 @@ function extractJsonLdProductText(html: string): string {
   return parts.join("\n\n");
 }
 
-async function fetchRawHtml(url: string): Promise<string> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      signal: controller.signal,
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; CatalogIA-ReferenceFetcher/1.0)" },
-    });
-  } finally {
-    clearTimeout(timeout);
+function isUsefulProductKey(key: string): boolean {
+  const normalized = key.toLowerCase();
+  return [
+    "name",
+    "title",
+    "brand",
+    "description",
+    "descricao",
+    "product",
+    "produto",
+    "sku",
+    "spec",
+    "technical",
+    "tecnico",
+    "material",
+    "color",
+    "cor",
+    "voltage",
+    "voltagem",
+    "dimension",
+    "dimens",
+    "feature",
+    "benefit",
+    "beneficio",
+    "value",
+  ].some((needle) => normalized.includes(needle));
+}
+
+function collectUsefulScriptValues(value: unknown, parts: string[], key = "", depth = 0) {
+  if (depth > 12 || parts.length >= 80) return;
+
+  if (typeof value === "string") {
+    if (!isUsefulProductKey(key)) return;
+    const cleaned = stripHtml(decodeHtmlEntities(value));
+    const wordCount = cleaned.split(/\s+/).filter(Boolean).length;
+    if ((cleaned.length >= 20 || wordCount >= 2) && !parts.includes(cleaned)) parts.push(cleaned);
+    return;
   }
-  if (!res.ok) throw new Error(`Falha ao buscar ${url}: HTTP ${res.status}`);
-  return res.text();
+
+  if (Array.isArray(value)) {
+    for (const item of value) collectUsefulScriptValues(item, parts, key, depth + 1);
+    return;
+  }
+
+  if (value && typeof value === "object") {
+    for (const [childKey, childValue] of Object.entries(value as Record<string, unknown>)) {
+      collectUsefulScriptValues(childValue, parts, childKey || key, depth + 1);
+    }
+  }
+}
+
+function extractStructuredScriptText(html: string): string {
+  const parts: string[] = [];
+  for (const match of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)) {
+    const attrs = match[1] ?? "";
+    const body = (match[2] ?? "").trim();
+    const isJsonScript =
+      /\btype\s*=\s*["']application\/json["']/i.test(attrs) ||
+      /\bid\s*=\s*["']__NEXT_DATA__["']/i.test(attrs);
+
+    if (!isJsonScript || !body) continue;
+
+    try {
+      collectUsefulScriptValues(JSON.parse(body), parts);
+    } catch {
+      continue;
+    }
+  }
+  return parts.join("\n\n");
+}
+
+async function fetchRawHtml(url: string): Promise<string> {
+  const { response, body } = await safeUrlFetch(url, {
+    timeoutMs: FETCH_TIMEOUT_MS,
+    maxBytes: MAX_FETCH_BYTES,
+    allowTruncated: true,
+    init: {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; CatalogIA-ReferenceFetcher/1.0)" },
+    },
+  });
+  if (!response.ok) throw new Error(`Falha ao buscar ${url}: HTTP ${response.status}`);
+  return body.toString("utf8");
 }
 
 /** Exported for unit testing (see web-fetch.client.test.ts) — pure/synchronous, no network call,
@@ -109,7 +179,7 @@ export function toFetchedPageText(html: string): FetchedPageText {
   const truncated = html.slice(0, MAX_FETCH_BYTES);
   // JSON-LD first — it's the richer, cleaner source when present (see extractJsonLdProductText);
   // the visible-text fallback still runs unconditionally since JSON-LD is often absent or thin.
-  const text = [extractJsonLdProductText(truncated), stripHtml(truncated)].filter(Boolean).join("\n\n");
+  const text = [extractJsonLdProductText(truncated), extractStructuredScriptText(truncated), stripHtml(truncated)].filter(Boolean).join("\n\n");
   const wordCount = text.split(/\s+/).filter(Boolean).length;
   return {
     text,
@@ -129,7 +199,7 @@ export async function fetchPageText(url: string): Promise<FetchedPageText> {
   return toFetchedPageText(await fetchRawHtml(url));
 }
 
-const MAX_IMAGE_CANDIDATES = 4;
+const MAX_IMAGE_CANDIDATES = 8;
 const IMG_NOISE_PATTERN = /logo|icon|sprite|pixel|favicon|placeholder|avatar/i;
 
 function extractMetaImageUrls(html: string): string[] {
