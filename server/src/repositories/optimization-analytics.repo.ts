@@ -113,7 +113,20 @@ async function listActivityProductIds(platform: CatalogPlatform): Promise<Set<nu
     .innerJoin(products, eq(generatedImages.productId, products.id))
     .where(and(eq(products.platform, platform), ne(generatedImages.kind, "manufacturer_reference")));
 
-  return new Set([...proposalProducts, ...imageProducts].map((row) => row.productId));
+  const costProducts = await db
+    .selectDistinct({ productId: agentRequestLogs.productId })
+    .from(agentRequestLogs)
+    .innerJoin(products, eq(agentRequestLogs.productId, products.id))
+    .where(
+      and(
+        inArray(agentRequestLogs.provider, LLM_PROVIDERS),
+        isNotNull(agentRequestLogs.productId),
+        isNotNull(agentRequestLogs.costUsd),
+        eq(products.platform, platform),
+      ),
+    );
+
+  return new Set([...proposalProducts, ...imageProducts, ...costProducts].map((row) => row.productId as number));
 }
 
 export async function getOptimizationAnalytics(): Promise<OptimizationAnalyticsSummary> {
