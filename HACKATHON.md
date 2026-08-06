@@ -305,17 +305,35 @@ specs, FAQ, dados estruturados) + alt-text de imagem, sem opção de escolher. A
   embutida no nível Excelente, escolhida por visão multimodal a partir das fotos reais do
   produto.
 
-- **Editor/otimização de páginas de Marca, Departamento, Categoria e Subcategoria** — esclarecido
-  em 2026-08-06: este item não é só variar o template da página de produto por marca/departamento.
-  A ideia é otimizar páginas além da PDP, criando experiências editoriais próprias para páginas de
-  Marca (ex. DECA), Departamento (ex. Cozinha), Categoria e Subcategoria, com editor, blocos,
-  conteúdo SEO/GEO, imagens e prévia visual. Hoje a "Configuração de PDP" (`pdp_templates`) resolve
-  somente a estrutura da página de produto por categoria/subcategoria (ou o padrão `'*'`). Este
-  novo módulo exigiria modelar tipos de página, rota/API/editor próprios, armazenar conteúdo por
-  plataforma + tipo + chave da página, e depois integrar publicação/leitura com a plataforma ativa.
-  A precedência natural para herança editorial continua sendo do mais específico para o mais geral:
-  subcategoria > categoria > departamento > marca > `'*'`, mas aqui aplicada a páginas de conteúdo,
-  não apenas ao layout interno do anúncio.
+- ~~**Editor/otimização de páginas de Marca, Departamento, Categoria e Subcategoria**~~ —
+  **implementado em 2026-08-06**. Escopo esclarecido ao vivo antes de codar: o pedido inicial
+  supunha um editor rico (blocos, imagens, prévia de página inteira, como a "Configuração de PDP"
+  já tem para a PDP) — mas checando ao vivo o admin real da VTEX (Catálogo > Categorias > Editar e
+  Conteúdo > Marcas > Editar), os 4 tipos de página (Departamento/Categoria/Subcategoria usam a
+  mesma tela "Categoria"; Marca tem a sua própria) só expõem exatamente os mesmos **3 campos de
+  conteúdo**: "Título da página (Title Tag)", "Descrição (meta tag de descrição)" e "Palavras
+  similares" — nenhuma tem corpo de texto longo separado nem campo de FAQ, e por pedido explícito do
+  usuário essas páginas não levam imagem. Isso simplificou o módulo pra um editor único (SEO
+  title/meta description/keywords) com um seletor de tipo de página, em vez de 4 telas distintas ou
+  de um sistema de blocos como o da PDP.
+  - Tabela nova `page_content` (`platform`, `pageType`, `scopeKey`, `seoTitle`, `metaDescription`,
+    `keywords`) — uma linha só cobre os 4 tipos: `department`/`category`/`subcategory` são
+    chaveados pelo mesmo `path` de `categoryNodes` (nível 1/2/3, já sincronizado, zero sync novo
+    necessário), `brand` é chaveado pelo nome da marca (dimensão independente — a VTEX não tem
+    tabela de marca persistida, o id é resolvido ao vivo via `listFilterOptions()` só no momento de
+    publicar). Cada um dos 4 tipos cai pro seu próprio padrão `scopeKey = '*'` de forma
+    independente — confirmado com o usuário que não é uma cadeia de herança entre os 4 tipos.
+  - `VtexClient.updateCategoryContent`/`updateBrandContent` (novo, técnica GET→mescla→PUT já usada
+    em `updateProductFields`, campos `Title`/`MetaTagDescription`/`KeyWords` — o mesmo `KeyWords` já
+    confirmado ao vivo pro "Palavras similares" de produto). Adicionado à interface `CatalogClient`
+    compartilhada; `ShopifyClient` lança erro claro (não faz no-op silencioso) já que aqui a escrita
+    na plataforma é a própria ação que o usuário pediu ao clicar "Publicar", não um campo secundário
+    de um lote maior — Shopify não tem hierarquia de categoria nem conceito de página de marca.
+  - Tela nova `/page-content` ("Páginas de Marca/Categoria"): seletor de tipo (Departamento/
+    Categoria/Subcategoria/Marca) + seletor do nó/marca específico (reaproveita `categoryNodes` e
+    `catalogFilters().brands`, ambos já existentes), os 3 campos, e uma prévia de resultado de busca
+    (estilo snippet do Google) em vez de uma prévia de página renderizada — não há HTML de página
+    pra compor aqui, só metadados.
 
 - ~~**Palavras recomendadas/proibidas e instruções por campo e por padrão de foto, por categoria**~~ —
   **implementado em 2026-08-06**. O caso de uso confirmado pelo usuário foi compliance/termos

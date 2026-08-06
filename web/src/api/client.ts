@@ -272,6 +272,21 @@ export interface CategoryTreeNode {
   isLeaf: boolean;
 }
 
+/** "department"/"category"/"subcategory" are keyed by the same breadcrumb `path` CategoryTreeNode
+ *  uses; "brand" is keyed by brand name instead (see CatalogFilterOptions.brands). All 4 share the
+ *  same 3 fields — confirmed live against the real VTEX admin, see server's page-content.repo.ts. */
+export type PageContentType = "department" | "category" | "subcategory" | "brand";
+
+export interface PageContent {
+  platform: CatalogPlatform;
+  pageType: PageContentType;
+  scopeKey: string;
+  seoTitle: string | null;
+  metaDescription: string | null;
+  keywords: string | null;
+  source: "specific" | "default";
+}
+
 export interface CategoryFieldDefinition {
   id: string;
   name: string;
@@ -754,6 +769,18 @@ export const api = {
     }),
   previewPdpTemplate: (body: { level: DescriptionRichness; blocks: PdpBlock[]; customHtml?: string | null; layout?: PdpLayoutRow[] | null }) =>
     request<{ html: string }>("/pdp-templates/preview", { method: "POST", body: JSON.stringify(body) }),
+
+  getPageContent: (pageType: PageContentType, scopeKey?: string) =>
+    request<PageContent>(`/page-content?pageType=${pageType}${scopeKey ? `&scopeKey=${encodeURIComponent(scopeKey)}` : ""}`),
+  setPageContent: (body: {
+    pageType: PageContentType;
+    scopeKey?: string;
+    seoTitle?: string | null;
+    metaDescription?: string | null;
+    keywords?: string | null;
+  }) => request<PageContent>("/page-content", { method: "PUT", body: JSON.stringify(body) }),
+  publishPageContent: (pageType: PageContentType, scopeKey: string) =>
+    request<{ ok: boolean }>("/page-content/publish", { method: "POST", body: JSON.stringify({ pageType, scopeKey }) }),
 
   getCategoryNodes: () => request<{ platform: CatalogPlatform; nodes: CategoryTreeNode[] }>("/category-nodes"),
   getCategorySpecFields: () =>

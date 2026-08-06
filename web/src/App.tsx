@@ -4,6 +4,7 @@ import { Architecture } from "./pages/Architecture";
 import { ApiReference } from "./pages/ApiReference";
 import { Documentation } from "./pages/Documentation";
 import { PdpConfig } from "./pages/PdpConfig";
+import { PageContentEditor } from "./pages/PageContentEditor";
 import { Connections } from "./pages/Connections";
 import { Runs } from "./pages/Runs";
 import { RunDetail } from "./pages/RunDetail";
@@ -64,6 +65,11 @@ function AppShell() {
             </NavLink>
           )}
           {can("connections") && (
+            <NavLink to="/page-content">
+              <span className="nav-icon">🏷️</span> <span className="nav-label">Páginas de Marca/Categoria</span>
+            </NavLink>
+          )}
+          {can("connections") && (
             <NavLink to="/connections">
               <span className="nav-icon">⚙</span> <span className="nav-label">Integrações</span>
             </NavLink>
@@ -102,6 +108,7 @@ function AppShell() {
           {can("connections") && <Route path="/api-reference" element={<ApiReference />} />}
           {can("connections") && <Route path="/documentation" element={<Documentation />} />}
           {can("connections") && <Route path="/pdp-config" element={<PdpConfig />} />}
+          {can("connections") && <Route path="/page-content" element={<PageContentEditor />} />}
           {can("connections") && <Route path="/connections" element={<Connections />} />}
           {can("users") && <Route path="/users" element={<Users />} />}
           <Route path="*" element={<Navigate to="/" replace />} />

@@ -324,6 +324,33 @@ export const categoryNodes = pgTable("category_nodes", {
   pk: primaryKey({ columns: [table.platform, table.path] }),
 }));
 
+/** SEO/content editor for pages beyond the PDP: Departamento/Categoria/Subcategoria (`pageType`
+ *  matches categoryNodes.level: 1/2/3, `scopeKey` is the same breadcrumb `path` string) and Marca
+ *  (`pageType` "brand", `scopeKey` is the brand name — orthogonal to the category tree, VTEX has no
+ *  persisted brand table so there's no id to key off, just the name shown in the admin's Marcas
+ *  screen). All 4 page types share the exact same 3 fields on purpose — confirmed live against the
+ *  real VTEX admin (Catálogo > Categorias / Marcas > Editar): every one of them only exposes
+ *  "Título da página (Title Tag)", "Descrição (meta tag de descrição)" and "Palavras similares" —
+ *  there is no separate long-form body/description field and no FAQ field on any of the 4 admin
+ *  screens, so this table intentionally has no `blocks`/`customHtml` richness like pdpTemplates
+ *  does. `scopeKey = '*'` is the catalog-wide default for that `pageType` — same sentinel
+ *  convention as pdpTemplates' `category = '*'`, and each of the 4 page types falls back to its OWN
+ *  `'*'` row independently (not a shared cross-type default, and not a live inheritance chain
+ *  between e.g. Subcategoria and Categoria — confirmed with the user). */
+export const pageContentTypeEnum = pgEnum("page_content_type", ["department", "category", "subcategory", "brand"]);
+
+export const pageContent = pgTable("page_content", {
+  platform: catalogPlatformEnum("platform").notNull(),
+  pageType: pageContentTypeEnum("page_type").notNull(),
+  scopeKey: text("scope_key").notNull(),
+  seoTitle: text("seo_title"),
+  metaDescription: text("meta_description"),
+  keywords: text("keywords"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.platform, table.pageType, table.scopeKey] }),
+}));
+
 /** Specification fields the catalog platform accepts/requires for one category path — VTEX's
  *  `specification/field/listByCategoryId`, scoped to content/spec attributes only (Material,
  *  Voltagem, Cor...). NEVER covers price, stock, or the category assignment itself — those are

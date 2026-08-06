@@ -183,6 +183,29 @@ interface VtexBrand {
   isActive?: boolean;
 }
 
+/** `GET/PUT /pvt/category/{id}` full record shape — see updateCategoryContent's doc comment for
+ *  which 3 fields this app actually writes; every other key is preserved as-is via the GET-then-PUT
+ *  merge, never read/interpreted here. */
+interface VtexCategoryRecord {
+  Id: number;
+  Name: string;
+  Title?: string;
+  MetaTagDescription?: string;
+  KeyWords?: string;
+  [key: string]: unknown;
+}
+
+/** `GET/PUT /pvt/brand/{id}` full record shape — same "preserve everything else via merge" role as
+ *  VtexCategoryRecord, see updateBrandContent's doc comment. */
+interface VtexBrandRecord {
+  Id: number;
+  Name: string;
+  Title?: string;
+  MetaTagDescription?: string;
+  KeyWords?: string;
+  [key: string]: unknown;
+}
+
 /** Response shape of `specification/field/listTreeByCategoryId/{categoryId}` — `CategoryId` is
  *  usually null (the field is inherited from a group, not tied directly to this category), and
  *  `IsStockKeepingUnit` distinguishes SKU-level fields (VTEX allows registering specs at either
@@ -706,6 +729,75 @@ export class VtexClient implements CatalogClient {
   }
 
   async updateProductMetafields(): Promise<void> {}
+
+  private async fetchCategoryContent(categoryId: string): Promise<VtexCategoryRecord> {
+    const res = await requestWithRetry({
+      provider: "vtex",
+      operation: "getCategoryContent",
+      url: `${this.baseUrl}/pvt/category/${categoryId}`,
+      init: { method: "GET", headers: this.headers() },
+      onAttempt: this.onAttempt,
+    });
+    return (await res.json()) as VtexCategoryRecord;
+  }
+
+  /** Same "not a partial update" footgun as updateProductFields (`PUT /pvt/category/{id}` replaces
+   *  the whole record) — fetches the current category first and PUTs it back merged with only the
+   *  intended change, so fields this app never touches (ParentCategoryId, IsActive, the "Menu"/
+   *  "Filtro de marca" flags, GlobalCategoryId...) don't come back blank. Field mapping confirmed
+   *  live against the real admin (Catálogo > Categorias > Editar categoria): "Título da página
+   *  (Title Tag)"→Title, "Descrição da categoria (meta tag de descrição)"→MetaTagDescription,
+   *  "Palavras similares"→KeyWords — same field name VTEX already uses for this exact "palavras
+   *  similares" concept on the product record (see updateProductKeywords). There is no separate
+   *  long-form body/description field on this screen — MetaTagDescription is the only "Descrição"
+   *  this app can write here. */
+  async updateCategoryContent(categoryId: string, patch: { title?: string; description?: string; keywords?: string }): Promise<void> {
+    const current = await this.fetchCategoryContent(categoryId);
+    const next: Partial<VtexCategoryRecord> = {};
+    if (patch.title !== undefined) next.Title = patch.title;
+    if (patch.description !== undefined) next.MetaTagDescription = patch.description;
+    if (patch.keywords !== undefined) next.KeyWords = patch.keywords;
+    await requestWithRetry({
+      provider: "vtex",
+      operation: "updateCategoryContent",
+      url: `${this.baseUrl}/pvt/category/${categoryId}`,
+      init: { method: "PUT", headers: this.headers(), body: JSON.stringify({ ...current, ...next }) },
+      onAttempt: this.onAttempt,
+    });
+  }
+
+  private async fetchBrandContent(brandId: string): Promise<VtexBrandRecord> {
+    const res = await requestWithRetry({
+      provider: "vtex",
+      operation: "getBrandContent",
+      url: `${this.baseUrl}/pvt/brand/${brandId}`,
+      init: { method: "GET", headers: this.headers() },
+      onAttempt: this.onAttempt,
+    });
+    return (await res.json()) as VtexBrandRecord;
+  }
+
+  /** Same GET-then-merge-then-PUT technique as updateCategoryContent, `PUT /pvt/brand/{id}` (the
+   *  single-entity endpoint under `catalog`, distinct from the `catalog_system/pvt/brand/list`
+   *  listFilterOptions() reads from to resolve a brand name to this id — see page-publisher.agent.ts).
+   *  Field mapping confirmed live against the real admin (Conteúdo > Marcas > Editar marca):
+   *  "Título da página da marca (Title Tag)"→Title, "Descrição da marca (meta tag de
+   *  descrição)"→MetaTagDescription, "Palavras similares"→KeyWords — same 3-field shape as
+   *  updateCategoryContent, confirmed independently on this separate admin screen. */
+  async updateBrandContent(brandId: string, patch: { title?: string; description?: string; keywords?: string }): Promise<void> {
+    const current = await this.fetchBrandContent(brandId);
+    const next: Partial<VtexBrandRecord> = {};
+    if (patch.title !== undefined) next.Title = patch.title;
+    if (patch.description !== undefined) next.MetaTagDescription = patch.description;
+    if (patch.keywords !== undefined) next.KeyWords = patch.keywords;
+    await requestWithRetry({
+      provider: "vtex",
+      operation: "updateBrandContent",
+      url: `${this.baseUrl}/pvt/brand/${brandId}`,
+      init: { method: "PUT", headers: this.headers(), body: JSON.stringify({ ...current, ...next }) },
+      onAttempt: this.onAttempt,
+    });
+  }
 
   /** Attaches a new SKU image by URL (VTEX fetches the bytes itself from `Url` — no direct binary
    *  upload here, same as the Shopify implementation). Unlike `updateSkuImageAltText` (PUT, edits

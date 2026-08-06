@@ -186,4 +186,18 @@ export interface CatalogClient {
     altText?: string;
     label?: string;
   }): Promise<{ id: string }>;
+  /** Publishes a Departamento/Categoria/Subcategoria page's SEO content — VTEX's private category
+   *  entity (`title`→Title, `description`→MetaTagDescription, `keywords`→KeyWords; confirmed live
+   *  against the real admin's "Título da página"/"Descrição (meta tag de descrição)"/"Palavras
+   *  similares" fields — see page-content.repo.ts). `categoryId` is categoryNodes.vtexCategoryId.
+   *  Shopify has no category hierarchy at all, so its implementation throws rather than silently
+   *  no-op-ing — this IS the entire action the merchant asked for by clicking "Publicar", not a
+   *  secondary field in a bigger batch (unlike e.g. updateProductTags's no-op). */
+  updateCategoryContent(categoryId: string, patch: { title?: string; description?: string; keywords?: string }): Promise<void>;
+  /** Same idea as updateCategoryContent, for a Marca page — VTEX's private brand entity
+   *  (`title`→Title, `description`→MetaTagDescription, `keywords`→KeyWords; confirmed live against
+   *  the real admin's Marcas > Editar screen). `brandId` comes from listFilterOptions()/brand
+   *  list — VTEX has no persisted brand table, so this app resolves name→id live at publish time.
+   *  Shopify throws (no brand-page concept), same reasoning as updateCategoryContent. */
+  updateBrandContent(brandId: string, patch: { title?: string; description?: string; keywords?: string }): Promise<void>;
 }

@@ -549,4 +549,12 @@ export class ShopifyClient implements CatalogClient {
       throw new Error(`Shopify fileDelete userError: ${data.fileDelete.userErrors[0].message}`);
     }
   }
+
+  async updateCategoryContent(): Promise<void> {
+    throw new Error("Shopify não tem hierarquia de categorias — publicação de página de departamento/categoria/subcategoria não é suportada nesta plataforma.");
+  }
+
+  async updateBrandContent(): Promise<void> {
+    throw new Error("Shopify não tem um campo de conteúdo de marca equivalente — publicação de página de marca não é suportada nesta plataforma.");
+  }
 }
