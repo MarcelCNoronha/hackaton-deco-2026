@@ -394,6 +394,28 @@ a {
   letter-spacing: 0.03em;
 }
 
+.analytics-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  gap: 1rem;
+  align-items: start;
+  margin: 1.1rem 0;
+}
+
+.analytics-grid .card {
+  margin: 0;
+}
+
+.analytics-grid-wide {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 900px) {
+  .analytics-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ---------- Forms ---------- */
 
 .form-grid {

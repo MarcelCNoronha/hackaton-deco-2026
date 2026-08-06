@@ -576,6 +576,54 @@ export interface BusinessImpactSummary {
   products: BusinessImpactProduct[];
 }
 
+export type OptimizationAnalyticsTier = PriceTier | "unknown";
+
+export interface OptimizationAnalytics {
+  generatedAt: string;
+  platform: CatalogPlatform;
+  totals: {
+    costUsd: number;
+    unassignedCostUsd: number;
+    calls: number;
+    successfulCalls: number;
+    failedCalls: number;
+    inputTokens: number;
+    outputTokens: number;
+    optimizedProducts: number;
+    runs: number;
+    proposals: number;
+    images: number;
+  };
+  byMonth: Array<{
+    month: string;
+    costUsd: number;
+    calls: number;
+    inputTokens: number;
+    outputTokens: number;
+    products: number;
+  }>;
+  byProviderModel: Array<{
+    provider: LlmProvider;
+    model: string | null;
+    tier: OptimizationAnalyticsTier;
+    costUsd: number;
+    calls: number;
+    inputTokens: number;
+    outputTokens: number;
+    products: number;
+  }>;
+  byField: Array<{
+    field: string;
+    label: string;
+    count: number;
+    products: number;
+    runs: number;
+    published: number;
+    reused: number;
+    lastCreatedAt: string | null;
+  }>;
+}
+
 export interface RunCosts {
   totalCostUsd: number;
   totalCalls: number;
@@ -763,6 +811,7 @@ export const api = {
   runImpactSummary: (runId: number) => request<ImpactSummary>(`/runs/${runId}/impact-summary`),
   overallImpactSummary: () => request<ImpactSummary>("/impact/summary"),
   businessImpact: () => request<BusinessImpactSummary>("/impact/business"),
+  optimizationAnalytics: () => request<OptimizationAnalytics>("/optimization-analytics"),
   reviewProposal: (id: number, body: { status: "approved" | "rejected" | "edited"; proposedValue?: string }) =>
     request<EnrichmentProposal>(`/proposals/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   approveAllProposals: (runId: number) =>

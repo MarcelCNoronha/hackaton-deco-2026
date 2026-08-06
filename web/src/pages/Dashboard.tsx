@@ -1,6 +1,14 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
-import { api, type CatalogPlatform, type Connection, type EnrichmentRun, type ProviderSpend } from "../api/client";
+import {
+  api,
+  type CatalogPlatform,
+  type Connection,
+  type EnrichmentRun,
+  type OptimizationAnalytics,
+  type OptimizationAnalyticsTier,
+  type ProviderSpend,
+} from "../api/client";
 import { StatTile } from "../components/StatTile";
 import { StatusBadge } from "../components/StatusBadge";
 import { ToolStatusGrid } from "../components/ToolStatusGrid";
@@ -13,6 +21,25 @@ const PROVIDER_LABELS: Record<string, string> = {
   gemini: "Google (Gemini)",
 };
 
+const TIER_LABELS: Record<OptimizationAnalyticsTier, string> = {
+  quality: "Qualidade",
+  balanced: "Equilibrado",
+  price: "Preco",
+  unknown: "Fora do trio",
+};
+
+const NUMBER = new Intl.NumberFormat("pt-BR");
+
+function formatNumber(value: number): string {
+  return NUMBER.format(value);
+}
+
+function monthLabel(value: string): string {
+  const [year, month] = value.split("-").map(Number);
+  if (!year || !month) return value;
+  return new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString("pt-BR", { month: "short", year: "numeric", timeZone: "UTC" });
+}
+
 export function Dashboard() {
   const { can } = useAuth();
   const [runs, setRuns] = useState<EnrichmentRun[]>([]);
@@ -20,6 +47,7 @@ export function Dashboard() {
   const [spendLimits, setSpendLimits] = useState<ProviderSpend[]>([]);
   const [connections, setConnections] = useState<Connection[]>([]);
   const [catalogPlatform, setCatalogPlatform] = useState<CatalogPlatform>("vtex");
+  const [analytics, setAnalytics] = useState<OptimizationAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -29,12 +57,14 @@ export function Dashboard() {
       api.getSpendLimits(),
       api.listConnections(),
       api.getCatalogPlatform(),
-    ]).then(([runsResult, optimized, spend, connectionsResult, { platform }]) => {
+      api.optimizationAnalytics(),
+    ]).then(([runsResult, optimized, spend, connectionsResult, { platform }, analyticsResult]) => {
       setRuns(runsResult);
       setOptimizedCount(optimized.count);
       setSpendLimits(spend);
       setConnections(connectionsResult);
       setCatalogPlatform(platform);
+      setAnalytics(analyticsResult);
       setLoading(false);
     });
   }, []);
@@ -70,6 +100,119 @@ export function Dashboard() {
             <StatTile label="Reaproveitados (RAG)" value={reusedTotal} delta="menor custo" deltaGood />
           )}
         </div>
+
+        {analytics && (
+          <>
+            <div className="stat-row">
+              <StatTile label="Custo historico IA" value={formatCost(analytics.totals.costUsd)} />
+              <StatTile label="Chamadas IA" value={formatNumber(analytics.totals.calls)} />
+              <StatTile label="Produtos no analytics" value={formatNumber(analytics.totals.optimizedProducts)} delta={analytics.platform.toUpperCase()} deltaGood />
+              <StatTile label="Campos gerados" value={formatNumber(analytics.totals.proposals)} />
+              <StatTile label="Imagens geradas" value={formatNumber(analytics.totals.images)} />
+              {analytics.totals.unassignedCostUsd > 0 && (
+                <StatTile label="Custo sem produto" value={formatCost(analytics.totals.unassignedCostUsd)} delta="fora do escopo" deltaGood={false} />
+              )}
+            </div>
+
+            <div className="analytics-grid">
+              <section className="card">
+                <h2>Historico mes a mes</h2>
+                {analytics.byMonth.length === 0 ? (
+                  <p className="muted">Ainda nao ha custo de IA vinculado a produto na plataforma ativa.</p>
+                ) : (
+                  <div className="table-scroll">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Mes</th>
+                          <th>Custo</th>
+                          <th>Chamadas</th>
+                          <th>Produtos</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...analytics.byMonth].reverse().map((row) => (
+                          <tr key={row.month}>
+                            <td>{monthLabel(row.month)}</td>
+                            <td>{formatCost(row.costUsd)}</td>
+                            <td className="muted">{formatNumber(row.calls)}</td>
+                            <td className="muted">{formatNumber(row.products)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+
+              <section className="card">
+                <h2>Volume por campo</h2>
+                {analytics.byField.length === 0 ? (
+                  <p className="muted">Nenhum campo otimizado ainda para a plataforma ativa.</p>
+                ) : (
+                  <div className="table-scroll">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Campo</th>
+                          <th>Total</th>
+                          <th>Produtos</th>
+                          <th>Publicados</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {analytics.byField.map((row) => (
+                          <tr key={row.field}>
+                            <td>{row.label}</td>
+                            <td>{formatNumber(row.count)}</td>
+                            <td className="muted">{formatNumber(row.products)}</td>
+                            <td className="muted">{formatNumber(row.published)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+
+              <section className="card analytics-grid-wide">
+                <h2>Custo por provedor e modelo</h2>
+                {analytics.byProviderModel.length === 0 ? (
+                  <p className="muted">Ainda nao ha chamadas pagas de IA na plataforma ativa.</p>
+                ) : (
+                  <div className="table-scroll">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Provedor</th>
+                          <th>Modelo</th>
+                          <th>Nivel</th>
+                          <th>Custo</th>
+                          <th>Chamadas</th>
+                          <th>Tokens</th>
+                          <th>Produtos</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {analytics.byProviderModel.map((row) => (
+                          <tr key={`${row.provider}:${row.model ?? "unknown"}`}>
+                            <td>{PROVIDER_LABELS[row.provider] ?? row.provider}</td>
+                            <td>{row.model ?? "Sem modelo"}</td>
+                            <td className="muted">{TIER_LABELS[row.tier]}</td>
+                            <td>{formatCost(row.costUsd)}</td>
+                            <td className="muted">{formatNumber(row.calls)}</td>
+                            <td className="muted">{formatNumber(row.inputTokens + row.outputTokens)}</td>
+                            <td className="muted">{formatNumber(row.products)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+            </div>
+          </>
+        )}
 
         <section className="card">
           <h2>Gasto por provedor neste mês</h2>

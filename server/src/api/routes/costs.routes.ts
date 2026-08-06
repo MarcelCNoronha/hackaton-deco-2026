@@ -3,9 +3,12 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "../../db/client.js";
 import { agentRequestLogs } from "../../db/schema.js";
 import { requireAuth } from "../../auth/guards.js";
+import { getOptimizationAnalytics } from "../../repositories/optimization-analytics.repo.js";
 
 export async function costsRoutes(app: FastifyInstance) {
   app.addHook("preHandler", requireAuth);
+
+  app.get("/api/optimization-analytics", async () => getOptimizationAnalytics());
 
   /** Cost breakdown for one run: total plus per-product, per-model — the "quanto custou cada
    *  otimização" view. Only Anthropic calls carry a cost; other providers' rows have costUsd null. */
