@@ -171,6 +171,29 @@ export const generatedImages = pgTable("generated_images", {
   productIdIdx: index("generated_images_product_id_idx").on(table.productId),
 }));
 
+/** AI-generated short product video, produced FROM one of the product's existing photos (image-to-
+ *  video via Veo, never from scratch) — a single fixed-length clip (see VIDEO_GENERATION_DURATION_SECONDS
+ *  in model-recommendations.ts), never chained/extended. Unlike generatedImages, there's no
+ *  platform "publish" target (VTEX/Shopify have no native product-video field) and no classification
+ *  slot — this is a standalone asset a human downloads/uses for marketing, not something the
+ *  pipeline pushes to the catalog. Stored inline as base64 like generatedImages, same rationale
+ *  (no object storage yet, fine at hackathon-demo volume). */
+export const generatedVideos = pgTable("generated_videos", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  productId: bigint("product_id", { mode: "number" })
+    .notNull()
+    .references(() => products.id),
+  sourceImageUrl: text("source_image_url").notNull(),
+  prompt: text("prompt").notNull(),
+  durationSeconds: integer("duration_seconds").notNull(),
+  mimeType: text("mime_type").notNull(),
+  videoBase64: text("video_base64").notNull(),
+  costUsd: numeric("cost_usd"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  productIdIdx: index("generated_videos_product_id_idx").on(table.productId),
+}));
+
 /** Top-level tracking for one enrichment pipeline execution — mirrors Mundial's integration_sync_runs. */
 export const enrichmentRuns = pgTable("enrichment_runs", {
   id: bigserial("id", { mode: "number" }).primaryKey(),

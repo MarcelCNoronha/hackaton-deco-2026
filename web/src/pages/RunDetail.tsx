@@ -11,6 +11,7 @@ import {
   type EnrichmentProposal,
   type EnrichmentRun,
   type GeneratedImage,
+  type GeneratedVideo,
   type ImpactSummary,
   type PhotoClassification,
   type Product,
@@ -420,6 +421,78 @@ function ImageGenerationModal({
   );
 }
 
+/** Mirrors ImageGenerationModal, simplified: no crop (Veo takes one whole reference photo, not a
+ *  detail region), no run-wide note (video is a one-off ask per product, not a repeated action
+ *  across a whole run's worth of generations the way image kinds are). */
+function VideoGenerationModal({
+  productId,
+  images,
+  submitting,
+  error,
+  onCancel,
+  onSubmit,
+}: {
+  productId: number;
+  images: ProductImage[];
+  submitting: boolean;
+  error: string | null;
+  onCancel: () => void;
+  onSubmit: (baseImageUrl: string, note: string) => void;
+}) {
+  const [baseImageUrl, setBaseImageUrl] = useState(images[0]?.ImageUrl ?? "");
+  const [note, setNote] = useState("");
+
+  useEffect(() => {
+    setBaseImageUrl(images[0]?.ImageUrl ?? "");
+    setNote("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productId]);
+
+  return (
+    <div className="modal-overlay" role="dialog" aria-modal="true" onClick={submitting ? undefined : onCancel}>
+      <div className="modal-box card" style={{ maxWidth: 640 }} onClick={(event) => event.stopPropagation()}>
+        <h2 style={{ marginTop: 0 }}>Gerar vídeo do produto</h2>
+        <p className="muted" style={{ fontSize: "0.78rem", marginTop: "-0.4rem" }}>
+          Vídeo curto (8s) gerado por IA a partir de uma foto real do produto. Pode levar alguns minutos.
+        </p>
+        {images.length === 0 ? (
+          <p className="muted">Este produto não tem fotos cadastradas para usar como referência.</p>
+        ) : (
+          <>
+            <PhotoReferencePicker images={images} baseImageUrl={baseImageUrl} onBaseImageChange={setBaseImageUrl} allowCrop={false} />
+            <label style={{ display: "block", margin: "0.9rem 0 0" }}>
+              <span className="muted" style={{ display: "block", fontSize: "0.78rem", marginBottom: "0.3rem" }}>
+                Instruções (opcional)
+              </span>
+              <textarea
+                value={note}
+                onChange={(event) => setNote(event.target.value)}
+                maxLength={500}
+                rows={3}
+                placeholder="Ex.: leve giro mostrando os dois lados; câmera fixa, só aproximação suave"
+                style={IMAGE_NOTE_TEXTAREA_STYLE}
+              />
+            </label>
+          </>
+        )}
+        {error && (
+          <div className="banner" style={{ marginTop: "0.75rem" }}>
+            {error}
+          </div>
+        )}
+        <div className="actions" style={{ marginTop: "1rem", justifyContent: "flex-end" }}>
+          <button type="button" className="secondary" onClick={onCancel} disabled={submitting}>
+            Cancelar
+          </button>
+          <button type="button" onClick={() => onSubmit(baseImageUrl, note.trim())} disabled={submitting || !baseImageUrl}>
+            {submitting ? "Gerando… (pode levar minutos)" : "Gerar vídeo"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const FIELD_LABELS: Record<EnrichmentProposal["field"], string> = {
   description: "Descrição",
   alt_text: "Alt-text de imagem",
@@ -581,6 +654,13 @@ export function RunDetail() {
   const [imageModalSubmitting, setImageModalSubmitting] = useState(false);
   const [imageModalError, setImageModalError] = useState<string | null>(null);
   const [classifyingId, setClassifyingId] = useState<string | null>(null);
+  const [generatedVideos, setGeneratedVideos] = useState<Record<number, GeneratedVideo[]>>({});
+  const [generatingVideoFor, setGeneratingVideoFor] = useState<Set<number>>(new Set());
+  const [videoGenError, setVideoGenError] = useState<string | null>(null);
+  const [videoModalProductId, setVideoModalProductId] = useState<number | null>(null);
+  const [videoModalSubmitting, setVideoModalSubmitting] = useState(false);
+  const [videoModalError, setVideoModalError] = useState<string | null>(null);
+  const [deletingVideoId, setDeletingVideoId] = useState<number | null>(null);
   const runImageNoteDirtyRef = useRef(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -657,6 +737,9 @@ export function RunDetail() {
           .catch(() => [productId, []] as const),
       ),
     ).then((pairs) => setCatalogImages(Object.fromEntries(pairs)));
+    Promise.all(ids.map((productId) => api.listGeneratedVideos(productId).then((videos) => [productId, videos] as const)))
+      .then((pairs) => setGeneratedVideos(Object.fromEntries(pairs)))
+      .catch((err) => console.error("Failed to load generated videos", err));
   }, [proposals]);
 
   /** Generates a new marketing image FROM the product's existing photos (never from scratch) —
@@ -723,6 +806,59 @@ export function RunDetail() {
     setImageModalSubmitting(false);
     if (err) setImageModalError(err);
     else setImageModal(null);
+  }
+
+  /** Generates a short marketing video FROM the product's existing photos (never from scratch) —
+   *  mirrors handleGenerateImage, but tracked in a Set instead of a per-kind map since there's only
+   *  one video "kind", and the request itself can take up to several minutes (Veo polls internally
+   *  on the server — see gemini.client.ts's generateProductVideo). */
+  async function handleGenerateVideo(productId: number, options: { note?: string; baseImageUrl?: string }): Promise<string | null> {
+    setGeneratingVideoFor((prev) => new Set(prev).add(productId));
+    try {
+      const note = (options.note ?? "").trim();
+      const video = await api.generateVideo(productId, {
+        runId,
+        note: note || undefined,
+        baseImageUrl: options.baseImageUrl || undefined,
+      });
+      setGeneratedVideos((prev) => ({ ...prev, [productId]: [video, ...(prev[productId] ?? [])] }));
+      api.runCosts(runId).then(setCosts);
+      return null;
+    } catch (err) {
+      return err instanceof Error ? err.message : String(err);
+    } finally {
+      setGeneratingVideoFor((prev) => {
+        const next = new Set(prev);
+        next.delete(productId);
+        return next;
+      });
+    }
+  }
+
+  async function handleVideoModalSubmit(baseImageUrl: string, note: string) {
+    if (videoModalProductId === null) return;
+    setVideoModalSubmitting(true);
+    setVideoModalError(null);
+    const err = await handleGenerateVideo(videoModalProductId, { note, baseImageUrl });
+    setVideoModalSubmitting(false);
+    if (err) setVideoModalError(err);
+    else setVideoModalProductId(null);
+  }
+
+  async function handleDeleteGeneratedVideo(productId: number, video: GeneratedVideo) {
+    setVideoGenError(null);
+    setDeletingVideoId(video.id);
+    try {
+      await api.deleteGeneratedVideo(video.id);
+      setGeneratedVideos((prev) => ({
+        ...prev,
+        [productId]: (prev[productId] ?? []).filter((v) => v.id !== video.id),
+      }));
+    } catch (err) {
+      setVideoGenError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDeletingVideoId(null);
+    }
   }
 
   const [publishingImageId, setPublishingImageId] = useState<number | null>(null);
@@ -1087,6 +1223,14 @@ export function RunDetail() {
                     >
                       {generatingFor[productId] === "feature_callout" ? "Gerando…" : "🎯 Gerar foto de destaque"}
                     </button>
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => setVideoModalProductId(productId)}
+                      disabled={generatingVideoFor.has(productId)}
+                    >
+                      {generatingVideoFor.has(productId) ? "Gerando… (minutos)" : "🎬 Gerar vídeo"}
+                    </button>
                     {descriptionProposal && (descriptionProposal.status === "approved" || descriptionProposal.status === "published") && (
                       <button
                         type="button"
@@ -1308,6 +1452,51 @@ export function RunDetail() {
                 })()}
               </div>
 
+              {((generatedVideos[productId] ?? []).length > 0 || generatingVideoFor.has(productId)) && (
+                <div className="card" style={{ background: "var(--surface-2)", margin: "0 0 1rem" }}>
+                  <h3 style={{ margin: "0 0 0.6rem" }}>Vídeos</h3>
+                  {videoGenError && (
+                    <div className="banner" style={{ marginBottom: "0.6rem" }}>
+                      {videoGenError}
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
+                    {generatingVideoFor.has(productId) && (
+                      <div className="muted" style={{ width: 180, fontSize: "0.78rem" }}>
+                        Gerando vídeo… pode levar alguns minutos.
+                      </div>
+                    )}
+                    {(generatedVideos[productId] ?? []).map((video) => (
+                      <div key={video.id} style={{ width: 180 }}>
+                        <video
+                          src={api.generatedVideoRawUrl(video.id)}
+                          controls
+                          loop
+                          style={{ width: "100%", height: 160, objectFit: "cover", borderRadius: "var(--radius-md)", background: "#000" }}
+                        />
+                        <div className="muted" style={{ fontSize: "0.72rem", marginTop: "0.3rem" }}>
+                          {video.durationSeconds}s · {formatCost(Number(video.costUsd ?? 0))}
+                        </div>
+                        <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.3rem" }}>
+                          <a href={api.generatedVideoRawUrl(video.id)} download className="link-button" style={{ fontSize: "0.72rem" }}>
+                            Baixar
+                          </a>
+                          <button
+                            type="button"
+                            className="link-button"
+                            style={{ fontSize: "0.72rem", color: "var(--status-critical)" }}
+                            onClick={() => handleDeleteGeneratedVideo(productId, video)}
+                            disabled={deletingVideoId === video.id}
+                          >
+                            {deletingVideoId === video.id ? "Excluindo…" : "Excluir"}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {productProposals.map((proposal) => (
                 <div key={proposal.id} style={{ marginBottom: "1.25rem" }}>
                   <div className="proposal-header">
@@ -1375,6 +1564,20 @@ export function RunDetail() {
           runNoteError={runImageNoteError}
           onRunNoteChange={handleRunImageNoteChange}
           onSaveRunNote={handleSaveRunImageNote}
+        />
+      )}
+      {videoModalProductId !== null && (
+        <VideoGenerationModal
+          productId={videoModalProductId}
+          images={orderedReferenceImages(products.find((p) => p.id === videoModalProductId))}
+          submitting={videoModalSubmitting}
+          error={videoModalError}
+          onCancel={() => {
+            if (videoModalSubmitting) return;
+            setVideoModalProductId(null);
+            setVideoModalError(null);
+          }}
+          onSubmit={handleVideoModalSubmit}
         />
       )}
     </>

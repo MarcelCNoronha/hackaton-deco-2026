@@ -445,6 +445,23 @@ export interface GeneratedImage {
   createdAt: string;
 }
 
+/** An AI-generated short marketing video produced FROM one of the product's existing photos
+ *  (image-to-video, never from scratch) — no publish target (VTEX/Shopify have no native product
+ *  video field) and no integrity gate (unlike GeneratedImage), so this is just generated, stored,
+ *  and reviewed directly. `videoBase64` is intentionally NOT part of this type — the list/create
+ *  responses omit it (can be several MB per row); playback/download always goes through
+ *  `/generated-videos/:id/raw`. */
+export interface GeneratedVideo {
+  id: number;
+  productId: number;
+  sourceImageUrl: string;
+  prompt: string;
+  durationSeconds: number;
+  mimeType: string;
+  costUsd: string | null;
+  createdAt: string;
+}
+
 /** A photo already on the platform, outside CatalogIA's own generatedImages table — most predate
  *  this store's Label convention and come back with `label: null` until classified. */
 export interface CatalogImage {
@@ -908,6 +925,17 @@ export const api = {
    *  generations don't pile up — if it was already published, the real photo is removed from the
    *  platform too, not just locally. */
   deleteGeneratedImage: (imageId: number) => request<{ ok: boolean }>(`/generated-images/${imageId}`, { method: "DELETE" }),
+
+  listGeneratedVideos: (productId: number) => request<GeneratedVideo[]>(`/products/${productId}/generated-videos`),
+  /** Can take up to several minutes (Veo itself, not this request, polls internally on the server
+   *  — see gemini.client.ts's generateProductVideo) — callers should show a long-running spinner,
+   *  not treat this like the near-instant image generation call. */
+  generateVideo: (productId: number, body: { note?: string; runId?: number; baseImageUrl?: string }) =>
+    request<GeneratedVideo>(`/products/${productId}/generated-videos`, { method: "POST", body: JSON.stringify(body) }),
+  deleteGeneratedVideo: (videoId: number) => request<{ ok: boolean }>(`/generated-videos/${videoId}`, { method: "DELETE" }),
+  /** Same-origin path, not a fetch() call — use directly as a <video src> or download link; the
+   *  session cookie rides along automatically since /generated-videos/:id/raw sits behind requireAuth. */
+  generatedVideoRawUrl: (videoId: number) => `${BASE}/generated-videos/${videoId}/raw`,
   /** The product's own photos already on the platform, outside CatalogIA's generatedImages table
    *  — shown in the same panel so every photo for a product can be classified from one place. */
   listCatalogImages: (productId: number) => request<CatalogImage[]>(`/products/${productId}/catalog-images`),

@@ -211,6 +211,13 @@
       "when": 1786035730281,
       "tag": "0029_naive_franklin_richards",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1786139341335,
+      "tag": "0030_wild_thunderbolt",
+      "breakpoints": true
     }
   ]
 }

@@ -1,6 +1,6 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, VideoGenerationReferenceType } from "@google/genai";
 import type { RequestLogEntry } from "./http.js";
-import { computeCostUsd, IMAGE_GENERATION_MODEL } from "./model-recommendations.js";
+import { computeCostUsd, IMAGE_GENERATION_MODEL, VIDEO_GENERATION_MODEL } from "./model-recommendations.js";
 import {
   buildCategoryFieldsSuffix,
   buildCategoryPromptRulesSuffix,
@@ -50,6 +50,9 @@ const GEMINI_BASE_DELAY_MS = 3000;
 /** Wait at most this long per attempt even when Google's own error suggests longer — bounds how
  *  long one product's failure can stall the rest of the run. */
 const GEMINI_MAX_BACKOFF_MS = 20_000;
+/** Veo's own docs cite 11s-6min latency per generation — polling faster than this just burns
+ *  quota on status checks without the result arriving any sooner. */
+const VIDEO_POLL_INTERVAL_MS = 10_000;
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -156,7 +159,7 @@ export class GeminiClient implements LlmClient {
   private readonly client: GoogleGenAI;
 
   constructor(
-    apiKey: string,
+    private readonly apiKey: string,
     private readonly model: string,
     private readonly onAttempt?: (entry: RequestLogEntry) => void | Promise<void>,
   ) {
@@ -631,6 +634,111 @@ export class GeminiClient implements LlmClient {
       sameProduct: verdict.sameProduct && verdict.instructionSatisfied,
       notes: verdict.instructionSatisfied ? verdict.notes : `Instrucao obrigatoria nao confirmada: ${verdict.notes}`,
     };
+  }
+
+  /** Generates a short video FROM up to 3 of the product's existing photos (image-to-video, never
+   *  from scratch) via Veo — a long-running operation, unlike every other call in this class, so
+   *  this polls instead of returning immediately. `costUsd` is supplied by the caller (video is
+   *  priced per second, not per-token, same reasoning as generateProductImage's costUsd param).
+   *  Deliberately no retry-with-backoff (unlike every other method here): a single Veo generation
+   *  already costs ~$0.80 and takes up to several minutes, so blindly retrying a transient failure
+   *  up to 3x (this class's usual pattern) could 3x both cost and wait time for one call — a failed
+   *  generation just surfaces to the caller instead. */
+  async generateProductVideo(params: {
+    referenceImageUrls: string[];
+    prompt: string;
+    durationSeconds: number;
+    costUsd: number;
+    productId?: number;
+  }): Promise<{ mimeType: string; base64: string }> {
+    const startedAt = Date.now();
+    try {
+      const referenceImages = await Promise.all(
+        params.referenceImageUrls.map(async (url) => {
+          const block = await fetchImageDataBlock(url);
+          return { image: { imageBytes: block.data, mimeType: block.mime_type }, referenceType: VideoGenerationReferenceType.ASSET };
+        }),
+      );
+      let operation = await this.client.models.generateVideos({
+        model: VIDEO_GENERATION_MODEL,
+        // Top-level prompt/image (as opposed to nesting both under `source`) is flagged deprecated
+        // by the SDK itself as of this writing ("will be removed in a future major release, not
+        // before 2026-07-31" — a date already past) — confirmed live against the real API on
+        // 2026-08-07 that `source` is the form actually expected going forward.
+        //
+        // Multiple ASSET-type referenceImages (config, not source) is mutually exclusive with
+        // source.image (a single image) per the SDK's own doc comment — confirmed live 2026-08-07
+        // with 1 and 3 reference images, both succeeding at the same cost (Veo bills per second of
+        // OUTPUT video, not per input image).
+        source: { prompt: params.prompt },
+        // Veo only supports 16:9/9:16 (never 1:1, unlike the image model above) — 9:16 (vertical)
+        // chosen since a short product clip is a social/Reels-style marketing asset, not a page hero.
+        config: { durationSeconds: params.durationSeconds, aspectRatio: "9:16", numberOfVideos: 1, referenceImages },
+      });
+
+      while (!operation.done) {
+        await sleep(VIDEO_POLL_INTERVAL_MS);
+        operation = await this.client.operations.getVideosOperation({ operation });
+      }
+      if (operation.error) {
+        throw new Error(`Veo video generation failed: ${JSON.stringify(operation.error)}`);
+      }
+
+      const video = operation.response?.generatedVideos?.[0]?.video;
+      if (!video) {
+        throw new Error("Veo did not return a generated video");
+      }
+      let base64 = video.videoBytes;
+      const mimeType = video.mimeType ?? "video/mp4";
+      if (!base64 && video.uri) {
+        // NOT a rare fallback in practice — confirmed live across 3 separate real generations
+        // (2026-08-07) that this Developer API key/project always returns only `uri`, never
+        // `videoBytes`, so this branch is the normal path, not an edge case. Raw fetch with the API
+        // key header instead of ai.files.downloadMedia: that SDK method's TS type isn't reliably
+        // resolved across this package's node/web/bundled entry points (confirmed via tsc — same
+        // class of module-resolution flakiness already worked around elsewhere in this file for
+        // `instanceof ApiError`), so a plain fetch avoids depending on it entirely.
+        const res = await fetch(video.uri, { headers: { "x-goog-api-key": this.apiKey } });
+        if (!res.ok) {
+          throw new Error(`Failed to download generated video from ${video.uri}: HTTP ${res.status}`);
+        }
+        base64 = Buffer.from(await res.arrayBuffer()).toString("base64");
+      }
+      if (!base64) {
+        throw new Error("Veo returned a video with neither bytes nor a downloadable uri");
+      }
+
+      await this.onAttempt?.({
+        provider: "gemini",
+        operation: "generateProductVideo",
+        endpoint: "https://generativelanguage.googleapis.com/v1beta/models/generateVideos",
+        method: "POST",
+        success: true,
+        attempt: 1,
+        durationMs: Date.now() - startedAt,
+        model: VIDEO_GENERATION_MODEL,
+        costUsd: params.costUsd,
+        productId: params.productId,
+      });
+
+      return { mimeType, base64 };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[gemini] generateProductVideo failed (productId=${params.productId ?? "n/a"}): ${message}`);
+      await this.onAttempt?.({
+        provider: "gemini",
+        operation: "generateProductVideo",
+        endpoint: "https://generativelanguage.googleapis.com/v1beta/models/generateVideos",
+        method: "POST",
+        success: false,
+        attempt: 1,
+        durationMs: Date.now() - startedAt,
+        error: message,
+        model: VIDEO_GENERATION_MODEL,
+        productId: params.productId,
+      });
+      throw err;
+    }
   }
 
   async extractStructuredData<T>(params: {

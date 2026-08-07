@@ -2,12 +2,13 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../../db/client.js";
-import { enrichmentProposals, enrichmentRuns, generatedImages, products } from "../../db/schema.js";
+import { enrichmentProposals, enrichmentRuns, generatedImages, generatedVideos, products } from "../../db/schema.js";
 import { requireAuth } from "../../auth/guards.js";
 import { syncProduct } from "../../agents/catalog-reader.agent.js";
 import { extractManufacturerFacts } from "../../agents/reference-facts.agent.js";
 import { extractManufacturerReferenceImage } from "../../agents/manufacturer-image.agent.js";
 import { generateProductImage } from "../../agents/image-generation.agent.js";
+import { generateProductVideo } from "../../agents/video-generation.agent.js";
 import { republishProduct } from "../../agents/publisher.agent.js";
 import { getProductRealImpact } from "../../agents/impact.agent.js";
 import { requireActiveCatalogClient } from "./catalog.routes.js";
@@ -17,7 +18,7 @@ import { makeRequestLogger } from "../../repositories/logs.repo.js";
 import { GeminiClient } from "../../clients/gemini.client.js";
 import { GscClient } from "../../clients/gsc.client.js";
 import { Ga4Client } from "../../clients/ga4.client.js";
-import { IMAGE_GENERATION_MODEL } from "../../clients/model-recommendations.js";
+import { IMAGE_GENERATION_MODEL, VIDEO_GENERATION_MODEL } from "../../clients/model-recommendations.js";
 import { env } from "../../config/env.js";
 import { PHOTO_CLASSIFICATION_LABELS, resolvePhotoLabel } from "../../lib/photo-labels.js";
 
@@ -55,6 +56,12 @@ const generateImageBody = z.object({
   if (body.referenceCrop && body.kind !== "feature_callout") {
     ctx.addIssue({ code: "custom", path: ["referenceCrop"], message: "Recorte de referencia so pode ser usado na foto de destaque." });
   }
+});
+
+const generateVideoBody = z.object({
+  note: z.string().max(500).optional(),
+  baseImageUrl: z.string().url().optional(),
+  runId: z.number().optional(),
 });
 
 const manufacturerReferenceBody = z.object({ manufacturerReferenceUrl: z.string().url().nullable() });
@@ -238,6 +245,68 @@ export async function productsRoutes(app: FastifyInstance) {
     } catch (err) {
       return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
     }
+  });
+
+  app.get<{ Params: { id: string } }>("/api/products/:id/generated-videos", async (req) => {
+    return db.query.generatedVideos.findMany({
+      where: eq(generatedVideos.productId, Number(req.params.id)),
+      orderBy: desc(generatedVideos.createdAt),
+      columns: {
+        // videoBase64 excluded — can be several MB per row and this list is only for showing
+        // cards/metadata; playback/download goes through the dedicated /raw route below.
+        id: true,
+        productId: true,
+        sourceImageUrl: true,
+        prompt: true,
+        durationSeconds: true,
+        mimeType: true,
+        costUsd: true,
+        createdAt: true,
+      },
+    });
+  });
+
+  /** Generates a short marketing video FROM one of the product's existing photos via Veo (image-to-
+   *  video) — same Gemini connection as image generation, different model. Synchronous from the
+   *  caller's perspective even though Veo itself is a long-running operation: generateProductVideo
+   *  polls internally, so this request can take up to several minutes (see VIDEO_POLL_INTERVAL_MS). */
+  app.post<{ Params: { id: string } }>("/api/products/:id/generated-videos", async (req, reply) => {
+    const body = generateVideoBody.parse(req.body);
+    const product = await db.query.products.findFirst({ where: eq(products.id, Number(req.params.id)) });
+    if (!product) return reply.status(404).send({ error: "Produto não encontrado" });
+
+    const geminiCreds = await getConnectionCredentials<"gemini">("gemini");
+    if (!geminiCreds) {
+      return reply.status(400).send({ error: "Conexão Gemini não configurada — configure no painel de Integrações primeiro." });
+    }
+
+    try {
+      const gemini = new GeminiClient(geminiCreds.apiKey, VIDEO_GENERATION_MODEL, makeRequestLogger(body.runId));
+      const row = await generateProductVideo({
+        gemini,
+        product,
+        note: body.note?.trim() || undefined,
+        baseImageUrl: body.baseImageUrl,
+      });
+      const { videoBase64: _videoBase64, ...rowWithoutBytes } = row;
+      return reply.status(201).send(rowWithoutBytes);
+    } catch (err) {
+      return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.get<{ Params: { id: string } }>("/api/generated-videos/:id/raw", async (req, reply) => {
+    const video = await db.query.generatedVideos.findFirst({ where: eq(generatedVideos.id, Number(req.params.id)) });
+    if (!video) return reply.status(404).send();
+    reply.header("Content-Type", video.mimeType).header("Cache-Control", "private, max-age=31536000, immutable");
+    return reply.send(Buffer.from(video.videoBase64, "base64"));
+  });
+
+  app.delete<{ Params: { id: string } }>("/api/generated-videos/:id", async (req, reply) => {
+    const existing = await db.query.generatedVideos.findFirst({ where: eq(generatedVideos.id, Number(req.params.id)) });
+    if (!existing) return reply.status(404).send({ error: "Vídeo não encontrado" });
+    await db.delete(generatedVideos).where(eq(generatedVideos.id, Number(req.params.id)));
+    return reply.send({ ok: true });
   });
 
   // A manufacturer_reference photo's classification isn't implied by its kind (unlike the 4

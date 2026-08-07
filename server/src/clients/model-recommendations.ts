@@ -80,3 +80,17 @@ export function computeEmbeddingCostUsd(tokens: number): number {
  *  Fetched live (beyond training cutoff) on 2026-08-01, not guessed. */
 export const IMAGE_GENERATION_MODEL = "gemini-2.5-flash-image";
 export const IMAGE_GENERATION_PRICE_PER_IMAGE = 0.039;
+
+/** Video generation, same rationale as image gen above (priced per second of output, not per
+ *  token) — Veo (via the same @google/genai SDK already used for image gen) is the only one of our
+ *  3 providers with a video model. "Fast" tier chosen over the flagship "veo-3.1-generate-preview"
+ *  for cost (~4x cheaper per second) — acceptable for a marketing-asset use case where flagship
+ *  cinematic quality isn't the bar. Fixed at a single un-extended 8s clip by explicit product
+ *  decision (2026-08-07): Veo's own longer-video path chains 3-4 extension calls (each a separate
+ *  billed generation) to reach 15-30s, which multiplies both cost and failure surface for a
+ *  hackathon-timeline feature — a human can trivially loop/duplicate an 8s clip afterward if more
+ *  length is wanted. Fetched live (beyond training cutoff) on 2026-08-07, not guessed. */
+export const VIDEO_GENERATION_MODEL = "veo-3.1-fast-generate-preview";
+export const VIDEO_GENERATION_DURATION_SECONDS = 8;
+export const VIDEO_GENERATION_PRICE_PER_SECOND = 0.1;
+export const VIDEO_GENERATION_PRICE_PER_VIDEO = VIDEO_GENERATION_DURATION_SECONDS * VIDEO_GENERATION_PRICE_PER_SECOND;

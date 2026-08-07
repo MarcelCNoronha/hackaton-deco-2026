@@ -281,11 +281,57 @@ specs, FAQ, dados estruturados) + alt-text de imagem, sem opção de escolher. A
   marca confiança da amostra (sinal preliminar, poucos dados, janela parcial, completa) para não
   vender certeza antes de o histórico maturar.
 
-- **Geração de vídeo curto** — adiado para 2026-08-04 ("vamos fazer amanhã"). Ainda não
-  pesquisado; a geração de imagem (ver abaixo) já dá o padrão de client/agent/rota a seguir.
-  Especificação confirmada pelo usuário: o vídeo gerado deve ter **entre 15 e 30 segundos** — não
-  confundir com a duração do vídeo de demo do hackathon (5 minutos, ver "Entregáveis
-  obrigatórios"), são coisas completamente diferentes.
+- ~~**Geração de vídeo curto**~~ — **implementado em 2026-08-07**, com escopo reduzido por decisão
+  explícita do usuário: em vez dos 15-30s originalmente especificados, **um único clipe de 8s**,
+  sem encadear chamadas de extensão. Não confundir com o vídeo de demo do hackathon (5 minutos, ver
+  "Entregáveis obrigatórios") — coisas completamente diferentes.
+  - **Provedor**: Veo (`veo-3.1-fast-generate-preview`, via `@google/genai`, já dependência do
+    projeto — mesmo SDK do Nano Banana). Avaliado e descartado antes de implementar: Sora 2 da
+    OpenAI está **fora do ar** (pausado pela própria OpenAI); um agregador tipo Replicate
+    (Kling/Seedance, sem espera de allowlist) foi cotado como alternativa caso o acesso ao Veo não
+    viesse a tempo, mas não foi necessário — o usuário já tinha o allowlist do Veo liberado no
+    projeto Google (confirmado ao vivo, print da tela de rate limits do AI Studio).
+  - **Por que 8s e não 15-30s**: Veo gera no máximo 8s por chamada; passar disso exige encadear até
+    ~4 chamadas de "extensão" (cada uma um novo request cobrado), multiplicando custo e superfície
+    de falha para um recurso implementado no fim do prazo do hackathon. Decisão do usuário: um clipe
+    de 8s, com a opção manual de duplicar/repetir o mesmo clipe depois se precisar de mais duração.
+  - **Custo**: ~$0,80 por vídeo (8s × $0,10/s, tier "Fast" 720p/9:16) — ordem de grandeza acima do
+    custo de imagem ($0,039), então é uma ação opt-in por produto (botão "🎬 Gerar vídeo" em
+    RunDetail), nunca parte de um run em lote.
+  - **Sem gate de integridade** (diferente de `generateProductImage`) — decisão consciente por
+    custo: uma segunda chamada de verificação dobraria o custo por vídeo; revisão fica só com o
+    humano assistindo o resultado no player.
+  - **Dois achados só confirmados testando ao vivo contra a API real** (não estavam documentados,
+    ou a doc pública estava desatualizada/inconsistente com o SDK instalado):
+    1. Os parâmetros de nível superior `prompt`/`image` do `generateVideos` estão **deprecados**
+       pelo próprio SDK ("será removido numa major futura, não antes de 2026-07-31" — data já
+       passada) — o formato certo é aninhar os dois em `source: { prompt, image }`. Confirmado sem
+       o aviso de depreciação depois de trocar.
+    2. A resposta da API **nunca** trouxe `video.videoBytes` inline (diferente do que a doc da Google
+       sugeria como caminho comum) — sempre só `video.uri`, exigindo download via
+       `fetch(uri, { headers: { "x-goog-api-key": ... } })`. `GeminiClient.generateProductVideo`
+       (`gemini.client.ts`) trata esse fallback como o caminho principal, não uma exceção rara.
+  - **Até 3 fotos de referência, não só 1** (mesmo dia, refinamento pedido pelo usuário): a primeira
+    versão mandava só a foto base escolhida no modal. Confirmado ao vivo que Veo cobra por **segundo
+    de vídeo gerado**, não por quantidade de imagem de entrada — então usar mais fotos não muda o
+    custo ($0,80 continua igual com 1 ou 3). `GeminiClient.generateProductVideo` passou a montar
+    `config.referenceImages` (tipo `ASSET`, até 3 — limite documentado no próprio SDK) em vez de
+    `source.image` (mutuamente exclusivos); `video-generation.agent.ts`'s
+    `selectSourceImageUrls` usa a foto escolhida pelo operador como primeira referência e completa
+    até 3 com as demais fotos reais do produto (padrão "principal" primeiro como desempate). Não
+    testado além de 3 (limite documentado, decisão consciente de não gastar mais uma chamada real só
+    pra descobrir se a conta aceita mais).
+  - **Validado ao vivo em produção antes do deploy**: 3 chamadas reais completas contra a conta de
+    produção (via SSH + decifrando a credencial Gemini já armazenada) — 2 com 1 foto de referência,
+    1 com 3 —, ~44s cada, vídeo de ~2.5-2.8MB cada, sem tocar o banco de produção (script isolado,
+    nunca gravou em `generated_videos`, arquivos de teste removidos da VPS depois de cada rodada) —
+    validou o fluxo request→poll→download antes de expor o botão pro usuário final.
+  - **Arquivos novos**: `server/src/agents/video-generation.agent.ts`, migração `0030` (tabela
+    `generated_videos` — sem classificação/publicação de plataforma, já que VTEX/Shopify não têm
+    campo nativo de vídeo de produto; é um asset avulso pra download/uso em marketing, não algo que
+    o pipeline empurra pro catálogo). Rotas em `products.routes.ts`
+    (`GET/POST /api/products/:id/generated-videos`, `GET /api/generated-videos/:id/raw`,
+    `DELETE /api/generated-videos/:id`), card "Vídeos" novo em `RunDetail.tsx`.
 
 - ~~**Seleção de recorte da foto de referência para guiar a geração da foto de destaque**~~ —
   **implementado em 2026-08-06**. Na tela da run, o bloco **Fotos** agora permite selecionar um
