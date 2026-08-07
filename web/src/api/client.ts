@@ -523,6 +523,10 @@ export interface ContentScore {
   unsupportedClaims: string[];
   overallScore: number;
   seoScore: number;
+  /** % of real Search Console queries for this product's page whose words show up in the SEO
+   *  fields — null when there was no real query data to compare against (GSC disconnected, or no
+   *  impressions yet). Already folded into seoScore itself (60% AI judgment / 40% this, when set). */
+  seoQueryCoverage: number | null;
   conversionScore: number;
   readabilityScore: number;
   structureScore: number;

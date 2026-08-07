@@ -262,6 +262,12 @@ export const contentScores = pgTable("content_scores", {
   // Composite sub-scores (0-100), added for the Excelente/Bom/Médio classification system —
   // see optimization-thresholds.repo.ts.
   seoScore: integer("seo_score").notNull().default(0),
+  // % of real Search Console queries for this product's page whose words show up in the SEO
+  // fields — null means no real query data was available (GSC disconnected, or no impressions
+  // yet), distinct from 0 ("checked, covers none"). Already folded into seoScore itself; kept
+  // here too so the panel can show the real-data component separately. See evaluator.agent.ts's
+  // computeSeoQueryCoverage.
+  seoQueryCoverage: integer("seo_query_coverage"),
   conversionScore: integer("conversion_score").notNull().default(0),
   readabilityScore: integer("readability_score").notNull().default(0),
   structureScore: integer("structure_score").notNull().default(0),

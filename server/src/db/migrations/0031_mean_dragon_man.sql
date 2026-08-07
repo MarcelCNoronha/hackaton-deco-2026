@@ -1,0 +1,1 @@
+ALTER TABLE "content_scores" ADD COLUMN "seo_query_coverage" integer;

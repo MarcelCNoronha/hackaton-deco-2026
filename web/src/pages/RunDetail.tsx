@@ -448,12 +448,21 @@ function VideoGenerationModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productId]);
 
+  // Mirrors video-generation.agent.ts's selectSourceImageUrls: the chosen base photo goes first,
+  // filled out with up to MAX_REFERENCE_IMAGES(3) total from the product's other real photos — the
+  // extra ones aren't picked here, just counted, so the operator knows more than the base photo
+  // will actually be sent to Veo.
+  const additionalReferenceCount = Math.min(Math.max(images.length - 1, 0), 2);
+
   return (
     <div className="modal-overlay" role="dialog" aria-modal="true" onClick={submitting ? undefined : onCancel}>
       <div className="modal-box card" style={{ maxWidth: 640 }} onClick={(event) => event.stopPropagation()}>
         <h2 style={{ marginTop: 0 }}>Gerar vídeo do produto</h2>
         <p className="muted" style={{ fontSize: "0.78rem", marginTop: "-0.4rem" }}>
-          Vídeo curto (8s) gerado por IA a partir de uma foto real do produto. Pode levar alguns minutos.
+          Vídeo curto (8s) gerado por IA a partir de fotos reais do produto. Pode levar alguns minutos.
+          {additionalReferenceCount > 0
+            ? ` Além da foto escolhida abaixo, ${additionalReferenceCount === 1 ? "mais 1 foto real do produto entra" : `mais ${additionalReferenceCount} fotos reais do produto entram`} automaticamente como referência (Veo aceita até 3).`
+            : " Este produto só tem essa foto disponível como referência."}
         </p>
         {images.length === 0 ? (
           <p className="muted">Este produto não tem fotos cadastradas para usar como referência.</p>
@@ -1148,6 +1157,12 @@ export function RunDetail() {
                     after={percent(proposed.attributesFilled, proposed.attributesExpected)}
                   />
                   <ScoreCompare label="SEO" before={original.seoScore} after={proposed.seoScore} />
+                  {proposed.seoQueryCoverage !== null && (
+                    <p className="muted" style={{ fontSize: "0.72rem", margin: "-0.5rem 0 0.75rem" }}>
+                      Cobre {proposed.seoQueryCoverage}% das buscas reais do Google Search Console para esta página
+                      {original.seoQueryCoverage !== null ? ` (antes: ${original.seoQueryCoverage}%)` : ""} — já somado ao score de SEO acima.
+                    </p>
+                  )}
                   <ScoreCompare
                     label="GEO"
                     before={percent(original.questionsAnswered, original.questionsTotal)}

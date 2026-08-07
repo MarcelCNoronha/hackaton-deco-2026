@@ -1085,6 +1085,52 @@ Duas correções pequenas no mesmo dia, ambas a partir de teste ao vivo do usuá
   dentro do próprio `ImageGenerationModal`, como uma seção "Orientação para imagens desta otimização"
   com salvamento próprio, separada da instrução pontual daquela geração.
 
+### Score de SEO ancorado em busca real + Score de GEO determinístico (2026-08-07)
+
+Pedido do usuário: "medir impacto de GEO e precisamos melhorar a forma que medimos SEO". Investigação
+mostrou que os dois sub-scores mais citados no pitch (SEO e GEO, parte do score composto de 8) eram
+**100% autoavaliação da mesma IA que escreveu o texto** — inclusive o `topSearchQueries` (buscas reais
+do Search Console) já estava disponível e usado na *geração* de conteúdo, mas nunca chegava na
+*avaliação*. Corrigido nos dois, com abordagens diferentes por decisão explícita do usuário:
+
+- **SEO — cobertura real somada ao julgamento de IA, não substituindo**: nova função pura
+  `computeSeoQueryCoverage` (`evaluator.agent.ts`) calcula, sem chamada de IA, quantas das queries
+  reais do GSC para a página do produto têm ≥60% das palavras significativas (≥3 letras) presentes em
+  `seoTitle`/`metaDescription`/`keywords`/descrição — exige a maioria das palavras, não a frase exata
+  (texto raro repete uma query de várias palavras ao pé da letra mesmo cobrindo a intenção). `seoScore`
+  final passa a ser `julgamento de IA × 0,6 + cobertura real × 0,4` quando há dado real disponível;
+  sem GSC conectado ou sem impressões pra aquela página, cai pro comportamento antigo (só IA), nunca
+  0 — `seoQueryCoverage` fica `null` (distinto de "cobre 0%") pra o painel diferenciar "sem dado" de
+  "dado ruim". O baseline "antes" também passou a receber `topSearchQueries` (senão a comparação
+  antes/depois seria injusta, o "antes" nunca ganhando crédito pela cobertura que talvez já tivesse).
+  Nova coluna `content_scores.seo_query_coverage` (migração `0031`), exposta no `RunDetail` como uma
+  linha abaixo do dumbbell de SEO ("Cobre X% das buscas reais do Google Search Console...").
+- **GEO — trocado de autoavaliação por score estrutural determinístico**: `geoAnswerableCount` (a IA
+  julgando se O PRÓPRIO texto dela responde as 11 `GEO_QUESTIONS`) tinha o mesmo problema que já foi
+  corrigido antes pro Evaluator vs. Content Enrichment em geral (roteamento pra provedores diferentes)
+  — só que aqui era o MESMO texto sendo julgado pelo mesmo mecanismo que o escreveu, sem nem trocar de
+  provedor. Substituído por `computeGeoStructureScore`: 11 padrões de palavra-chave/regex (um por
+  pergunta de `GEO_QUESTIONS`, acento-insensível), verificados contra a descrição **+ conteúdo real do
+  FAQ** (pergunta e resposta, não só a contagem) — determinístico, sem chamada de IA, sem o modelo
+  julgando o próprio trabalho. Deliberadamente independente dos bônus de `structureScore` por
+  `faqCount`/`hasStructuredData` (que já premiam a PRESENÇA de FAQ/schema.org) — este score mede só
+  COBERTURA DE TÓPICO, pra não contar o mesmo sinal duas vezes na média dos 8 sub-scores. `buyerConfidence`/
+  `buyerUnanswered` (julgamento livre de "comprador simulado", não amarrado às 11 perguntas fixas)
+  continuam vindo da IA normalmente — só a métrica ligada às `GEO_QUESTIONS` específicas mudou de fonte.
+  Reaproveitadas as colunas já existentes `questionsAnswered`/`questionsTotal` (já lidas pelo
+  frontend, sem migração nova) — só a fonte do número mudou, não o schema.
+- **Limitação documentada, não escondida**: os 11 padrões de GEO são heurísticos (regex/palavra-chave
+  em português), não NLP de verdade — um texto pode cobrir um tópico com um vocabulário que o padrão
+  não prevê e não ganhar crédito. Aceitável como proxy determinístico; segue sem existir um "Search
+  Console" padrão de mercado pra IA generativa, então não há como validar contra um ground truth
+  externo real (a limitação original que motivou a pergunta do usuário continua sendo a raiz do
+  problema — isso ataca a autoavaliação circular, não inventa dado externo que não existe).
+- **Testes novos** (`evaluator.test.ts`, 22 testes no arquivo, todos passando): cobertura total/zero/
+  parcial de `computeGeoStructureScore` (incluindo crédito só via conteúdo de FAQ, e acento-
+  insensibilidade), `computeSeoQueryCoverage` (null sem dado, correspondência parcial de palavras,
+  múltiplas queries), e o teste de `computeContentScore` que antes fixava `expectedGeo = 100` agora
+  deriva o valor esperado chamando a própria função determinística, não mais assumindo o resultado.
+
 ## Formação de equipes
 
 - 1 a 5 pessoas por equipe (pode ser solo)

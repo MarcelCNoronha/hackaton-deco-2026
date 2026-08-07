@@ -355,6 +355,10 @@ export async function proposeContentEnrichment(params: {
     text: product.description,
     hasStructuredData: false,
     faqCount: 0,
+    // The "before" baseline needs the same real query data as "after" — otherwise the delta the
+    // panel shows would be unfair (original never gets credit for whatever query coverage it
+    // already had, inflating the apparent improvement).
+    topSearchQueries: params.topSearchQueries,
     originalAttributes: product.attributes as Record<string, unknown>,
     expectedAttributeKeys,
   });
@@ -399,10 +403,13 @@ export async function proposeContentEnrichment(params: {
       text: enriched.description,
       hasStructuredData: Boolean(enriched.structuredData),
       faqCount: enriched.faq?.length ?? 0,
+      faq: enriched.faq,
       knownFacts,
       productId: product.id,
       seoTitle: enriched.seoTitle,
       metaDescription: enriched.metaDescription,
+      keywords: enriched.keywords,
+      topSearchQueries: params.topSearchQueries,
       originalAttributes: product.attributes as Record<string, unknown>,
       attributesPatch: enriched.attributesPatch,
       expectedAttributeKeys,
@@ -456,10 +463,13 @@ export async function proposeContentEnrichment(params: {
       text: enriched.description,
       hasStructuredData: Boolean(enriched.structuredData),
       faqCount: enriched.faq?.length ?? 0,
+      faq: enriched.faq,
       knownFacts,
       productId: product.id,
       seoTitle: enriched.seoTitle,
       metaDescription: enriched.metaDescription,
+      keywords: enriched.keywords,
+      topSearchQueries: params.topSearchQueries,
       originalAttributes: product.attributes as Record<string, unknown>,
       attributesPatch: enriched.attributesPatch,
       expectedAttributeKeys,

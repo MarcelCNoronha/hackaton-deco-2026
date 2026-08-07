@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { computeAttributeCompleteness, computeContentScore, readabilityScore, structureScore } from "./evaluator.agent.js";
+import {
+  computeAttributeCompleteness,
+  computeContentScore,
+  computeGeoStructureScore,
+  computeSeoQueryCoverage,
+  readabilityScore,
+  structureScore,
+} from "./evaluator.agent.js";
 import type { ContentEvaluation, LlmClient } from "../clients/llm-types.js";
 
 function fakeLlm(evaluation: ContentEvaluation): LlmClient {
@@ -13,6 +20,8 @@ function fakeLlm(evaluation: ContentEvaluation): LlmClient {
   };
 }
 
+// geoAnswerableCount is intentionally NOT used for scoring anymore (see computeGeoStructureScore)
+// — kept here only because ContentEvaluation still requires the field from evaluateContent's shape.
 const FULL_EVALUATION: ContentEvaluation = {
   buyerConfidence: 80,
   buyerUnanswered: [],
@@ -23,6 +32,74 @@ const FULL_EVALUATION: ContentEvaluation = {
   dataConsistencyScore: 100,
   catalogIssues: [],
 };
+
+// Written to trip every one of the 11 GEO_TOPIC_PATTERNS at least once, so tests can assert full
+// coverage without hardcoding a topicsCovered count that would silently drift if a pattern changes.
+const GEO_COMPLETE_TEXT =
+  "Serve para revestir paredes internas e é compatível com pisos já existentes. " +
+  "Material cerâmico de alta qualidade, nas dimensões de 60x60 cm. " +
+  "Não deve ser usado em áreas externas sem proteção adequada. " +
+  "Garantia de 5 anos contra defeitos, com troca garantida. " +
+  "Em comparação com outras opções do mercado, tem acabamento diferencial superior ao concorrente. " +
+  "Indicado para quem busca durabilidade — perfeito para reformas completas. " +
+  "A instalação é simples, veja o passo a passo no manual. " +
+  "Vale o investimento pelo excelente custo-benefício.";
+
+describe("computeGeoStructureScore", () => {
+  it("covers every topic when the text explicitly addresses all 11", () => {
+    const { topicsCovered, topicsTotal } = computeGeoStructureScore(GEO_COMPLETE_TEXT, []);
+    expect(topicsCovered).toBe(11);
+    expect(topicsTotal).toBe(11);
+  });
+
+  it("returns 0/11 for empty text and no FAQ", () => {
+    const { topicsCovered, topicsTotal } = computeGeoStructureScore(null, []);
+    expect(topicsCovered).toBe(0);
+    expect(topicsTotal).toBe(11);
+  });
+
+  it("credits a topic addressed only in FAQ content, not the main text", () => {
+    const withoutFaq = computeGeoStructureScore("Produto de alta qualidade.", []);
+    const withFaq = computeGeoStructureScore("Produto de alta qualidade.", [
+      { question: "Qual a garantia?", answer: "Garantia de 2 anos contra defeitos de fabricação." },
+    ]);
+    expect(withFaq.topicsCovered).toBeGreaterThan(withoutFaq.topicsCovered);
+  });
+
+  it("ignores accents so 'compatível' matches the same as 'compativel'", () => {
+    const accented = computeGeoStructureScore("Este produto é compatível com qualquer instalação elétrica.", []);
+    const plain = computeGeoStructureScore("Este produto e compativel com qualquer instalacao eletrica.", []);
+    expect(accented.topicsCovered).toBe(plain.topicsCovered);
+    expect(accented.topicsCovered).toBeGreaterThan(0);
+  });
+});
+
+describe("computeSeoQueryCoverage", () => {
+  it("returns null (not 0) when there are no real queries to check", () => {
+    expect(computeSeoQueryCoverage(null, "qualquer texto")).toBeNull();
+    expect(computeSeoQueryCoverage([], "qualquer texto")).toBeNull();
+  });
+
+  it("matches a query whose significant words mostly appear, without requiring an exact phrase", () => {
+    // "revestimento" and "banheiro" both present, "para" is <3 chars-filtered-out isn't relevant
+    // here, but the query as a whole should count as covered.
+    const coverage = computeSeoQueryCoverage(["revestimento para banheiro"], "Revestimento cerâmico ideal para banheiros modernos");
+    expect(coverage).toBe(100);
+  });
+
+  it("does not count a query whose significant words are absent", () => {
+    const coverage = computeSeoQueryCoverage(["torneira cromada"], "Piso cerâmico antiderrapante");
+    expect(coverage).toBe(0);
+  });
+
+  it("computes a partial percentage across multiple queries", () => {
+    const coverage = computeSeoQueryCoverage(
+      ["piso ceramico", "torneira cromada"],
+      "Piso cerâmico de alta resistência",
+    );
+    expect(coverage).toBe(50);
+  });
+});
 
 describe("structureScore", () => {
   it("scores 0 for empty content", () => {
@@ -87,10 +164,10 @@ describe("computeAttributeCompleteness", () => {
 });
 
 describe("computeContentScore", () => {
-  it("averages the 8 sub-scores into overallScore", async () => {
+  it("averages the 8 sub-scores into overallScore, sourcing GEO from real topic coverage (not AI self-judgment)", async () => {
     const score = await computeContentScore({
       llm: fakeLlm(FULL_EVALUATION),
-      text: "<h2>Título</h2><p>" + "Texto de exemplo com tamanho razoável para pontuar bem. ".repeat(5) + "</p><table></table>",
+      text: "<h2>Título</h2><p>" + GEO_COMPLETE_TEXT + "</p><table></table>",
       hasStructuredData: true,
       faqCount: 3,
       seoTitle: "Título SEO",
@@ -99,8 +176,12 @@ describe("computeContentScore", () => {
       expectedAttributeKeys: ["cor", "material"],
     });
 
-    const expectedGeo = 100; // 11/11 answerable, GEO_QUESTIONS has 11 entries
+    // Not hardcoded to 11/11 — derived from the same deterministic function computeContentScore
+    // itself calls, so this test tracks real behavior instead of an assumption about the patterns.
+    const { topicsCovered, topicsTotal } = computeGeoStructureScore(GEO_COMPLETE_TEXT, []);
+    const expectedGeo = Math.round((topicsCovered / topicsTotal) * 100);
     const expectedCompletude = 100; // both expected keys filled
+    // No topSearchQueries passed — seoScore should be untouched AI judgment, seoQueryCoverage null.
     const manualAverage = Math.round(
       (FULL_EVALUATION.seoScore +
         expectedGeo +
@@ -113,9 +194,27 @@ describe("computeContentScore", () => {
         8,
     );
 
+    expect(topicsCovered).toBe(11); // sanity: GEO_COMPLETE_TEXT is written to hit every pattern
     expect(score.overallScore).toBe(manualAverage);
     expect(score.questionsTotal).toBe(11);
     expect(score.attributesExpected).toBe(2);
+    expect(score.seoScore).toBe(FULL_EVALUATION.seoScore);
+    expect(score.seoQueryCoverage).toBeNull();
+  });
+
+  it("blends seoScore with real Search Console query coverage when topSearchQueries is provided", async () => {
+    const score = await computeContentScore({
+      llm: fakeLlm(FULL_EVALUATION),
+      text: "Piso cerâmico antiderrapante para área externa, fácil de instalar.",
+      hasStructuredData: false,
+      faqCount: 0,
+      seoTitle: "Piso cerâmico antiderrapante",
+      topSearchQueries: ["piso ceramico antiderrapante", "piso area externa"],
+    });
+
+    // Both queries' significant words appear in the seoTitle/text above — full coverage.
+    expect(score.seoQueryCoverage).toBe(100);
+    expect(score.seoScore).toBe(Math.round(FULL_EVALUATION.seoScore * 0.6 + 100 * 0.4));
   });
 
   it("skips the LLM call when there is no text to judge, scoring every AI sub-score 0", async () => {
