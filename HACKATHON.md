@@ -180,17 +180,22 @@ do runner do GitHub Actions (mesmo sintoma documentado no projeto Mundial). Sem 
 código necessária; resolve sozinho re-rodando o workflow depois do bloqueio expirar.
 
 **Pendências de segurança identificadas, para ajustar depois (não bloqueiam o uso agora):**
-- **Senha root da VPS ainda ativa** — o deploy automático já usa só chave SSH, mas a senha root
-  (que passou por esta conversa de texto) continua funcionando pra login. Trocar ou desativar
-  autenticação por senha no SSH (`PasswordAuthentication no` no sshd_config), deixando só chave.
-  **Não verificado de novo desde que foi escrito** — só o usuário, com acesso à VPS, pode
-  confirmar se já foi feito.
+- ~~**Senha root da VPS ainda ativa**~~ — **verificado resolvido em 2026-08-07**: SSH na VPS
+  (`46.202.144.198`) checado direto — `/etc/ssh/sshd_config.d/99-catalogia-hardening.conf`
+  (criado 2026-08-06) define `PasswordAuthentication no` / `PermitRootLogin prohibit-password` /
+  `KbdInteractiveAuthentication no`, confirmado como configuração **efetiva** via `sshd -T` e por
+  teste real de conexão (`ssh -o PreferredAuthentications=password` — servidor responde
+  `Authentications that can continue: publickey`, nunca oferece senha). Root só entra por chave.
 - ~~**CORS da API permissivo** (`origin: true`)~~ — **corrigido**: `server/src/api/server.ts`
   hoje usa uma allowlist real (`allowedOrigins`), não mais `origin: true`. Nota mantida como
   registro de que já foi resolvido, não como pendência.
-- Recadastrar as conexões (VTEX/Shopify, Anthropic/OpenAI/Gemini, Google) pela tela de
-  Integrações em produção — o banco novo não herda nada do ambiente local. **Não verificado daqui**
-  — só o usuário sabe se já reconectou tudo em produção.
+- ~~**Recadastrar as conexões em produção**~~ — **verificado em 2026-08-07**: consulta direta à
+  tabela `connections` do Postgres de produção (metadados só, sem decifrar segredo) mostra VTEX,
+  Shopify, Google (GSC+GA4) e Gemini todos com `status = connected`. **Achado à parte, não é bug
+  novo (já registrado antes)**: Anthropic e OpenAI não têm linha em produção — só Gemini está
+  conectado entre os 3 provedores de LLM, então Content Enrichment e Evaluator continuam roteados
+  pro mesmo modelo em produção (mesma ressalva já anotada na rodada de 04/08 sobre "Confiança de
+  conteúdo" ser lida como indicativo otimista até um segundo provedor entrar).
 
 ### Gate de qualidade com auto-correção (2026-08-01, quarta rodada)
 
@@ -252,12 +257,13 @@ specs, FAQ, dados estruturados) + alt-text de imagem, sem opção de escolher. A
   causa raiz rápido; troca de framework é aposta em manutenibilidade futura, não requisito pra
   terminar o projeto. Revisitar só se bugs de formatação por provedor continuarem recorrentes.
 
-- **Analytics completo de otimizações** — pedido em 2026-08-03, não implementado ainda. Deve
-  incluir: histórico de gastos mês a mês (não só o mês corrente, que já existe no Dashboard),
-  quantidade de otimizações por tipo de campo (descrição, FAQ, bullets, specs, dados estruturados,
-  alt-text, imagem gerada), e por nível/tier de modelo usado (qualidade/equilibrado/preço — ver
-  `model-recommendations.ts`). Dá pra montar em cima do que já existe em `agent_request_logs`
-  (tem `provider`/`model`/`costUsd`/`createdAt` por chamada) sem precisar de tabela nova.
+- ~~**Analytics completo de otimizações**~~ — pedido em 2026-08-03, **implementado em 2026-08-06**
+  (commits `950f8cb`/`6e6b6e2`, nota só nunca tinha sido atualizada aqui). Vive em
+  `optimization-analytics.repo.ts` → `GET /api/optimization-analytics` → `Dashboard.tsx`: histórico
+  de gastos mês a mês (`byMonth`), quantidade de otimizações por campo (`byField`, via
+  `enrichmentProposals.field` + `generatedImages`, já que `agent_request_logs` não guarda o campo
+  por chamada) e custo por provedor/modelo/nível (`byProviderModel`, `classifyModelTier` casando
+  provider+model contra `model-recommendations.ts`).
 
 - ~~**Analytics agregado combinando Google + otimizações**~~ — **implementado em 2026-08-06** com
   foco no que o usuário pediu como principal: **acessos e retorno financeiro**. A página Impacto
