@@ -71,6 +71,7 @@ const classifyImageBody = z.object({ classification: z.enum(["principal", "ambie
 
 const republishBody = z.object({ runId: z.number() });
 const publishImageBody = z.object({ force: z.boolean().optional() }).default({});
+const publishVideoBody = z.object({ force: z.boolean().optional() }).default({});
 
 function imageGenerationNoteFromScope(scope: unknown): string | undefined {
   if (!scope || typeof scope !== "object" || Array.isArray(scope)) return undefined;
@@ -261,6 +262,8 @@ export async function productsRoutes(app: FastifyInstance) {
         durationSeconds: true,
         mimeType: true,
         costUsd: true,
+        integrityVerified: true,
+        integrityNotes: true,
         publishedAt: true,
         platformVideoId: true,
         createdAt: true,
@@ -300,15 +303,22 @@ export async function productsRoutes(app: FastifyInstance) {
   /** Uploads a generated video as a real product video — VTEX/Shopify both fetch the bytes
    *  server-side from `/api/generated-videos/:id/raw` (now a PUBLIC route, see
    *  generated-videos-public.routes.ts, same reasoning as generated-images'), never from the
-   *  caller's browser. No integrity/classification gate here (unlike image publish) — video has
-   *  neither concept, see generated_videos' schema doc comment. */
+   *  caller's browser. No classification gate here (unlike image publish) — video has no
+   *  carousel-position concept, see generated_videos' schema doc comment. It DOES now have an
+   *  integrity gate, mirroring image publish's — enforced here, not just as a UI warning. */
   app.post<{ Params: { id: string; videoId: string } }>(
     "/api/products/:id/generated-videos/:videoId/publish",
     async (req, reply) => {
+      const body = publishVideoBody.parse(req.body ?? {});
       const product = await db.query.products.findFirst({ where: eq(products.id, Number(req.params.id)) });
       if (!product) return reply.status(404).send({ error: "Produto não encontrado" });
       const video = await db.query.generatedVideos.findFirst({ where: eq(generatedVideos.id, Number(req.params.videoId)) });
       if (!video || video.productId !== product.id) return reply.status(404).send({ error: "Vídeo não encontrado" });
+      if (!video.integrityVerified && !body.force) {
+        return reply.status(400).send({
+          error: "Integridade do produto não confirmada para este vídeo — não pode ser publicado. Gere um novo vídeo.",
+        });
+      }
       if (!env.APP_BASE_URL) {
         return reply.status(400).send({ error: "APP_BASE_URL não configurado — necessário pra plataforma buscar o vídeo." });
       }

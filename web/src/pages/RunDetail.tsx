@@ -878,10 +878,18 @@ export function RunDetail() {
   /** Uploads an already-generated video as a real product video on the active platform — distinct
    *  from generating it (which only ever saves inside CatalogIA until this is called). */
   async function handlePublishVideo(productId: number, video: GeneratedVideo) {
+    if (
+      !video.integrityVerified &&
+      !window.confirm(
+        "A integridade deste vídeo não foi confirmada automaticamente. Se você revisou visualmente e o vídeo está correto, pode publicar mesmo assim. Continuar?",
+      )
+    ) {
+      return;
+    }
     setVideoGenError(null);
     setPublishingVideoId(video.id);
     try {
-      const updated = await api.publishGeneratedVideo(productId, video.id);
+      const updated = await api.publishGeneratedVideo(productId, video.id, { force: !video.integrityVerified });
       setGeneratedVideos((prev) => ({
         ...prev,
         [productId]: (prev[productId] ?? []).map((v) => (v.id === video.id ? updated : v)),
@@ -1515,6 +1523,14 @@ export function RunDetail() {
                         <div className="muted" style={{ fontSize: "0.72rem", marginTop: "0.3rem" }}>
                           {video.durationSeconds}s · {formatCost(Number(video.costUsd ?? 0))}
                         </div>
+                        {!video.integrityVerified && (
+                          <div
+                            style={{ fontSize: "0.72rem", marginTop: "0.2rem", color: "var(--status-warning)" }}
+                            title={video.integrityNotes ?? ""}
+                          >
+                            ⚠ Integridade do produto não confirmada
+                          </div>
+                        )}
                         {video.publishedAt ? (
                           <div style={{ fontSize: "0.72rem", marginTop: "0.3rem", color: "var(--status-good)" }}>✓ Publicado na loja</div>
                         ) : (
@@ -1524,8 +1540,17 @@ export function RunDetail() {
                             style={{ fontSize: "0.72rem", marginTop: "0.3rem" }}
                             onClick={() => handlePublishVideo(productId, video)}
                             disabled={publishingVideoId === video.id}
+                            title={
+                              !video.integrityVerified
+                                ? "Integridade nao confirmada automaticamente — publique apenas se voce revisou visualmente."
+                                : undefined
+                            }
                           >
-                            {publishingVideoId === video.id ? "Publicando…" : "Publicar na loja"}
+                            {publishingVideoId === video.id
+                              ? "Publicando…"
+                              : video.integrityVerified
+                                ? "Publicar na loja"
+                                : "Publicar mesmo assim"}
                           </button>
                         )}
                         <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.3rem" }}>

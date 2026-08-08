@@ -244,13 +244,18 @@ export class GeminiClient implements LlmClient {
     input: unknown;
     schema: Record<string, unknown>;
     maxOutputTokens?: number;
+    /** Overrides `this.model` for this one call — needed by verifyVideoIntegrity, which runs on a
+     *  GeminiClient instance bound to the Veo video model (generateVideos-only, no Interactions API
+     *  support) and must instead target the image model for its vision QA call. */
+    model?: string;
   }): Promise<T> {
+    const model = params.model ?? this.model;
     return this.loggedCall<T>({
       operation: params.operation,
       productId: params.productId,
       call: () =>
         this.client.interactions.create({
-          model: this.model,
+          model,
           system_instruction: params.systemInstruction,
           input: Array.isArray(params.input) ? params.input : JSON.stringify(params.input),
           response_format: { type: "text", mime_type: "application/json", schema: params.schema },
@@ -260,7 +265,7 @@ export class GeminiClient implements LlmClient {
           // where "minimal" is load-bearing to avoid reasoning eating the whole output budget.
           generation_config: {
             max_output_tokens: params.maxOutputTokens ?? 1500,
-            ...(this.model === IMAGE_GENERATION_MODEL ? {} : { thinking_level: "minimal" }),
+            ...(model === IMAGE_GENERATION_MODEL ? {} : { thinking_level: "minimal" }),
           },
         }) as unknown as Promise<GeminiInteraction>,
       extract: (interaction) => {
@@ -623,6 +628,69 @@ export class GeminiClient implements LlmClient {
             type: "boolean",
             description:
               "true se nao houver instrucao obrigatoria; ou, havendo instrucao, somente se a imagem cumprir exatamente. Para quantidades, conte visualmente; na duvida, false.",
+          },
+          notes: { type: "string", description: "Justificativa curta (1 frase) do veredito." },
+        },
+        required: ["sameProduct", "instructionSatisfied", "notes"],
+      },
+      maxOutputTokens: 200,
+    });
+    return {
+      sameProduct: verdict.sameProduct && verdict.instructionSatisfied,
+      notes: verdict.instructionSatisfied ? verdict.notes : `Instrucao obrigatoria nao confirmada: ${verdict.notes}`,
+    };
+  }
+
+  /** Post-generation integrity gate for generateProductVideo — same purpose and verdict shape as
+   *  verifyImageIntegrity above, adapted for video: sends the WHOLE generated clip (not a single
+   *  extracted frame) alongside one reference photo, so the model can judge consistency across the
+   *  motion, not just a snapshot — a shape/color deviation that only appears mid-clip (e.g. during
+   *  a camera move or parallax) would pass a single-frame check but fail this one. */
+  async verifyVideoIntegrity(params: {
+    referenceImageUrl: string;
+    generatedVideoBase64: string;
+    generatedVideoMimeType: string;
+    productId?: number;
+    requiredInstruction?: string;
+  }): Promise<{ sameProduct: boolean; notes: string }> {
+    const referenceBlock = await fetchImageDataBlock(params.referenceImageUrl);
+    const requiredInstruction = params.requiredInstruction?.trim();
+    const verdict = await this.callWithSchema<{ sameProduct: boolean; instructionSatisfied: boolean; notes: string }>({
+      operation: "verifyVideoIntegrity",
+      productId: params.productId,
+      // this.model on a GeminiClient built for video generation is the Veo model, which only
+      // supports models.generateVideos — never the Interactions API this call needs, hence the
+      // explicit override (see callWithSchema's `model` param doc comment).
+      model: IMAGE_GENERATION_MODEL,
+      systemInstruction:
+        "Você compara uma FOTO DE REFERÊNCIA real de um produto de e-commerce com um VÍDEO gerado por IA a " +
+        "partir dela. Diga se o produto mostrado no vídeo é EXATAMENTE o mesmo em TODOS os frames, do início " +
+        "ao fim — mesma forma, cor, material, rótulo/logo/textura; mudanças de cenário, enquadramento, câmera " +
+        "ou iluminação são aceitáveis. Qualquer deformação, duplicação de partes, mudança de cor/tom, ou " +
+        "produto que só fica correto em alguns frames NÃO é aceitável. Seja rigoroso: na dúvida, ou se algum " +
+        "trecho do vídeo divergir da referência mesmo que o resto esteja correto, considere que não é o mesmo produto." +
+        (requiredInstruction
+          ? " Alem disso, existe uma INSTRUCAO OBRIGATORIA do operador. Quando ela for objetiva ou contavel, " +
+            "como numero de barras, hastes, suportes ou pecas, reprove se o video nao cumprir exatamente em todos os frames."
+          : ""),
+      input: [
+        referenceBlock,
+        { type: "video", data: params.generatedVideoBase64, mime_type: params.generatedVideoMimeType },
+        { type: "text", text: "Primeira imagem = referência real do produto. Vídeo = gerado por IA a partir dela." },
+        ...(requiredInstruction ? [{ type: "text" as const, text: `Instrucao obrigatoria do operador: ${requiredInstruction}` }] : []),
+      ],
+      schema: {
+        type: "object",
+        properties: {
+          sameProduct: {
+            type: "boolean",
+            description:
+              "true somente se for claramente o mesmo produto em TODO o vídeo, sem alteracao de forma/cor/material/rotulo em nenhum frame.",
+          },
+          instructionSatisfied: {
+            type: "boolean",
+            description:
+              "true se nao houver instrucao obrigatoria; ou, havendo instrucao, somente se o video cumprir exatamente do inicio ao fim. Na duvida, false.",
           },
           notes: { type: "string", description: "Justificativa curta (1 frase) do veredito." },
         },

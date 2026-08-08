@@ -191,6 +191,14 @@ export const generatedVideos = pgTable("generated_videos", {
   mimeType: text("mime_type").notNull(),
   videoBase64: text("video_base64").notNull(),
   costUsd: numeric("cost_usd"),
+  // Result of the post-generation integrity gate (see video-generation.agent.ts): a second
+  // multimodal call comparing the generated video against the reference photo, checking the
+  // product stays the same across the whole clip (no shape/color/label/material drift or
+  // deformation over the motion) before it's ever shown/published. Mirrors generatedImages'
+  // column of the same name — added later once video's "no integrity gate" gap (see this table's
+  // original doc comment) turned out to let visibly distorted clips reach publish unflagged.
+  integrityVerified: boolean("integrity_verified").notNull().default(false),
+  integrityNotes: text("integrity_notes"),
   // Set once this video has actually been added to the active catalog platform — null means it
   // only ever existed inside CatalogIA. Mirrors generatedImages.publishedAt/platformImageId.
   publishedAt: timestamp("published_at", { withTimezone: true }),

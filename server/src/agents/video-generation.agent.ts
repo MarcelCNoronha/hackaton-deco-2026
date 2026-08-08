@@ -56,10 +56,13 @@ function buildPrompt(title: string, note?: string): string {
 }
 
 /** Generates a short (see VIDEO_GENERATION_DURATION_SECONDS) marketing video FROM up to
- *  MAX_REFERENCE_IMAGES of the product's existing photos (never from scratch) and persists it. No
- *  quality/integrity gate (unlike generateProductImage) — deliberately out of scope for the
- *  hackathon timeline given video's much higher per-attempt cost; a human reviews the result
- *  directly in the panel instead. */
+ *  MAX_REFERENCE_IMAGES of the product's existing photos (never from scratch) and persists it.
+ *  Runs the same post-generation integrity gate as generateProductImage, but only ONE attempt
+ *  (never regenerates on a failed verdict) — unlike image's MAX_INTEGRITY_ATTEMPTS retry loop, a
+ *  single Veo generation already costs ~$0.80 and takes minutes, so auto-retrying here would 2x
+ *  both for every video, verified or not. A failed/unverified verdict still doesn't block the
+ *  video from being saved — same "always show something, but flag it" discipline as images — it
+ *  only blocks *publishing* (see products.routes.ts's publish route) until a human confirms. */
 export async function generateProductVideo(params: {
   gemini: GeminiClient;
   product: ProductRow;
@@ -83,6 +86,29 @@ export async function generateProductVideo(params: {
     productId: product.id,
   });
 
+  let integrityVerified = false;
+  let integrityNotes = "";
+  // Same discipline as generateProductImage: a thrown error here (network blip, model rejecting
+  // video input) is NOT a rejection verdict — it just means verification couldn't be completed,
+  // so the video is still saved with integrityVerified=false for human review rather than lost.
+  try {
+    const verdict = await gemini.verifyVideoIntegrity({
+      referenceImageUrl: sourceImageUrls[0],
+      generatedVideoBase64: generated.base64,
+      generatedVideoMimeType: generated.mimeType,
+      productId: product.id,
+      requiredInstruction: note,
+    });
+    integrityVerified = verdict.sameProduct;
+    integrityNotes = verdict.notes;
+    if (!integrityVerified) {
+      console.error(`[video-generation] integrity check failed for product ${product.id}: ${verdict.notes}`);
+    }
+  } catch (err) {
+    integrityNotes = `Verificação de integridade falhou (erro técnico, não reprovação): ${err instanceof Error ? err.message : String(err)}`;
+    console.error(`[video-generation] integrity check errored for product ${product.id}:`, err);
+  }
+
   const [row] = await db
     .insert(generatedVideos)
     .values({
@@ -96,6 +122,8 @@ export async function generateProductVideo(params: {
       mimeType: generated.mimeType,
       videoBase64: generated.base64,
       costUsd: VIDEO_GENERATION_PRICE_PER_VIDEO.toString(),
+      integrityVerified,
+      integrityNotes,
     })
     .returning();
   return row;

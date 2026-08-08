@@ -446,10 +446,9 @@ export interface GeneratedImage {
 }
 
 /** An AI-generated short marketing video produced FROM one of the product's existing photos
- *  (image-to-video, never from scratch) — no integrity gate (unlike GeneratedImage; see
- *  video-generation.agent.ts's doc comment for why), but DOES have a real platform publish target
- *  (VTEX's `Videos` field / Shopify's `productCreateMedia`, confirmed live 2026-08-07). No
- *  classification slot though — video has no carousel-position concept on either platform.
+ *  (image-to-video, never from scratch) — has a real platform publish target (VTEX's `Videos`
+ *  field / Shopify's `productCreateMedia`, confirmed live 2026-08-07). No classification slot
+ *  though — video has no carousel-position concept on either platform.
  *  `videoBase64` is intentionally NOT part of this type — the list/create responses omit it (can be
  *  several MB per row); playback/download always goes through `/generated-videos/:id/raw`. */
 export interface GeneratedVideo {
@@ -460,6 +459,11 @@ export interface GeneratedVideo {
   durationSeconds: number;
   mimeType: string;
   costUsd: string | null;
+  /** Result of the post-generation integrity gate — false means the model itself flagged this
+   *  generation as NOT reliably the same product (see integrityNotes), mirroring GeneratedImage's
+   *  field of the same name. Unlike images, only ever checked once (never retried). */
+  integrityVerified: boolean;
+  integrityNotes: string | null;
   /** Set once this video was actually added to the active catalog platform — null means it only
    *  ever existed inside CatalogIA. */
   publishedAt: string | null;
@@ -948,8 +952,11 @@ export const api = {
   deleteGeneratedVideo: (videoId: number) => request<{ ok: boolean }>(`/generated-videos/${videoId}`, { method: "DELETE" }),
   /** Uploads an already-generated video as a real product video on the active platform — distinct
    *  from generating it (which only ever saves inside CatalogIA until this is called). */
-  publishGeneratedVideo: (productId: number, videoId: number) =>
-    request<GeneratedVideo>(`/products/${productId}/generated-videos/${videoId}/publish`, { method: "POST" }),
+  publishGeneratedVideo: (productId: number, videoId: number, body?: { force?: boolean }) =>
+    request<GeneratedVideo>(`/products/${productId}/generated-videos/${videoId}/publish`, {
+      method: "POST",
+      body: JSON.stringify(body ?? {}),
+    }),
   /** Same-origin path, not a fetch() call — use directly as a <video src> or download link. Public
    *  route (no auth required), same reasoning as generated-images' raw route: VTEX/Shopify fetch
    *  this URL directly when publishing, and neither platform can present a session cookie. */
