@@ -253,7 +253,7 @@ export async function productsRoutes(app: FastifyInstance) {
       orderBy: desc(generatedVideos.createdAt),
       columns: {
         // videoBase64 excluded — can be several MB per row and this list is only for showing
-        // cards/metadata; playback/download goes through the dedicated /raw route below.
+        // cards/metadata; playback/download goes through the public /raw route.
         id: true,
         productId: true,
         sourceImageUrl: true,
@@ -261,6 +261,8 @@ export async function productsRoutes(app: FastifyInstance) {
         durationSeconds: true,
         mimeType: true,
         costUsd: true,
+        publishedAt: true,
+        platformVideoId: true,
         createdAt: true,
       },
     });
@@ -295,16 +297,66 @@ export async function productsRoutes(app: FastifyInstance) {
     }
   });
 
-  app.get<{ Params: { id: string } }>("/api/generated-videos/:id/raw", async (req, reply) => {
-    const video = await db.query.generatedVideos.findFirst({ where: eq(generatedVideos.id, Number(req.params.id)) });
-    if (!video) return reply.status(404).send();
-    reply.header("Content-Type", video.mimeType).header("Cache-Control", "private, max-age=31536000, immutable");
-    return reply.send(Buffer.from(video.videoBase64, "base64"));
-  });
+  /** Uploads a generated video as a real product video — VTEX/Shopify both fetch the bytes
+   *  server-side from `/api/generated-videos/:id/raw` (now a PUBLIC route, see
+   *  generated-videos-public.routes.ts, same reasoning as generated-images'), never from the
+   *  caller's browser. No integrity/classification gate here (unlike image publish) — video has
+   *  neither concept, see generated_videos' schema doc comment. */
+  app.post<{ Params: { id: string; videoId: string } }>(
+    "/api/products/:id/generated-videos/:videoId/publish",
+    async (req, reply) => {
+      const product = await db.query.products.findFirst({ where: eq(products.id, Number(req.params.id)) });
+      if (!product) return reply.status(404).send({ error: "Produto não encontrado" });
+      const video = await db.query.generatedVideos.findFirst({ where: eq(generatedVideos.id, Number(req.params.videoId)) });
+      if (!video || video.productId !== product.id) return reply.status(404).send({ error: "Vídeo não encontrado" });
+      if (!env.APP_BASE_URL) {
+        return reply.status(400).send({ error: "APP_BASE_URL não configurado — necessário pra plataforma buscar o vídeo." });
+      }
 
+      try {
+        const catalog = await requireActiveCatalogClient();
+        const { id: platformVideoId } = await catalog.addProductVideo({
+          externalId: product.vtexProductId,
+          variantId: product.vtexSkuId,
+          videoUrl: `${env.APP_BASE_URL}/api/generated-videos/${video.id}/raw`,
+        });
+        const [updated] = await db
+          .update(generatedVideos)
+          .set({ publishedAt: new Date(), platformVideoId })
+          .where(eq(generatedVideos.id, video.id))
+          .returning();
+        const { videoBase64: _videoBase64, ...rowWithoutBytes } = updated;
+        return rowWithoutBytes;
+      } catch (err) {
+        return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
+  /** Deletes a generated video from the panel — if it was already published, the real video is
+   *  removed from the platform FIRST (same "never leave an untracked orphan live" discipline as
+   *  deleting a generated image), an error there aborting before the local row is dropped. */
   app.delete<{ Params: { id: string } }>("/api/generated-videos/:id", async (req, reply) => {
     const existing = await db.query.generatedVideos.findFirst({ where: eq(generatedVideos.id, Number(req.params.id)) });
     if (!existing) return reply.status(404).send({ error: "Vídeo não encontrado" });
+
+    if (existing.publishedAt) {
+      try {
+        const product = await db.query.products.findFirst({ where: eq(products.id, existing.productId) });
+        const catalog = await requireActiveCatalogClient();
+        if (product) {
+          await catalog.removeProductVideo({
+            externalId: product.vtexProductId,
+            variantId: product.vtexSkuId,
+            videoUrl: `${env.APP_BASE_URL}/api/generated-videos/${existing.id}/raw`,
+            videoId: existing.platformVideoId,
+          });
+        }
+      } catch (err) {
+        return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
     await db.delete(generatedVideos).where(eq(generatedVideos.id, Number(req.params.id)));
     return reply.send({ ok: true });
   });

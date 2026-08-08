@@ -481,6 +481,49 @@ export class ShopifyClient implements CatalogClient {
     return { id: data.productCreateMedia.media[0].id };
   }
 
+  /** Same `productCreateMedia` mutation as addProductImage, `mediaContentType: "VIDEO"` instead of
+   *  `"IMAGE"` — Shopify's documented type for a direct video file URL (distinct from
+   *  `EXTERNAL_VIDEO`, which is specifically for a YouTube/Vimeo embed link, not applicable here
+   *  since our URL serves the raw MP4 itself). Unlike the VTEX path (confirmed live 2026-08-07
+   *  against the real account), this hasn't been tested against a real Shopify store yet — the shape
+   *  matches Shopify's public API docs, not empirical confirmation. */
+  async addProductVideo(params: { externalId: string; variantId: string; videoUrl: string }): Promise<{ id: string | null }> {
+    type Resp = {
+      productCreateMedia: { media: Array<{ id: string }>; mediaUserErrors: Array<{ field: string[]; message: string }> };
+    };
+    const data = await this.graphql<Resp>(
+      "addProductVideo",
+      `mutation CreateMedia($productId: ID!, $media: [CreateMediaInput!]!) {
+        productCreateMedia(productId: $productId, media: $media) { media { id } mediaUserErrors { field message } }
+      }`,
+      {
+        productId: params.externalId,
+        media: [{ originalSource: params.videoUrl, mediaContentType: "VIDEO" }],
+      },
+    );
+    if (data.productCreateMedia.mediaUserErrors.length > 0) {
+      throw new Error(`Shopify productCreateMedia userError: ${data.productCreateMedia.mediaUserErrors[0].message}`);
+    }
+    return { id: data.productCreateMedia.media[0].id };
+  }
+
+  /** Same generic Files API as deleteImage — `videoId` (the media GID from addProductVideo) is
+   *  required here, unlike VTEX where there's no id to target. */
+  async removeProductVideo(params: { videoId: string | null }): Promise<void> {
+    if (!params.videoId) return;
+    type Resp = { fileDelete: { userErrors: Array<{ field: string[]; message: string }> } };
+    const data = await this.graphql<Resp>(
+      "removeProductVideo",
+      `mutation DeleteFile($fileIds: [ID!]!) {
+        fileDelete(fileIds: $fileIds) { userErrors { field message } }
+      }`,
+      { fileIds: [params.videoId] },
+    );
+    if (data.fileDelete.userErrors.length > 0) {
+      throw new Error(`Shopify fileDelete userError: ${data.fileDelete.userErrors[0].message}`);
+    }
+  }
+
   async updateProductTags(externalId: string, tags: string[]): Promise<void> {
     type Resp = { productUpdate: { userErrors: Array<{ field: string[]; message: string }> } };
     const data = await this.graphql<Resp>(

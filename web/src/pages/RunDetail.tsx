@@ -855,6 +855,9 @@ export function RunDetail() {
   }
 
   async function handleDeleteGeneratedVideo(productId: number, video: GeneratedVideo) {
+    if (video.publishedAt && !window.confirm("Esse vídeo já está publicado na loja — excluir aqui também remove o vídeo real da loja. Continuar?")) {
+      return;
+    }
     setVideoGenError(null);
     setDeletingVideoId(video.id);
     try {
@@ -867,6 +870,26 @@ export function RunDetail() {
       setVideoGenError(err instanceof Error ? err.message : String(err));
     } finally {
       setDeletingVideoId(null);
+    }
+  }
+
+  const [publishingVideoId, setPublishingVideoId] = useState<number | null>(null);
+
+  /** Uploads an already-generated video as a real product video on the active platform — distinct
+   *  from generating it (which only ever saves inside CatalogIA until this is called). */
+  async function handlePublishVideo(productId: number, video: GeneratedVideo) {
+    setVideoGenError(null);
+    setPublishingVideoId(video.id);
+    try {
+      const updated = await api.publishGeneratedVideo(productId, video.id);
+      setGeneratedVideos((prev) => ({
+        ...prev,
+        [productId]: (prev[productId] ?? []).map((v) => (v.id === video.id ? updated : v)),
+      }));
+    } catch (err) {
+      setVideoGenError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPublishingVideoId(null);
     }
   }
 
@@ -1492,6 +1515,19 @@ export function RunDetail() {
                         <div className="muted" style={{ fontSize: "0.72rem", marginTop: "0.3rem" }}>
                           {video.durationSeconds}s · {formatCost(Number(video.costUsd ?? 0))}
                         </div>
+                        {video.publishedAt ? (
+                          <div style={{ fontSize: "0.72rem", marginTop: "0.3rem", color: "var(--status-good)" }}>✓ Publicado na loja</div>
+                        ) : (
+                          <button
+                            type="button"
+                            className="link-button"
+                            style={{ fontSize: "0.72rem", marginTop: "0.3rem" }}
+                            onClick={() => handlePublishVideo(productId, video)}
+                            disabled={publishingVideoId === video.id}
+                          >
+                            {publishingVideoId === video.id ? "Publicando…" : "Publicar na loja"}
+                          </button>
+                        )}
                         <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.3rem" }}>
                           <a href={api.generatedVideoRawUrl(video.id)} download className="link-button" style={{ fontSize: "0.72rem" }}>
                             Baixar

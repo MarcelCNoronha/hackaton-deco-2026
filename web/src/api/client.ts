@@ -446,11 +446,12 @@ export interface GeneratedImage {
 }
 
 /** An AI-generated short marketing video produced FROM one of the product's existing photos
- *  (image-to-video, never from scratch) — no publish target (VTEX/Shopify have no native product
- *  video field) and no integrity gate (unlike GeneratedImage), so this is just generated, stored,
- *  and reviewed directly. `videoBase64` is intentionally NOT part of this type — the list/create
- *  responses omit it (can be several MB per row); playback/download always goes through
- *  `/generated-videos/:id/raw`. */
+ *  (image-to-video, never from scratch) — no integrity gate (unlike GeneratedImage; see
+ *  video-generation.agent.ts's doc comment for why), but DOES have a real platform publish target
+ *  (VTEX's `Videos` field / Shopify's `productCreateMedia`, confirmed live 2026-08-07). No
+ *  classification slot though — video has no carousel-position concept on either platform.
+ *  `videoBase64` is intentionally NOT part of this type — the list/create responses omit it (can be
+ *  several MB per row); playback/download always goes through `/generated-videos/:id/raw`. */
 export interface GeneratedVideo {
   id: number;
   productId: number;
@@ -459,6 +460,12 @@ export interface GeneratedVideo {
   durationSeconds: number;
   mimeType: string;
   costUsd: string | null;
+  /** Set once this video was actually added to the active catalog platform — null means it only
+   *  ever existed inside CatalogIA. */
+  publishedAt: string | null;
+  /** Shopify's media GID for the published video, needed to remove it later — always null on VTEX
+   *  (no per-entry id for its `Videos` array, removed by URL match instead). */
+  platformVideoId: string | null;
   createdAt: string;
 }
 
@@ -936,9 +943,16 @@ export const api = {
    *  not treat this like the near-instant image generation call. */
   generateVideo: (productId: number, body: { note?: string; runId?: number; baseImageUrl?: string }) =>
     request<GeneratedVideo>(`/products/${productId}/generated-videos`, { method: "POST", body: JSON.stringify(body) }),
+  /** Deletes a generated video from the panel — if it was already published, the real video is
+   *  removed from the platform too, not just locally (see the route's doc comment). */
   deleteGeneratedVideo: (videoId: number) => request<{ ok: boolean }>(`/generated-videos/${videoId}`, { method: "DELETE" }),
-  /** Same-origin path, not a fetch() call — use directly as a <video src> or download link; the
-   *  session cookie rides along automatically since /generated-videos/:id/raw sits behind requireAuth. */
+  /** Uploads an already-generated video as a real product video on the active platform — distinct
+   *  from generating it (which only ever saves inside CatalogIA until this is called). */
+  publishGeneratedVideo: (productId: number, videoId: number) =>
+    request<GeneratedVideo>(`/products/${productId}/generated-videos/${videoId}/publish`, { method: "POST" }),
+  /** Same-origin path, not a fetch() call — use directly as a <video src> or download link. Public
+   *  route (no auth required), same reasoning as generated-images' raw route: VTEX/Shopify fetch
+   *  this URL directly when publishing, and neither platform can present a session cookie. */
   generatedVideoRawUrl: (videoId: number) => `${BASE}/generated-videos/${videoId}/raw`,
   /** The product's own photos already on the platform, outside CatalogIA's generatedImages table
    *  — shown in the same panel so every photo for a product can be classified from one place. */

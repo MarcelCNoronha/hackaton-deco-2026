@@ -827,6 +827,47 @@ export class VtexClient implements CatalogClient {
     return { id: String(created.Id) };
   }
 
+  /** `Videos` is a plain string array field directly on the SKU record (`GET/PUT
+   *  /pvt/stockkeepingunit/{id}`, same endpoint fetchSku already reads) — confirmed live 2026-08-07
+   *  against a real account: added a test URL through the admin's own "Vídeos" section (next to
+   *  Imagens, under Mídias), then GET the SKU and found it verbatim in `Videos`. Same "not a partial
+   *  update" footgun as updateProductFields — fetches the current SKU first and PUTs it back with
+   *  only `Videos` changed, so an unguarded write doesn't blank out Name/RefId/dimensions/etc. VTEX
+   *  doesn't eagerly validate or download the URL (confirmed: an unreachable test URL was accepted
+   *  without error), so this can't itself confirm the video plays — same trust level as the URL
+   *  being publicly fetchable at all, which is the caller's job (APP_BASE_URL check in the route). */
+  async addProductVideo(params: { externalId: string; variantId: string; videoUrl: string }): Promise<{ id: string | null }> {
+    const current = await this.fetchSku(params.variantId);
+    const existing = Array.isArray(current.Videos) ? (current.Videos as string[]) : [];
+    if (!existing.includes(params.videoUrl)) {
+      await requestWithRetry({
+        provider: "vtex",
+        operation: "addProductVideo",
+        url: `${this.baseUrl}/pvt/stockkeepingunit/${params.variantId}`,
+        init: { method: "PUT", headers: this.headers(), body: JSON.stringify({ ...current, Videos: [...existing, params.videoUrl] }) },
+        onAttempt: this.onAttempt,
+      });
+    }
+    return { id: null };
+  }
+
+  /** No per-entry id for a `Videos` array member (see addProductVideo) — removal filters the array
+   *  by exact URL match instead. `videoId` is ignored (Shopify-only concept), kept in the shared
+   *  signature so callers don't need platform-specific branching. */
+  async removeProductVideo(params: { externalId: string; variantId: string; videoUrl: string }): Promise<void> {
+    const current = await this.fetchSku(params.variantId);
+    const existing = Array.isArray(current.Videos) ? (current.Videos as string[]) : [];
+    const next = existing.filter((url) => url !== params.videoUrl);
+    if (next.length === existing.length) return;
+    await requestWithRetry({
+      provider: "vtex",
+      operation: "removeProductVideo",
+      url: `${this.baseUrl}/pvt/stockkeepingunit/${params.variantId}`,
+      init: { method: "PUT", headers: this.headers(), body: JSON.stringify({ ...current, Videos: next }) },
+      onAttempt: this.onAttempt,
+    });
+  }
+
   /** Same "not a partial update" footgun as updateProductFields — confirmed live: sending just
    *  `{Text: altText}` 400s with "Field Url is required". VTEX also never echoes the original
    *  upload URL back on GET (`Url` comes back null, only `FileLocation` does), so the current

@@ -173,11 +173,13 @@ export const generatedImages = pgTable("generated_images", {
 
 /** AI-generated short product video, produced FROM one of the product's existing photos (image-to-
  *  video via Veo, never from scratch) — a single fixed-length clip (see VIDEO_GENERATION_DURATION_SECONDS
- *  in model-recommendations.ts), never chained/extended. Unlike generatedImages, there's no
- *  platform "publish" target (VTEX/Shopify have no native product-video field) and no classification
- *  slot — this is a standalone asset a human downloads/uses for marketing, not something the
- *  pipeline pushes to the catalog. Stored inline as base64 like generatedImages, same rationale
- *  (no object storage yet, fine at hackathon-demo volume). */
+ *  in model-recommendations.ts), never chained/extended. Both platforms DO have a native per-SKU
+ *  video field after all (VTEX: `Videos`, a plain array of URLs on the SKU record, confirmed live
+ *  2026-08-07 against a real account's admin — a wrong initial assumption here corrected the same
+ *  day; Shopify: `productCreateMedia` with `mediaContentType: VIDEO`, same mutation already used for
+ *  images), unlike the "no classification slot" part which still holds — there's no VTEX Label-style
+ *  carousel-position concept for video on either platform. Stored inline as base64 like
+ *  generatedImages, same rationale (no object storage yet, fine at hackathon-demo volume). */
 export const generatedVideos = pgTable("generated_videos", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
   productId: bigint("product_id", { mode: "number" })
@@ -189,6 +191,13 @@ export const generatedVideos = pgTable("generated_videos", {
   mimeType: text("mime_type").notNull(),
   videoBase64: text("video_base64").notNull(),
   costUsd: numeric("cost_usd"),
+  // Set once this video has actually been added to the active catalog platform — null means it
+  // only ever existed inside CatalogIA. Mirrors generatedImages.publishedAt/platformImageId.
+  publishedAt: timestamp("published_at", { withTimezone: true }),
+  // Shopify: the media GID `productCreateMedia` returns, needed later to `fileDelete` it. VTEX has
+  // no per-entry id for a `Videos` array member — always null there; removal matches by URL instead
+  // (see VtexClient.removeProductVideo).
+  platformVideoId: text("platform_video_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
   productIdIdx: index("generated_videos_product_id_idx").on(table.productId),

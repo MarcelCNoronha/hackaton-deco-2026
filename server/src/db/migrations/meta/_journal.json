@@ -225,6 +225,13 @@
       "when": 1786145795399,
       "tag": "0031_mean_dragon_man",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1786147267190,
+      "tag": "0032_colorful_the_twelve",
+      "breakpoints": true
     }
   ]
 }

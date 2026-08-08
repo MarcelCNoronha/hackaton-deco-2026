@@ -1131,6 +1131,42 @@ do Search Console) já estava disponível e usado na *geração* de conteúdo, m
   múltiplas queries), e o teste de `computeContentScore` que antes fixava `expectedGeo = 100` agora
   deriva o valor esperado chamando a própria função determinística, não mais assumindo o resultado.
 
+### Vídeo curto: publicação real na VTEX/Shopify, corrigindo suposição errada (2026-08-07)
+
+Ao terminar a geração de vídeo (ver "Vídeo curto (Veo)" acima), a documentação original assumia
+"VTEX/Shopify não têm campo nativo de vídeo de produto" — nunca verificado contra a conta real. O
+usuário pediu confirmação, e checar ao vivo no admin da VTEX (Catálogo > Produto > SKU > Mídias)
+mostrou uma seção **"Vídeos"** de primeira classe, ao lado de Imagens, com "+ Adicionar" abrindo um
+campo de link. Teste ao vivo (URL pública de um vídeo de amostra, sem relação com o produto, colada
+e aplicada, depois removida) confirmou: aceita **qualquer URL pública de vídeo**, não só YouTube/
+Vimeo, e a VTEX não baixa/valida a URL na hora de salvar — só guarda a string.
+
+- **Campo real descoberto por leitura direta da API** (não documentado publicamente): `GET
+  /pvt/stockkeepingunit/{skuId}` retorna `Videos: string[]` — um array simples direto no registro do
+  SKU, não um sub-recurso com id próprio como as imagens (`/file/{id}`). Confirmado com uma consulta
+  só-leitura à conta real logo depois do teste manual do usuário, sem escrever nada.
+- **`VtexClient.addProductVideo`/`removeProductVideo`** (`vtex.client.ts`): mesmo padrão
+  ler→mesclar→escrever já usado por `updateProductFields` (o `PUT` não é parcial) — busca o SKU
+  inteiro, muta só `Videos` (adiciona/filtra por URL exata), manda de volta. Sem id próprio pra
+  remover por id (diferente de imagem) — remoção casa pela URL exata.
+- **`ShopifyClient.addProductVideo`/`removeProductVideo`**: mesma mutation `productCreateMedia` já
+  usada pra imagem, trocando `mediaContentType` de `IMAGE` pra `VIDEO` (tipo documentado
+  publicamente pela Shopify, distinto de `EXTERNAL_VIDEO` que é só pra embed do YouTube/Vimeo — o
+  nosso caso é link direto de arquivo). **Não validado ao vivo contra uma loja Shopify real** (só o
+  caminho VTEX foi testado empiricamente) — implementado a partir da doc pública da Shopify, mesmo
+  padrão de honestidade já usado noutros pontos do projeto pra distinguir "confirmado ao vivo" de
+  "implementado a partir da doc, ainda não testado".
+- **Rota `/api/generated-videos/:id/raw` virou pública** (antes exigia login) — criada
+  `generated-videos-public.routes.ts`, mesma razão da rota de imagem: a VTEX/Shopify busca a URL
+  direto do servidor delas, sem conseguir enviar cookie de sessão.
+- Nova rota `POST /api/products/:id/generated-videos/:videoId/publish` + botão "Publicar na loja" no
+  `RunDetail`, e o `DELETE` de um vídeo já publicado agora remove da plataforma primeiro (mesma
+  disciplina "nunca deixar órfão publicado" já aplicada à imagem). Migração `0032` (`published_at`,
+  `platform_video_id`).
+- Modal de geração de vídeo ganhou uma linha avisando quantas fotos adicionais (até 2, além da
+  escolhida) entram automaticamente como referência — pedido do usuário depois de notar que o
+  seletor mostrava só 1 foto, sem deixar claro que o backend já usa até 3 desde a rodada anterior.
+
 ## Formação de equipes
 
 - 1 a 5 pessoas por equipe (pode ser solo)

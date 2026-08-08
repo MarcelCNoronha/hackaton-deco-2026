@@ -186,6 +186,19 @@ export interface CatalogClient {
     altText?: string;
     label?: string;
   }): Promise<{ id: string }>;
+  /** Adds an AI-generated video as a real product video — `videoUrl` must be a publicly fetchable
+   *  URL (see `/api/generated-videos/:id/raw`), same "platform fetches the bytes itself" contract
+   *  as addProductImage. VTEX: appends to the SKU's `Videos` array (confirmed live 2026-08-07 —
+   *  accepts any public URL, not just YouTube/Vimeo, and doesn't eagerly validate/download it).
+   *  Shopify: `productCreateMedia` with `mediaContentType: VIDEO`. Returns the platform's own id for
+   *  the video when one exists (Shopify's media GID, used later to remove it) — VTEX has no
+   *  per-entry id for a `Videos` array member, so its implementation always returns `{ id: null }`. */
+  addProductVideo(params: { externalId: string; variantId: string; videoUrl: string }): Promise<{ id: string | null }>;
+  /** Removes a previously-published video — VTEX has no id to target, so `videoUrl` is required
+   *  there (filters it out of the `Videos` array by exact match); Shopify uses `videoId` (fileDelete
+   *  by GID) when present, since matching by URL isn't reliable there (Shopify re-hosts/transcodes
+   *  the file, the stored URL isn't the original one back). */
+  removeProductVideo(params: { externalId: string; variantId: string; videoUrl: string; videoId: string | null }): Promise<void>;
   /** Publishes a Departamento/Categoria/Subcategoria page's SEO content — VTEX's private category
    *  entity (`title`→Title, `description`→MetaTagDescription, `keywords`→KeyWords; confirmed live
    *  against the real admin's "Título da página"/"Descrição (meta tag de descrição)"/"Palavras
