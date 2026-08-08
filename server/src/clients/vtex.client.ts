@@ -119,6 +119,11 @@ function formatVtexCategoryPath(categories?: string[]): string | null {
 export interface VtexCategoryTreeNode {
   id: number;
   name: string;
+  /** VTEX's `category/tree/{levels}` endpoint returns this per node natively — the category
+   *  listing page's real storefront URL, e.g. "/banheiro". Captured here purely to thread through
+   *  to CategoryTreeNode.url below; unrelated to the product-level `url` field elsewhere in this
+   *  file (formatVtexCategoryPath etc.). */
+  url?: string;
   children?: VtexCategoryTreeNode[];
 }
 
@@ -505,7 +510,8 @@ export class VtexClient implements CatalogClient {
       for (const node of children) {
         const path = parentPath ? `${parentPath} > ${node.name}` : node.name;
         const isLeaf = !node.children?.length;
-        nodes.push({ id: String(node.id), name: node.name, path, parentPath, level, isLeaf });
+        const url = node.url ? `https://${this.storefrontHost}${node.url.startsWith("/") ? "" : "/"}${node.url}` : null;
+        nodes.push({ id: String(node.id), name: node.name, path, parentPath, level, isLeaf, url });
         if (node.children?.length) walk(node.children, path, level + 1);
       }
     };

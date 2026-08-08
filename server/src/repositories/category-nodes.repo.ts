@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { categoryNodes } from "../db/schema.js";
 import type { CatalogPlatform } from "../clients/catalog-types.js";
@@ -18,6 +18,7 @@ export async function upsertCategoryNodes(platform: CatalogPlatform, nodes: Cate
         parentPath: node.parentPath,
         level: node.level,
         isLeaf: node.isLeaf,
+        url: node.url,
         updatedAt: new Date(),
       })
       .onConflictDoUpdate({
@@ -27,6 +28,7 @@ export async function upsertCategoryNodes(platform: CatalogPlatform, nodes: Cate
           parentPath: node.parentPath,
           level: node.level,
           isLeaf: node.isLeaf,
+          url: node.url,
           updatedAt: new Date(),
         },
       });
@@ -42,7 +44,17 @@ export async function listCategoryNodes(platform: CatalogPlatform): Promise<Cate
     parentPath: r.parentPath,
     level: r.level,
     isLeaf: r.isLeaf,
+    url: r.url,
   }));
+}
+
+/** Just the real storefront URL for one synced category node, by its breadcrumb path — used by
+ *  page-impact.agent.ts to auto-resolve a department/category/subcategory page's URL without
+ *  pulling the whole tree. Null when the node hasn't been synced (yet) or VTEX never gave a URL
+ *  for it. */
+export async function getCategoryNodeUrl(platform: CatalogPlatform, path: string): Promise<string | null> {
+  const row = await db.query.categoryNodes.findFirst({ where: and(eq(categoryNodes.platform, platform), eq(categoryNodes.path, path)) });
+  return row?.url ?? null;
 }
 
 /** Nodes where products actually get classified — where the category/subcategory reference-link

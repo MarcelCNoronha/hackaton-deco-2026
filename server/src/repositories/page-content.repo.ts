@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { pageContent } from "../db/schema.js";
 import type { CatalogPlatform } from "../clients/catalog-types.js";
@@ -27,6 +27,17 @@ export interface PageContent extends PageContentFields {
    *  doesn't exist either). Only meaningful for the admin editor — resolvePageContent (the
    *  publish-time path) doesn't need to know which case it hit. */
   source: "specific" | "default";
+  /** Manual override of this page's real storefront URL — required for "brand" (VTEX has no
+   *  auto-resolvable brand URL, see schema.ts's doc comment), optional override for the other 3
+   *  types (auto-resolved from categoryNodes.url otherwise). Unlike seoTitle/metaDescription/
+   *  keywords, NEVER inherited from the `'*'` fallback row — a URL is inherently specific to one
+   *  page, a catalog-wide default row has no URL of its own. Null when this scopeKey has no saved
+   *  row yet, same as source="default". See page-impact.agent.ts. */
+  pageUrl: string | null;
+  /** First time this exact scopeKey was actually published (see markPageContentFirstPublished) —
+   *  null until the first publish. Also never inherited from the `'*'` fallback row, same reasoning
+   *  as pageUrl. */
+  firstPublishedAt: string | null;
 }
 
 export interface ResolvedPageContent extends PageContentFields {}
@@ -52,6 +63,8 @@ export async function getPageContent(
       seoTitle: specificRow.seoTitle,
       metaDescription: specificRow.metaDescription,
       keywords: specificRow.keywords,
+      pageUrl: specificRow.pageUrl,
+      firstPublishedAt: specificRow.firstPublishedAt?.toISOString() ?? null,
       source: "specific",
     };
   }
@@ -63,6 +76,8 @@ export async function getPageContent(
     seoTitle: fallbackRow?.seoTitle ?? null,
     metaDescription: fallbackRow?.metaDescription ?? null,
     keywords: fallbackRow?.keywords ?? null,
+    pageUrl: null,
+    firstPublishedAt: null,
     source: "default",
   };
 }
@@ -92,10 +107,12 @@ export async function setPageContent(params: {
   seoTitle?: string | null;
   metaDescription?: string | null;
   keywords?: string | null;
+  pageUrl?: string | null;
 }): Promise<void> {
   const seoTitle = params.seoTitle?.trim() || null;
   const metaDescription = params.metaDescription?.trim() || null;
   const keywords = params.keywords?.trim() || null;
+  const pageUrl = params.pageUrl?.trim() || null;
   await db
     .insert(pageContent)
     .values({
@@ -105,10 +122,37 @@ export async function setPageContent(params: {
       seoTitle,
       metaDescription,
       keywords,
+      pageUrl,
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
       target: [pageContent.platform, pageContent.pageType, pageContent.scopeKey],
-      set: { seoTitle, metaDescription, keywords, updatedAt: new Date() },
+      set: { seoTitle, metaDescription, keywords, pageUrl, updatedAt: new Date() },
     });
+}
+
+/** Just the impact-relevant fields (URL + first-publish pivot) for one specific scopeKey — used by
+ *  page-impact.agent.ts. Deliberately doesn't fall back to the `'*'` row (unlike getPageContent's
+ *  text fields) — see PageContent.pageUrl's doc comment on why a URL/publish-history is never a
+ *  sane thing to inherit from a catalog-wide default. */
+export async function getPageContentPivot(
+  platform: CatalogPlatform,
+  pageType: PageContentType,
+  scopeKey: string,
+): Promise<{ pageUrl: string | null; firstPublishedAt: Date | null }> {
+  const row = await db.query.pageContent.findFirst({
+    where: and(eq(pageContent.platform, platform), eq(pageContent.pageType, pageType), eq(pageContent.scopeKey, scopeKey)),
+  });
+  return { pageUrl: row?.pageUrl ?? null, firstPublishedAt: row?.firstPublishedAt ?? null };
+}
+
+/** Marks this exact scopeKey's content as published for the first time — a no-op past the first
+ *  call (COALESCE keeps whatever was already there), same "first non-null write wins" discipline as
+ *  real-impact.repo.ts's earliest-publish tracking for products. Called right after a real,
+ *  successful platform write (see page-publisher.agent.ts) — never speculatively. */
+export async function markPageContentFirstPublished(platform: CatalogPlatform, pageType: PageContentType, scopeKey: string): Promise<void> {
+  await db
+    .update(pageContent)
+    .set({ firstPublishedAt: sql`COALESCE(${pageContent.firstPublishedAt}, now())` })
+    .where(and(eq(pageContent.platform, platform), eq(pageContent.pageType, pageType), eq(pageContent.scopeKey, scopeKey)));
 }

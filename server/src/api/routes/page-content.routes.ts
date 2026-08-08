@@ -8,6 +8,7 @@ import {
   type PageContentType,
 } from "../../repositories/page-content.repo.js";
 import { publishPageContent, publishBrandContent } from "../../agents/page-publisher.agent.js";
+import { generatePageContent, MAX_REFERENCE_URLS } from "../../agents/page-content-generation.agent.js";
 import { requireActiveCatalogClient } from "./catalog.routes.js";
 import { requireSection } from "../../auth/guards.js";
 
@@ -19,9 +20,17 @@ const contentBody = z.object({
   seoTitle: z.string().max(500).nullable().optional(),
   metaDescription: z.string().max(1000).nullable().optional(),
   keywords: z.string().max(500).nullable().optional(),
+  // Empty string is a valid "clear the field" input from the form, distinct from a real URL.
+  pageUrl: z.union([z.string().url(), z.literal("")]).nullable().optional(),
 });
 
 const publishBody = z.object({ pageType: pageTypeEnum, scopeKey: z.string().min(1) });
+
+const generateBody = z.object({
+  pageType: pageTypeEnum,
+  scopeKey: z.string().min(1),
+  referenceUrls: z.array(z.string().url()).max(MAX_REFERENCE_URLS).optional(),
+});
 
 export async function pageContentRoutes(app: FastifyInstance) {
   app.addHook("preHandler", requireSection("connections"));
@@ -36,6 +45,27 @@ export async function pageContentRoutes(app: FastifyInstance) {
     return getPageContent(platform, pageType.data as PageContentType, scopeKey);
   });
 
+  /** Drafts seoTitle/metaDescription/keywords with AI, grounded in this store's own real products
+   *  under the given scope (never invented) plus an optional market-reference URL for structural
+   *  inspiration only — see generatePageContent's doc comment. Never saved directly: returns the
+   *  draft so the operator reviews/edits it in the form, same "AI proposes, human disposes"
+   *  discipline as product content enrichment. */
+  app.post("/api/page-content/generate", async (req, reply) => {
+    const body = generateBody.parse(req.body);
+    const platform = await getCatalogPlatform();
+    try {
+      const result = await generatePageContent({
+        platform,
+        pageType: body.pageType,
+        scopeKey: body.scopeKey,
+        referenceUrls: body.referenceUrls,
+      });
+      return result;
+    } catch (err) {
+      return reply.status(400).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   app.put("/api/page-content", async (req) => {
     const body = contentBody.parse(req.body);
     const platform = await getCatalogPlatform();
@@ -47,6 +77,7 @@ export async function pageContentRoutes(app: FastifyInstance) {
       seoTitle: body.seoTitle,
       metaDescription: body.metaDescription,
       keywords: body.keywords,
+      pageUrl: body.pageUrl,
     });
     return getPageContent(platform, body.pageType, scopeKey);
   });

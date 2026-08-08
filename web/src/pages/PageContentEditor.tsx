@@ -1,5 +1,12 @@
 import { useEffect, useState } from "react";
-import { api, type CatalogPlatform, type CategoryTreeNode, type PageContent, type PageContentType } from "../api/client";
+import {
+  api,
+  MAX_PAGE_CONTENT_REFERENCE_URLS,
+  type CatalogPlatform,
+  type CategoryTreeNode,
+  type PageContent,
+  type PageContentType,
+} from "../api/client";
 
 const PAGE_TYPE_LABELS: Record<PageContentType, string> = {
   department: "Departamento",
@@ -35,11 +42,28 @@ export function PageContentEditor() {
   const [seoTitle, setSeoTitle] = useState("");
   const [metaDescription, setMetaDescription] = useState("");
   const [keywords, setKeywords] = useState("");
+  const [pageUrl, setPageUrl] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const [referenceUrls, setReferenceUrls] = useState<string[]>([""]);
+  const [generating, setGenerating] = useState(false);
+  const [generationNote, setGenerationNote] = useState<string | null>(null);
+
+  function updateReferenceUrl(index: number, value: string) {
+    setReferenceUrls((prev) => prev.map((u, i) => (i === index ? value : u)));
+  }
+
+  function addReferenceUrl() {
+    setReferenceUrls((prev) => (prev.length >= MAX_PAGE_CONTENT_REFERENCE_URLS ? prev : [...prev, ""]));
+  }
+
+  function removeReferenceUrl(index: number) {
+    setReferenceUrls((prev) => (prev.length <= 1 ? [""] : prev.filter((_, i) => i !== index)));
+  }
 
   useEffect(() => {
     api.getCatalogPlatform().then(({ platform }) => setPlatform(platform));
@@ -58,6 +82,7 @@ export function PageContentEditor() {
         setSeoTitle(c.seoTitle ?? "");
         setMetaDescription(c.metaDescription ?? "");
         setKeywords(c.keywords ?? "");
+        setPageUrl(c.pageUrl ?? "");
       })
       .finally(() => setLoading(false));
   }, [pageType, scopeKey]);
@@ -67,11 +92,31 @@ export function PageContentEditor() {
     setScopeKey(DEFAULT_SCOPE_KEY);
   }
 
+  async function handleGenerate() {
+    setGenerating(true);
+    setError(null);
+    setMessage(null);
+    setGenerationNote(null);
+    try {
+      const urls = referenceUrls.map((u) => u.trim()).filter(Boolean);
+      const result = await api.generatePageContent(pageType, scopeKey, urls);
+      setSeoTitle(result.content.seoTitle);
+      setMetaDescription(result.content.metaDescription);
+      setKeywords(result.content.keywords);
+      const notes = [`Rascunho gerado com base em ${result.productCount} produto(s) real(is) deste escopo.`, ...result.referenceWarnings];
+      setGenerationNote(notes.join(" "));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGenerating(false);
+    }
+  }
+
   async function handleSave() {
     setSaving(true);
     setError(null);
     try {
-      const updated = await api.setPageContent({ pageType, scopeKey, seoTitle, metaDescription, keywords });
+      const updated = await api.setPageContent({ pageType, scopeKey, seoTitle, metaDescription, keywords, pageUrl });
       setContent(updated);
       setMessage("Rascunho salvo.");
     } catch (err) {
@@ -181,6 +226,53 @@ export function PageContentEditor() {
                   : "Ainda sem conteúdo próprio — herdando o padrão geral. Salvar cria um conteúdo só pra este item."}
             </p>
 
+            <div style={{ background: "var(--surface-2)", borderRadius: "var(--radius-md)", padding: "0.75rem", marginBottom: "1rem" }}>
+              <span className="muted" style={{ display: "block", fontSize: "0.78rem", marginBottom: "0.4rem" }}>
+                Gerar rascunho com IA — baseado nos produtos reais deste escopo, com até {MAX_PAGE_CONTENT_REFERENCE_URLS}{" "}
+                referências de mercado opcionais (usadas só como inspiração de estrutura, nunca copiadas).
+              </span>
+              {isDefaultScope ? (
+                <p className="muted" style={{ margin: 0, fontSize: "0.78rem" }}>
+                  Selecione uma {PAGE_TYPE_LABELS[pageType].toLowerCase()} específica acima para gerar com IA — o padrão
+                  geral não tem produtos próprios para se basear.
+                </p>
+              ) : (
+                <>
+                  {referenceUrls.map((url, i) => (
+                    <div key={i} style={{ display: "flex", gap: "0.5rem", marginBottom: "0.4rem" }}>
+                      <input
+                        type="url"
+                        placeholder={`URL de referência ${i + 1} (opcional)`}
+                        value={url}
+                        onChange={(e) => updateReferenceUrl(i, e.target.value)}
+                        style={{ flex: "1 1 260px" }}
+                      />
+                      {(referenceUrls.length > 1 || url) && (
+                        <button type="button" className="secondary" onClick={() => removeReferenceUrl(i)} title="Remover referência">
+                          Remover
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginTop: "0.4rem" }}>
+                    {referenceUrls.length < MAX_PAGE_CONTENT_REFERENCE_URLS && (
+                      <button type="button" className="secondary" onClick={addReferenceUrl}>
+                        + Adicionar referência
+                      </button>
+                    )}
+                    <button type="button" onClick={handleGenerate} disabled={generating || loading}>
+                      {generating ? "Gerando…" : "Gerar com IA"}
+                    </button>
+                  </div>
+                  {generationNote && (
+                    <p className="muted" style={{ margin: "0.5rem 0 0", fontSize: "0.75rem" }}>
+                      {generationNote}
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+
             {loading ? (
               <p className="muted">Carregando…</p>
             ) : (
@@ -209,7 +301,7 @@ export function PageContentEditor() {
                     style={FIELD_TEXTAREA_STYLE}
                   />
                 </label>
-                <label style={{ display: "block" }}>
+                <label style={{ display: "block", marginBottom: "0.75rem" }}>
                   <span className="muted" style={{ display: "block", fontSize: "0.78rem", marginBottom: "0.3rem" }}>
                     Palavras similares / keywords (separadas por vírgula)
                   </span>
@@ -218,6 +310,21 @@ export function PageContentEditor() {
                     value={keywords}
                     onChange={(e) => setKeywords(e.target.value)}
                     maxLength={500}
+                    style={{ width: "100%" }}
+                  />
+                </label>
+                <label style={{ display: "block" }}>
+                  <span className="muted" style={{ display: "block", fontSize: "0.78rem", marginBottom: "0.3rem" }}>
+                    URL real da página{" "}
+                    {pageType === "brand"
+                      ? "(obrigatória para medir Impacto — a VTEX não expõe URL de marca automaticamente)"
+                      : "(opcional — detectada automaticamente na sincronização de categorias; preencha só para corrigir)"}
+                  </span>
+                  <input
+                    type="url"
+                    value={pageUrl}
+                    onChange={(e) => setPageUrl(e.target.value)}
+                    placeholder="https://www.sualoja.com.br/..."
                     style={{ width: "100%" }}
                   />
                 </label>

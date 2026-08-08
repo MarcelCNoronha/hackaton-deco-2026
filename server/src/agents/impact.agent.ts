@@ -69,17 +69,19 @@ function pctDelta(before: number | null, after: number | null): number | null {
  *  cover any range within the property's own retention, so both the "antes" and "depois" windows
  *  are always queryable on demand; keeping our own copy would just be a second, possibly-stale
  *  source of numbers Google already stores authoritatively. The pivot between the two windows is
- *  the product's own earliest `publishedAt` (see real-impact.repo.ts) — not "when this endpoint
- *  happened to be called". */
-export async function getProductRealImpact(params: {
+ *  the subject's own earliest publish moment — not "when this endpoint happened to be called".
+ *  Shared by getProductRealImpact (pivot = a product's earliest enrichment publish) and
+ *  page-impact.agent.ts's getPageRealImpact (pivot = a page_content row's firstPublishedAt) — the
+ *  GSC/GA4 windowing and delta math is identical, only how `url`/`publishedAt` get resolved
+ *  differs. */
+export async function computeRealImpact(params: {
   gsc: GscClient | null;
   ga4: Ga4Client | null;
-  product: ProductRow;
+  url: string | null;
+  publishedAt: Date | null;
 }): Promise<RealImpactResult> {
-  const { gsc, ga4, product } = params;
-  if (!product.url) return { status: "no_url" };
-
-  const publishedAt = await getEarliestPublishedAt(product.id);
+  const { gsc, ga4, url, publishedAt } = params;
+  if (!url) return { status: "no_url" };
   if (!publishedAt) return { status: "not_published" };
 
   const now = new Date();
@@ -100,7 +102,7 @@ export async function getProductRealImpact(params: {
   const afterStart = new Date(publishedDay.getTime() + (isMature ? MATURATION_DAYS : PRELIMINARY_IMPACT_DAYS) * MS_PER_DAY);
   const afterEnd = new Date(Math.min(now.getTime(), afterStart.getTime() + (WINDOW_DAYS - 1) * MS_PER_DAY));
 
-  const path = pathnameOf(product.url);
+  const path = pathnameOf(url);
 
   const [gscBefore, gscAfter, ga4Before, ga4After] = await Promise.all([
     isMature && gsc ? gsc.queryByPage({ startDate: fmt(beforeStart), endDate: fmt(beforeEnd) }).catch(() => []) : Promise.resolve([]),
@@ -167,4 +169,18 @@ export async function getProductRealImpact(params: {
       revenuePct: pctDelta(before.revenue, after.revenue),
     },
   };
+}
+
+/** Product-specific pivot resolution (URL from the catalog row, publishedAt = earliest enrichment
+ *  publish) on top of the shared computeRealImpact core — see page-impact.agent.ts's
+ *  getPageRealImpact for the page_content-scoped equivalent. */
+export async function getProductRealImpact(params: {
+  gsc: GscClient | null;
+  ga4: Ga4Client | null;
+  product: ProductRow;
+}): Promise<RealImpactResult> {
+  const { gsc, ga4, product } = params;
+  if (!product.url) return { status: "no_url" };
+  const publishedAt = await getEarliestPublishedAt(product.id);
+  return computeRealImpact({ gsc, ga4, url: product.url, publishedAt });
 }

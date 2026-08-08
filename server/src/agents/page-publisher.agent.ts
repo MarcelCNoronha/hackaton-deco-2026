@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { categoryNodes } from "../db/schema.js";
 import type { CatalogClient, CatalogPlatform } from "../clients/catalog-types.js";
-import { resolvePageContent, type PageContentType } from "../repositories/page-content.repo.js";
+import { resolvePageContent, markPageContentFirstPublished, type PageContentType } from "../repositories/page-content.repo.js";
 
 export interface PublishPageContentResult {
   ok: boolean;
@@ -36,6 +36,7 @@ export async function publishPageContent(params: {
       description: resolved.metaDescription ?? undefined,
       keywords: resolved.keywords ?? undefined,
     });
+    await markPageContentFirstPublished(params.platform, params.pageType, params.scopeKey);
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -62,6 +63,7 @@ export async function publishBrandContent(params: {
       description: resolved.metaDescription ?? undefined,
       keywords: resolved.keywords ?? undefined,
     });
+    await markPageContentFirstPublished(params.platform, "brand", params.scopeKey);
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };

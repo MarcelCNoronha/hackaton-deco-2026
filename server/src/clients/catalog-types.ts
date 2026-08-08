@@ -58,6 +58,11 @@ export interface CategoryTreeNode {
   parentPath: string | null;
   level: number;
   isLeaf: boolean;
+  /** Real storefront URL for this category's listing page, when the platform exposes one directly
+   *  on the tree (VTEX does; Shopify's listCategoryTree returns no nodes at all, see its doc
+   *  comment) — used by page-impact.agent.ts to match GSC/GA4 rows by pathname. Null when the
+   *  platform doesn't provide it. */
+  url: string | null;
 }
 
 /** A content/specification field the catalog platform accepts for a given category — scoped to

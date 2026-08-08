@@ -270,6 +270,7 @@ export interface CategoryTreeNode {
   parentPath: string | null;
   level: number;
   isLeaf: boolean;
+  url: string | null;
 }
 
 /** "department"/"category"/"subcategory" are keyed by the same breadcrumb `path` CategoryTreeNode
@@ -285,6 +286,22 @@ export interface PageContent {
   metaDescription: string | null;
   keywords: string | null;
   source: "specific" | "default";
+  /** Manual override of this page's real storefront URL — required for "brand" pages (VTEX has no
+   *  auto-resolvable brand URL), optional override for the other 3 (auto-resolved from the synced
+   *  category tree otherwise). Feeds the "Impacto Páginas" antes/depois comparison. */
+  pageUrl: string | null;
+  /** First time this page was actually published — null until then. The antes/depois pivot. */
+  firstPublishedAt: string | null;
+}
+
+export const MAX_PAGE_CONTENT_REFERENCE_URLS = 2;
+
+export interface PageContentGenerationResult {
+  content: { seoTitle: string; metaDescription: string; keywords: string };
+  /** How many real products this draft was grounded in — a low number is worth a second look
+   *  before trusting it. */
+  productCount: number;
+  referenceWarnings: string[];
 }
 
 export interface CategoryFieldDefinition {
@@ -810,9 +827,17 @@ export const api = {
     seoTitle?: string | null;
     metaDescription?: string | null;
     keywords?: string | null;
+    pageUrl?: string | null;
   }) => request<PageContent>("/page-content", { method: "PUT", body: JSON.stringify(body) }),
   publishPageContent: (pageType: PageContentType, scopeKey: string) =>
     request<{ ok: boolean }>("/page-content/publish", { method: "POST", body: JSON.stringify({ pageType, scopeKey }) }),
+  pageRealImpact: (pageType: PageContentType, scopeKey: string) =>
+    request<RealImpact>(`/page-content/real-impact?pageType=${pageType}&scopeKey=${encodeURIComponent(scopeKey)}`),
+  generatePageContent: (pageType: PageContentType, scopeKey: string, referenceUrls?: string[]) =>
+    request<PageContentGenerationResult>("/page-content/generate", {
+      method: "POST",
+      body: JSON.stringify({ pageType, scopeKey, referenceUrls: referenceUrls?.length ? referenceUrls : undefined }),
+    }),
 
   getCategoryNodes: () => request<{ platform: CatalogPlatform; nodes: CategoryTreeNode[] }>("/category-nodes"),
   getCategorySpecFields: () =>

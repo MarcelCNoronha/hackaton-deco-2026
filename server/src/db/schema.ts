@@ -365,6 +365,12 @@ export const categoryNodes = pgTable("category_nodes", {
   parentPath: text("parent_path"),
   level: integer("level").notNull(),
   isLeaf: boolean("is_leaf").notNull().default(false),
+  // The real storefront URL for this category's listing page — VTEX's own `category/tree/{levels}`
+  // endpoint returns this per node (same call category-sync.orchestrator.ts already makes), just
+  // wasn't captured before. Used by page-impact.agent.ts to match this page against GSC/GA4 rows by
+  // pathname, same technique as products.url already does for product pages. Null until the next
+  // sync after this column was added, or if VTEX ever omits it for a node.
+  url: text("url"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
   pk: primaryKey({ columns: [table.platform, table.path] }),
@@ -392,6 +398,19 @@ export const pageContent = pgTable("page_content", {
   seoTitle: text("seo_title"),
   metaDescription: text("meta_description"),
   keywords: text("keywords"),
+  // Real storefront URL for this exact page — auto-resolved from categoryNodes.url for
+  // department/category/subcategory when unset, but VTEX has no persisted brand table/URL to
+  // auto-resolve from (see this table's own doc comment on why "brand" is orthogonal to the
+  // category tree), so a Marca page ALWAYS needs this set manually here to get real GSC/GA4 impact
+  // numbers. Also usable as a manual override for the other 3 types if the auto-resolved URL is
+  // ever wrong. See page-impact.agent.ts.
+  pageUrl: text("page_url"),
+  // Set once, the first time this exact scopeKey's content is actually published to the platform
+  // (see page-publisher.agent.ts) — never overwritten afterward. The antes/depois pivot for
+  // page-impact.agent.ts, same role product.ts's earliest enrichmentProposals.publishedAt plays for
+  // products (see real-impact.repo.ts), but simpler: a page has exactly one row here, so there's
+  // no "earliest across many rows" aggregation needed, just "first non-null write wins".
+  firstPublishedAt: timestamp("first_published_at", { withTimezone: true }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
   pk: primaryKey({ columns: [table.platform, table.pageType, table.scopeKey] }),

@@ -13,14 +13,16 @@ function int(n: number | null): string {
   return n === null ? "-" : n.toLocaleString("pt-BR");
 }
 
-/** Per-product before/after panel fed by a live GSC/GA4 comparison. */
-export function RealImpactPanel({ impact }: { impact: RealImpact }) {
+/** Per-product (or per-page, see PageImpact.tsx) before/after panel fed by a live GSC/GA4
+ *  comparison. `subject` customizes the empty-state wording ("produto"/"página") — the underlying
+ *  comparison logic is identical either way (see impact.agent.ts's computeRealImpact). */
+export function RealImpactPanel({ impact, subject = "produto" }: { impact: RealImpact; subject?: string }) {
   if (impact.status === "no_url") {
-    return <div className="empty-state">Este produto nao tem URL conhecida para cruzar com Search Console/GA4.</div>;
+    return <div className="empty-state">Este {subject} nao tem URL conhecida para cruzar com Search Console/GA4.</div>;
   }
 
   if (impact.status === "not_published") {
-    return <div className="empty-state">Nenhum campo deste produto foi publicado ainda. O impacto real comeca na primeira publicacao.</div>;
+    return <div className="empty-state">Nada deste {subject} foi publicado ainda. O impacto real comeca na primeira publicacao.</div>;
   }
 
   if (impact.status === "maturing") {

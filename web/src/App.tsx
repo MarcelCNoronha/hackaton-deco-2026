@@ -9,6 +9,7 @@ import { Connections } from "./pages/Connections";
 import { Runs } from "./pages/Runs";
 import { RunDetail } from "./pages/RunDetail";
 import { Impact } from "./pages/Impact";
+import { PageImpact } from "./pages/PageImpact";
 import { OptimizationHistory } from "./pages/OptimizationHistory";
 import { Dashboard } from "./pages/Dashboard";
 import { Login } from "./pages/Login";
@@ -46,11 +47,19 @@ function AppShell() {
           <NavLink to="/products">
             <span className="nav-icon">▤</span> <span className="nav-label">Produtos</span>
           </NavLink>
+          {can("connections") && (
+            <NavLink to="/page-content">
+              <span className="nav-icon">🏷️</span> <span className="nav-label">Páginas</span>
+            </NavLink>
+          )}
           <NavLink to="/history">
             <span className="nav-icon">🕘</span> <span className="nav-label">Histórico</span>
           </NavLink>
           <NavLink to="/impact">
-            <span className="nav-icon">◈</span> <span className="nav-label">Impacto</span>
+            <span className="nav-icon">◈</span> <span className="nav-label">Impacto Produto</span>
+          </NavLink>
+          <NavLink to="/page-impact">
+            <span className="nav-icon">◈</span> <span className="nav-label">Impacto Páginas</span>
           </NavLink>
         </nav>
         <nav className="sidebar-nav sidebar-nav--account">
@@ -61,12 +70,7 @@ function AppShell() {
           )}
           {can("connections") && (
             <NavLink to="/pdp-config">
-              <span className="nav-icon">🧩</span> <span className="nav-label">Configuração de PDP</span>
-            </NavLink>
-          )}
-          {can("connections") && (
-            <NavLink to="/page-content">
-              <span className="nav-icon">🏷️</span> <span className="nav-label">Páginas de Marca/Categoria</span>
+              <span className="nav-icon">🧩</span> <span className="nav-label">Configuração de Descrição</span>
             </NavLink>
           )}
           {can("connections") && (
@@ -103,6 +107,7 @@ function AppShell() {
           <Route path="/history" element={<OptimizationHistory />} />
           <Route path="/runs/:id" element={<RunDetail />} />
           <Route path="/impact" element={<Impact />} />
+          <Route path="/page-impact" element={<PageImpact />} />
           <Route path="/account" element={<Account />} />
           {can("connections") && <Route path="/architecture" element={<Architecture />} />}
           {can("connections") && <Route path="/api-reference" element={<ApiReference />} />}
